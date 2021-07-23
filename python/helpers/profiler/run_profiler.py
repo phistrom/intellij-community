@@ -5,6 +5,7 @@ import traceback
 from socket import AF_INET
 from socket import SOCK_STREAM
 from socket import socket
+from socket import gethostbyname
 
 from _prof_imports import ProfilerResponse
 from prof_io import ProfWriter, ProfReader
@@ -159,6 +160,14 @@ if __name__ == '__main__':
     del sys.argv[0]
 
     profiler = Profiler()
+
+    try:
+        # override the provided host if we're in a Docker container
+        host = gethostbyname("host.docker.internal")
+        print("profiler host overriden with %s" % host)
+    except:
+        # host.docker.internal didn't resolve, so don't change host
+        pass
 
     try:
         profiler.connect(host, port)
