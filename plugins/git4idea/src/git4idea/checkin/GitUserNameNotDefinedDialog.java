@@ -77,8 +77,12 @@ class GitUserNameNotDefinedDialog extends DialogWrapper {
     if (isEmptyOrSpaces(getUserName())) {
       return new ValidationInfo(message, myNameTextField);
     }
-    if (isEmptyOrSpaces(getUserEmail())) {
+    String email = getUserEmail();
+    if (isEmptyOrSpaces(email)) {
       return new ValidationInfo(message, myEmailTextField);
+    }
+    if(!email.contains("@")) {
+      return new ValidationInfo(GitBundle.message("validation.error.email.no.at"), myEmailTextField);
     }
     return null;
   }
@@ -112,12 +116,10 @@ class GitUserNameNotDefinedDialog extends DialogWrapper {
 
     myNameTextField = new JTextField(20);
     JBLabel nameLabel = new JBLabel(GitBundle.message("label.user.name") + " ");
-    nameLabel.setDisplayedMnemonic('n');
     nameLabel.setLabelFor(myNameTextField);
 
     myEmailTextField = new JTextField(20);
     JBLabel emailLabel = new JBLabel(GitBundle.message("label.user.email") + " ");
-    emailLabel.setDisplayedMnemonic('e');
     emailLabel.setLabelFor(myEmailTextField);
 
     if (myProposedValues != null) {
@@ -129,7 +131,6 @@ class GitUserNameNotDefinedDialog extends DialogWrapper {
     }
 
     myGlobalCheckbox = new JBCheckBox(GitBundle.message("checkbox.set.config.property.globally"), mySettings.shouldSetUserNameGlobally());
-    myGlobalCheckbox.setMnemonic('g');
 
     JPanel rootPanel = new JPanel(new GridBagLayout());
     GridBag g = new GridBag()

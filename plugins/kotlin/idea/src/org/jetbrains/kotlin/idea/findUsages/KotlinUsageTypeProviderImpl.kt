@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.findUsages
 
@@ -21,7 +21,7 @@ class KotlinUsageTypeProviderImpl : KotlinUsageTypeProvider() {
 
         val context = refExpr.analyze(BodyResolveMode.PARTIAL)
 
-         fun getFunctionUsageTypeDescriptor(descriptor: FunctionDescriptor): UsageTypeEnum? {
+        fun getFunctionUsageTypeDescriptor(descriptor: FunctionDescriptor): UsageTypeEnum? {
             when (refExpr.mainReference) {
                 is KtArrayAccessReference -> {
                     return when {

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.terminal;
 
 import com.intellij.application.options.EditorFontsConstants;
@@ -21,15 +21,24 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.ToolWindow;
+import com.intellij.terminal.actions.TerminalActionWrapper;
+import com.intellij.ui.ExperimentalUI;
 import com.intellij.util.JBHiDPIScaledImage;
+import com.intellij.util.ObjectUtils;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.ImageUtil;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
+import com.jediterm.terminal.ProcessTtyConnector;
 import com.jediterm.terminal.TerminalCopyPasteHandler;
 import com.jediterm.terminal.TextStyle;
 import com.jediterm.terminal.model.StyleState;
 import com.jediterm.terminal.model.TerminalTextBuffer;
+import com.jediterm.terminal.model.hyperlinks.LinkInfo;
+import com.jediterm.terminal.ui.TerminalAction;
+import com.jediterm.terminal.ui.TerminalActionProvider;
 import com.jediterm.terminal.ui.TerminalPanel;
+import com.pty4j.windows.conpty.WinConPtyProcess;
 import org.intellij.lang.annotations.JdkConstants;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -51,6 +60,7 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Dis
     "ActivateTerminalToolWindow",
     "ActivateProjectToolWindow",
     "ActivateFavoritesToolWindow",
+    "ActivateBookmarksToolWindow",
     "ActivateFindToolWindow",
     "ActivateRunToolWindow",
     "ActivateDebugToolWindow",
@@ -70,6 +80,8 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Dis
     "PreviousProjectWindow",
 
     "ShowBookmarks",
+    "ShowTypeBookmarks",
+    "FindInPath",
     "GotoBookmark0",
     "GotoBookmark1",
     "GotoBookmark2",
@@ -174,6 +186,28 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Dis
   }
 
   @Override
+  public List<TerminalAction> getActions() {
+    List<TerminalAction> actions = super.getActions();
+    String clearBufferActionName = mySettingsProvider.getClearBufferActionPresentation().getName();
+    TerminalAction clearBufferAction = ContainerUtil.find(actions, action -> action.getName().equals(clearBufferActionName));
+    if (clearBufferAction != null) {
+      clearBufferAction.withEnabledSupplier(() -> {
+        if (getTerminalTextBuffer().isUsingAlternateBuffer()) {
+          return false;
+        }
+        JBTerminalWidget terminalWidget = DataManager.getInstance().getDataContext(this).getData(JBTerminalWidget.TERMINAL_DATA_KEY);
+        if (terminalWidget == null || terminalWidget.getTerminalPanel() != this) {
+          return false;
+        }
+        ProcessTtyConnector connector = terminalWidget.getProcessTtyConnector();
+        WinConPtyProcess winConPtyProcess = connector != null ? ObjectUtils.tryCast(connector.getProcess(), WinConPtyProcess.class) : null;
+        return winConPtyProcess == null;
+      });
+    }
+    return actions;
+  }
+
+  @Override
   protected void setupAntialiasing(Graphics graphics) {
     UIUtil.setupComposite((Graphics2D)graphics);
     UISettings.setupAntialiasing(graphics);
@@ -183,6 +217,71 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Dis
   @Override
   protected TerminalCopyPasteHandler createCopyPasteHandler() {
     return new IdeTerminalCopyPasteHandler();
+  }
+
+  @Override
+  protected @NotNull JPopupMenu createPopupMenu(@Nullable LinkInfo linkInfo, @NotNull MouseEvent e) {
+    if (ExperimentalUI.isNewUI()) {
+      return ActionManager.getInstance().createActionPopupMenu(
+        ActionPlaces.TOOLWINDOW_POPUP,
+        wrapTerminalActions(getTerminalActionProvider(linkInfo, e))
+      ).getComponent();
+    } else {
+      return super.createPopupMenu(linkInfo, e);
+    }
+  }
+
+  private TerminalActionProvider getTerminalActionProvider(@Nullable LinkInfo linkInfo, @NotNull MouseEvent e) {
+    // copied from super.createPopupMenu() and adjusted to our needs:
+    TerminalActionProvider provider;
+    LinkInfo.PopupMenuGroupProvider popupMenuGroupProvider = linkInfo != null ? linkInfo.getPopupMenuGroupProvider() : null;
+    if (popupMenuGroupProvider != null) {
+      provider = new TerminalActionProvider() {
+        @Override
+        public List<TerminalAction> getActions() {
+          return popupMenuGroupProvider.getPopupMenuGroup(e);
+        }
+
+        @Override
+        public TerminalActionProvider getNextProvider() {
+          return JBTerminalPanel.this;
+        }
+
+        @Override
+        public void setNextProvider(TerminalActionProvider provider) {
+        }
+      };
+    }
+    else {
+      provider = this;
+    }
+    return provider;
+  }
+
+  @NotNull
+  public ActionGroup wrapTerminalActions(@NotNull TerminalActionProvider provider) {
+    var result = new DefaultActionGroup();
+    var providers = new ArrayList<TerminalActionProvider>();
+    for (var p = provider; p != null; p = p.getNextProvider()) {
+      providers.add(0, p);
+    }
+    var canAddSeparator = false;
+    for (TerminalActionProvider p : providers) {
+      var shouldAddSeparator = true;
+      for (TerminalAction a : p.getActions()) {
+        if (a.isHidden()) {
+          continue;
+        }
+        shouldAddSeparator = shouldAddSeparator || a.isSeparated();
+        if (shouldAddSeparator && canAddSeparator) {
+          result.addSeparator();
+        }
+        result.add(new TerminalActionWrapper(a, this));
+        canAddSeparator = true;
+        shouldAddSeparator = false;
+      }
+    }
+    return result;
   }
 
   @Override
@@ -291,11 +390,6 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Dis
   }
 
   @Override
-  public void dispose() {
-    super.dispose();
-  }
-
-  @Override
   protected void processMouseWheelEvent(MouseWheelEvent e) {
     if (EditorSettingsExternalizable.getInstance().isWheelFontChangeEnabled() && EditorUtil.isChangeFontSize(e)) {
       int newFontSize = (int)mySettingsProvider.getTerminalFontSize() - e.getWheelRotation();
@@ -329,10 +423,13 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Dis
 
     @Override
     public boolean dispatch(@NotNull AWTEvent e) {
-      return e instanceof KeyEvent && dispatchKeyEvent((KeyEvent)e);
+      if (e instanceof KeyEvent) {
+        dispatchKeyEvent((KeyEvent)e);
+      }
+      return false;
     }
 
-    private boolean dispatchKeyEvent(@NotNull KeyEvent e) {
+    private void dispatchKeyEvent(@NotNull KeyEvent e) {
       if (!skipKeyEvent(e)) {
         if (!JBTerminalPanel.this.isFocusOwner()) {
           if (LOG.isDebugEnabled()) {
@@ -340,16 +437,13 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Dis
                       getDebugTerminalPanelName() + ", unregistering");
           }
           unregister();
-          return false;
+          return;
         }
         if (LOG.isDebugEnabled()) {
           LOG.debug("Consuming " + KeyStroke.getKeyStrokeForEvent(e) + ", registered:" + myRegistered);
         }
-        IdeEventQueue.getInstance().flushDelayedKeyEvents();
         JBTerminalPanel.this.dispatchEvent(e);
-        return true;
       }
-      return false;
     }
 
     void register() {

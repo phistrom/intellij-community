@@ -1,6 +1,5 @@
-// COMPILER_ARGUMENTS: -XXLanguage:-NewInference
-// PROBLEM: none
-// WITH_RUNTIME
+// PROBLEM: Redundant lambda arrow
+// WITH_STDLIB
 
 fun main() {
     registerHandler(handlers = *arrayOf(

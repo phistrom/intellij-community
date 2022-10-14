@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.kotlin.tools.projectWizard.settings.buildsystem
 
 import org.jetbrains.annotations.NonNls
@@ -28,6 +28,7 @@ enum class ModuleKind(val isSinglePlatform: Boolean) : DisplayableSettingItem {
     ;
 
     override val text: String
+        @Suppress("HardCodedStringLiteral")
         get() = name
 }
 
@@ -69,7 +70,9 @@ class Module(
     }
 
 
+    @Suppress("HardCodedStringLiteral")
     override val text: String get() = name
+
     override val greyText: String
         get() = when {
             kind == ModuleKind.target -> configurator.text + " " + KotlinNewProjectWizardBundle.message("module.kind.target")
@@ -179,13 +182,23 @@ val Module.isRootModule
     get() = parent == null
 
 @Suppress("FunctionName")
-fun MultiplatformTargetModule(@NonNls name: String, configurator: ModuleConfigurator, sourceSets: List<Sourceset>) =
-    Module(name, configurator, sourceSets = sourceSets)
+fun MultiplatformTargetModule(
+    @NonNls name: String,
+    configurator: ModuleConfigurator,
+    sourceSets: List<Sourceset>,
+    permittedTemplateIds: Set<String>? = null
+) =
+    Module(name, configurator, sourceSets = sourceSets, permittedTemplateIds = permittedTemplateIds)
 
 @Suppress("FunctionName")
-fun MultiplatformModule(@NonNls name: String, template: Template? = null, targets: List<Module> = emptyList()) =
-    Module(name, MppModuleConfigurator, template = template, subModules = targets)
+fun MultiplatformModule(
+    @NonNls name: String,
+    template: Template? = null,
+    targets: List<Module> = emptyList(),
+    permittedTemplateIds: Set<String>? = null
+) =
+    Module(name, MppModuleConfigurator, template = template, permittedTemplateIds = permittedTemplateIds, subModules = targets)
 
 @Suppress("FunctionName")
-fun SinglePlatformModule(@NonNls name: String, sourceSets: List<Sourceset>) =
-    Module(name, JvmSinglePlatformModuleConfigurator, sourceSets = sourceSets)
+fun SinglePlatformModule(@NonNls name: String, sourceSets: List<Sourceset>, permittedTemplateIds: Set<String>? = null) =
+    Module(name, JvmSinglePlatformModuleConfigurator, sourceSets = sourceSets, permittedTemplateIds = permittedTemplateIds)

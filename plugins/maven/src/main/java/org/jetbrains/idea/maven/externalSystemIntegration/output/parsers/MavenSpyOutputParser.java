@@ -15,10 +15,10 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 public class MavenSpyOutputParser {
-  public final static String PREFIX = "[IJ]-";
-  private final static String SEPARATOR = "-[IJ]-";
-  private final static String NEWLINE = "-[N]-";
-  public static final String DOWNLOAD_DEPENDENCIES_NAME = "dependencies";
+  public static final String PREFIX = "[IJ]-";
+  private static final String SEPARATOR = "-[IJ]-";
+  private static final String NEWLINE = "-[N]-";
+  private static final String DOWNLOAD_DEPENDENCIES_NAME = "dependencies";
   private final Set<String> downloadingMap = new HashSet<>();
   private final MavenParsingContext myContext;
 
@@ -62,7 +62,6 @@ public class MavenSpyOutputParser {
 
       MavenEventType eventType = MavenEventType.valueByName(type);
       if (eventType == null) {
-        MavenLog.LOG.info("maven event type not found by name " + type);
         return;
       }
       processErrorLogLine(parameters.get("error"), eventType, messageConsumer);
@@ -78,12 +77,12 @@ public class MavenSpyOutputParser {
                        Map<String, String> parameters,
                        Consumer<? super BuildEvent> messageConsumer) {
     switch (type) {
-      case SESSION_STARTED: {
+      case SESSION_STARTED -> {
         List<String> projectsInReactor = getProjectsInReactor(parameters);
         myContext.setProjectsInReactor(projectsInReactor);
-        return;
       }
-      case PROJECT_STARTED: {
+      case SESSION_ENDED -> doFinishSession(messageConsumer, myContext);
+      case PROJECT_STARTED -> {
         MavenParsingContext.ProjectExecutionEntry execution = myContext.getProject(threadId, parameters, true);
         if (execution == null) {
           MavenLog.LOG.debug("Not found for " + parameters);
@@ -92,21 +91,17 @@ public class MavenSpyOutputParser {
           messageConsumer
             .accept(new StartEventImpl(execution.getId(), execution.getParentId(), System.currentTimeMillis(), execution.getName()));
         }
-
-        return;
       }
-      case MOJO_STARTED: {
+      case MOJO_STARTED -> {
         MavenParsingContext.MojoExecutionEntry mojoExecution = myContext.getMojo(threadId, parameters, true);
         doStart(messageConsumer, mojoExecution);
-        return;
       }
-      case MOJO_SUCCEEDED: {
+      case MOJO_SUCCEEDED -> {
         stopFakeDownloadNode(threadId, parameters, messageConsumer);
         MavenParsingContext.MojoExecutionEntry mojoExecution = myContext.getMojo(threadId, parameters, false);
         doComplete(messageConsumer, mojoExecution);
-        return;
       }
-      case MOJO_FAILED: {
+      case MOJO_FAILED -> {
         stopFakeDownloadNode(threadId, parameters, messageConsumer);
         MavenParsingContext.MojoExecutionEntry mojoExecution = myContext.getMojo(threadId, parameters, false);
         if (mojoExecution == null) {
@@ -118,42 +113,29 @@ public class MavenSpyOutputParser {
                                 new MavenTaskFailedResultImpl(parameters.get("error"))));
           mojoExecution.complete();
         }
-        return;
       }
-      case MOJO_SKIPPED: {
+      case MOJO_SKIPPED -> {
         stopFakeDownloadNode(threadId, parameters, messageConsumer);
         MavenParsingContext.MojoExecutionEntry mojoExecution = myContext.getMojo(threadId, parameters, false);
         doSkip(messageConsumer, mojoExecution);
-        return;
       }
-      case PROJECT_SUCCEEDED: {
+      case PROJECT_SUCCEEDED -> {
         stopFakeDownloadNode(threadId, parameters, messageConsumer);
         MavenParsingContext.ProjectExecutionEntry execution = myContext.getProject(threadId, parameters, false);
         doComplete(messageConsumer, execution);
-        return;
       }
-
-      case PROJECT_SKIPPED: {
+      case PROJECT_SKIPPED -> {
         MavenParsingContext.ProjectExecutionEntry execution = myContext.getProject(threadId, parameters, false);
         doSkip(messageConsumer, execution);
-        return;
       }
-
-      case PROJECT_FAILED: {
+      case PROJECT_FAILED -> {
         stopFakeDownloadNode(threadId, parameters, messageConsumer);
         MavenParsingContext.ProjectExecutionEntry execution = myContext.getProject(threadId, parameters, false);
+        myContext.setProjectFailure(true);
         doError(messageConsumer, execution, parameters.get("error"));
-        return;
       }
-
-      case ARTIFACT_RESOLVED: {
-        artifactResolved(threadId, parameters, messageConsumer);
-        return;
-      }
-
-      case ARTIFACT_DOWNLOADING: {
-        artifactDownloading(threadId, parameters, messageConsumer);
-      }
+      case ARTIFACT_RESOLVED -> artifactResolved(threadId, parameters, messageConsumer);
+      case ARTIFACT_DOWNLOADING -> artifactDownloading(threadId, parameters, messageConsumer);
     }
   }
 
@@ -296,5 +278,16 @@ public class MavenSpyOutputParser {
         new FinishEventImpl(execution.getId(), execution.getParentId(), System.currentTimeMillis(), execution.getName(),
                             new SuccessResultImpl()));
     execution.complete();
+  }
+
+  private static void doFinishSession(Consumer<? super BuildEvent> messageConsumer, MavenParsingContext context) {
+    context.setSessionEnded(true);
+    if (context.getProjectFailure()) {
+      messageConsumer
+        .accept(new FinishBuildEventImpl(context.getMyTaskId(), null, System.currentTimeMillis(), "", new FailureResultImpl()));
+    } else {
+      messageConsumer
+        .accept(new FinishBuildEventImpl(context.getMyTaskId(), null, System.currentTimeMillis(), "", new SuccessResultImpl()));
+    }
   }
 }

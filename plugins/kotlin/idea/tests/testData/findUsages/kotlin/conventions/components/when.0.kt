@@ -1,6 +1,6 @@
 // PSI_ELEMENT: org.jetbrains.kotlin.psi.KtParameter
 // OPTIONS: usages
-// FIR_IGNORE
+// FIR_COMPARISON_WITH_DISABLED_COMPONENTS
 
 data class A(val <caret>a: Int, val b: Int)
 
@@ -18,10 +18,13 @@ fun when1(o: Any) {
 
 fun when2(o: Any) {
     when (o) {
-        !is A -> { }
+        !is A -> {
+        }
 
         else -> {
             val (x, y) = o
         }
     }
 }
+// FIR_COMPARISON
+// IGNORE_FIR_LOG

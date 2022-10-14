@@ -1,8 +1,7 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.xdebugger.impl.inline;
 
 import com.intellij.icons.AllIcons;
-import com.intellij.openapi.actionSystem.ActionGroup;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorCustomElementRenderer;
@@ -32,12 +31,12 @@ import com.intellij.xdebugger.impl.XDebugSessionImpl;
 import com.intellij.xdebugger.impl.XDebuggerManagerImpl;
 import com.intellij.xdebugger.impl.evaluate.XDebuggerEditorLinePainter;
 import com.intellij.xdebugger.impl.evaluate.quick.XDebuggerTreeCreator;
+import com.intellij.xdebugger.impl.frame.XValueMarkers;
 import com.intellij.xdebugger.impl.ui.XDebugSessionTab;
 import com.intellij.xdebugger.impl.ui.XDebuggerUIConstants;
 import com.intellij.xdebugger.impl.ui.tree.nodes.XValueNodeImpl;
 import com.intellij.xdebugger.ui.DebuggerColors;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
@@ -60,16 +59,17 @@ public final class InlineDebugRenderer implements EditorCustomElementRenderer {
   private final XSourcePosition myPosition;
   private SimpleColoredText myPresentation;
 
-  InlineDebugRenderer(XValueNodeImpl valueNode, @NotNull XSourcePosition position, @NotNull XDebugSession session) {
+  public InlineDebugRenderer(XValueNodeImpl valueNode, @NotNull XSourcePosition position, @NotNull XDebugSession session) {
     myPosition = position;
     mySession = session;
     myCustomNode = valueNode instanceof InlineWatchNodeImpl;
     myValueNode = valueNode;
     updatePresentation();
+    XValueMarkers<?, ?> markers = session instanceof XDebugSessionImpl ?  ((XDebugSessionImpl)session).getValueMarkers() : null;
     myTreeCreator = new XDebuggerTreeCreator(session.getProject(),
                                              session.getDebugProcess().getEditorsProvider(),
                                              session.getCurrentPosition(),
-                                             ((XDebugSessionImpl)session).getValueMarkers());
+                                             markers);
   }
 
   public void updatePresentation() {
@@ -119,21 +119,35 @@ public final class InlineDebugRenderer implements EditorCustomElementRenderer {
     if (inlayRenderer.myPopupIsShown) {
       return;
     }
-    String name = "valueName";
-    XValue container = myValueNode.getValueContainer();
-    if (container instanceof XNamedValue) {
-      name = ((XNamedValue)container).getName();
-    }
-    Pair<XValue, String> descriptor = Pair.create(container, name);
+    Pair<XValue, String> descriptor = getXValueDescriptor(myValueNode);
     Rectangle bounds = inlay.getBounds();
     Point point = new Point(bounds.x, bounds.y + bounds.height);
 
     inlayRenderer.myPopupIsShown = true;
-    XDebuggerTreeInlayPopup.showTreePopup(myTreeCreator, descriptor, myValueNode, inlay.getEditor(), point, myPosition, mySession, () -> {
+
+    Runnable hidePopupRunnable = () -> {
       ApplicationManager.getApplication().invokeLater(() -> {
         inlayRenderer.myPopupIsShown = false;
       });
-    });
+    };
+
+    Editor editor = inlay.getEditor();
+    InlineValuePopupProvider popupProvider = InlineValuePopupProvider.EP_NAME.findFirstSafe(a -> a.accepts(myValueNode));
+    if (popupProvider != null) {
+      popupProvider.showPopup(myValueNode, mySession, myPosition, myTreeCreator, editor, point, hidePopupRunnable);
+    } else {
+      XDebuggerTreeInlayPopup.showTreePopup(myTreeCreator, descriptor, myValueNode, editor, point, myPosition, mySession, hidePopupRunnable);
+    }
+  }
+
+  @NotNull
+  public static Pair<XValue, String> getXValueDescriptor(@NotNull XValueNodeImpl xValueNode) {
+    String name = "valueName";
+    XValue container = xValueNode.getValueContainer();
+    if (container instanceof XNamedValue) {
+      name = ((XNamedValue)container).getName();
+    }
+    return Pair.create(container, name);
   }
 
 
@@ -153,11 +167,6 @@ public final class InlineDebugRenderer implements EditorCustomElementRenderer {
     if (oldState != active) {
       inlay.update();
     }
-  }
-
-  @Override
-  public @Nullable ActionGroup getContextMenuGroup(@NotNull Inlay inlay) {
-    return null;
   }
 
   @Override
@@ -210,9 +219,8 @@ public final class InlineDebugRenderer implements EditorCustomElementRenderer {
     int curX = r.x + metrics.charWidth(' ');
 
     if (backgroundColor != null) {
-      float alpha = BACKGROUND_ALPHA;
       GraphicsConfig config = GraphicsUtil.setupAAPainting(g);
-      GraphicsUtil.paintWithAlpha(g, alpha);
+      GraphicsUtil.paintWithAlpha(g, BACKGROUND_ALPHA);
       g.setColor(backgroundColor);
       g.fillRoundRect(curX + margin, r.y + gap, r.width - (2 * margin) - metrics.charWidth(' '), r.height - gap * 2, 6, 6);
       config.restore();

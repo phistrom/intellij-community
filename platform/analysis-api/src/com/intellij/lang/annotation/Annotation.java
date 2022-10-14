@@ -93,8 +93,10 @@ public final class Annotation implements Segment {
    * @param message     the description of the annotation (shown in the status bar or by "View | Error Description" action)
    * @param tooltip     the tooltip for the annotation (shown when hovering the mouse in the gutter bar)
    * @see AnnotationHolder#newAnnotation
+   * @deprecated use {@link AnnotationHolder#newAnnotation} instead
    */
   @ApiStatus.Internal
+  @Deprecated
   public Annotation(int startOffset,
                     int endOffset,
                     @NotNull HighlightSeverity severity,
@@ -252,24 +254,19 @@ public final class Annotation implements Segment {
   public TextAttributesKey getTextAttributes() {
     if (myEnforcedAttributesKey != null) return myEnforcedAttributesKey;
 
-    switch (myHighlightType) {
-      case GENERIC_ERROR_OR_WARNING:
-        if (mySeverity == HighlightSeverity.ERROR) return CodeInsightColors.ERRORS_ATTRIBUTES;
-        if (mySeverity == HighlightSeverity.WARNING) return CodeInsightColors.WARNINGS_ATTRIBUTES;
-        if (mySeverity == HighlightSeverity.WEAK_WARNING) return CodeInsightColors.WEAK_WARNING_ATTRIBUTES;
-        return HighlighterColors.NO_HIGHLIGHTING;
-      case GENERIC_ERROR:
-        return CodeInsightColors.ERRORS_ATTRIBUTES;
-      case LIKE_DEPRECATED:
-        return CodeInsightColors.DEPRECATED_ATTRIBUTES;
-      case LIKE_UNUSED_SYMBOL:
-        return CodeInsightColors.NOT_USED_ELEMENT_ATTRIBUTES;
-      case LIKE_UNKNOWN_SYMBOL:
-      case ERROR:
-        return CodeInsightColors.WRONG_REFERENCES_ATTRIBUTES;
-      default:
-        return HighlighterColors.NO_HIGHLIGHTING;
-    }
+    return switch (myHighlightType) {
+      case GENERIC_ERROR_OR_WARNING -> {
+        if (mySeverity == HighlightSeverity.ERROR) yield CodeInsightColors.ERRORS_ATTRIBUTES;
+        if (mySeverity == HighlightSeverity.WARNING) yield CodeInsightColors.WARNINGS_ATTRIBUTES;
+        if (mySeverity == HighlightSeverity.WEAK_WARNING) yield CodeInsightColors.WEAK_WARNING_ATTRIBUTES;
+        yield HighlighterColors.NO_HIGHLIGHTING;
+      }
+      case GENERIC_ERROR -> CodeInsightColors.ERRORS_ATTRIBUTES;
+      case LIKE_DEPRECATED -> CodeInsightColors.DEPRECATED_ATTRIBUTES;
+      case LIKE_UNUSED_SYMBOL -> CodeInsightColors.NOT_USED_ELEMENT_ATTRIBUTES;
+      case LIKE_UNKNOWN_SYMBOL, ERROR -> CodeInsightColors.WRONG_REFERENCES_ATTRIBUTES;
+      default -> HighlighterColors.NO_HIGHLIGHTING;
+    };
   }
 
   public TextAttributes getEnforcedTextAttributes() {

@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.kotlin.tools.projectWizard.wizard.ui.secondStep.modulesEditor
 
 import com.intellij.icons.AllIcons
@@ -31,7 +31,7 @@ class ModulesEditorToolbarDecorator(
             val target = tree.selectedSettingItem?.safeAs<Module>()
             val isRootModule = target == null
             val popup = moduleCreator.create(
-                target = tree.selectedSettingItem?.safeAs(),
+                target = tree.selectedSettingItem as? Module,
                 allowMultiplatform = isMultiplatformProject()
                         && isRootModule
                         && allModules.none { it.configurator == MppModuleConfigurator },

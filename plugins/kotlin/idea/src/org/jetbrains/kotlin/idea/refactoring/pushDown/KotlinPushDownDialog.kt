@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.refactoring.pushDown
 
@@ -42,7 +42,7 @@ class KotlinPushDownDialog(
 
     override fun getDimensionServiceKey() = "#" + this::class.java.name
 
-    override fun createNorthPanel(): JComponent? {
+    override fun createNorthPanel(): JComponent {
         val gbConstraints = GridBagConstraints()
 
         val panel = JPanel(GridBagLayout())
@@ -65,7 +65,7 @@ class KotlinPushDownDialog(
         return panel
     }
 
-    override fun createCenterPanel(): JComponent? {
+    override fun createCenterPanel(): JComponent {
         val panel = JPanel(BorderLayout())
         val memberSelectionPanel = KotlinMemberSelectionPanel(
             RefactoringBundle.message("members.to.be.pushed.down.panel.title"),

@@ -12,16 +12,19 @@ import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.OrderRootType;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.StreamUtil;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.python.PyBundle;
 import com.jetbrains.python.PyNames;
+import com.jetbrains.python.PySdkBundle;
 import com.jetbrains.python.PythonHelpersLocator;
-import com.jetbrains.python.buildout.BuildoutFacet;
 import com.jetbrains.python.codeInsight.userSkeletons.PyUserSkeletonsUtil;
 import com.jetbrains.python.remote.PyRemoteSdkAdditionalDataBase;
 import com.jetbrains.python.remote.PyRemoteSkeletonGeneratorFactory;
+import com.jetbrains.python.run.PyRunnerUtil;
 import com.jetbrains.python.sdk.InvalidSdkException;
+import com.jetbrains.python.sdk.PySdkExtKt;
 import com.jetbrains.python.sdk.PythonSdkType;
 import com.jetbrains.python.sdk.PythonSdkUtil;
 import com.jetbrains.python.sdk.skeleton.PySkeletonHeader;
@@ -118,7 +121,14 @@ public class PySkeletonRefresher {
     myIndicator = indicator;
     mySdk = sdk;
     mySkeletonsPath = skeletonsPath;
-    if (PythonSdkUtil.isRemote(sdk)) {
+    if (Registry.is("python.use.targets.api")) {
+      mySkeletonsGenerator = new PyTargetsSkeletonGenerator(getSkeletonsPath(), mySdk, folder, myProject);
+    }
+    else if (PyRunnerUtil.isTargetBased(sdk)) {
+      // when `python.use.targets.api` flag is disabled
+      throw new InvalidSdkException(PySdkBundle.message("python.sdk.please.reconfigure.interpreter"));
+    }
+    else if (PythonSdkUtil.isRemote(sdk)) {
       try {
         mySkeletonsGenerator = createRemoteSkeletonGenerator(myProject, ownerComponent, sdk, getSkeletonsPath());
       }
@@ -127,7 +137,7 @@ public class PySkeletonRefresher {
       }
     }
     else {
-      mySkeletonsGenerator = new PySkeletonGenerator(getSkeletonsPath(), mySdk, folder);
+      mySkeletonsGenerator = new PyLegacySkeletonGenerator(getSkeletonsPath(), mySdk, folder);
     }
   }
 
@@ -218,7 +228,6 @@ public class PySkeletonRefresher {
     final List<VirtualFile> paths = new ArrayList<>();
 
     paths.addAll(Arrays.asList(sdk.getRootProvider().getFiles(OrderRootType.CLASSES)));
-    paths.addAll(BuildoutFacet.getExtraPathForAllOpenModules());
 
     return ContainerUtil.mapNotNull(paths, file -> {
       if (file.isInLocalFileSystem()) {

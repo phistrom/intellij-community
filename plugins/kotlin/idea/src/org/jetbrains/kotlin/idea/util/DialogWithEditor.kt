@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.util
 
@@ -9,6 +9,7 @@ import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.openapi.util.NlsContexts
 import com.intellij.testFramework.LightVirtualFile
 import org.jetbrains.kotlin.idea.KotlinFileType
 import java.awt.BorderLayout
@@ -16,9 +17,9 @@ import javax.swing.JComponent
 import javax.swing.JPanel
 
 open class DialogWithEditor(
-    val project: Project,
-    title: String,
-    val initialText: String
+  val project: Project,
+  @NlsContexts.DialogTitle title: String,
+  private val initialText: String
 ) : DialogWrapper(project, true) {
     val editor: Editor = createEditor()
 
@@ -27,7 +28,7 @@ open class DialogWithEditor(
         setTitle(title)
     }
 
-    override final fun init() {
+    final override fun init() {
         super.init()
     }
 

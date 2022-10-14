@@ -40,11 +40,6 @@ class DumbServiceHeavyActivities {
     };
   }
 
-  boolean isSuspended() {
-    ProgressSuspender suspender = myCurrentSuspender;
-    return suspender != null && suspender.isSuspended();
-  }
-
   void resumeProgressIfPossible() {
     ProgressSuspender suspender = myCurrentSuspender;
     if (suspender != null && suspender.isSuspended()) {
@@ -82,6 +77,12 @@ class DumbServiceHeavyActivities {
     ProgressSuspender currentSuspender = myCurrentSuspender;
     if (currentSuspender != null && !currentSuspender.isSuspended()) {
       currentSuspender.suspendProcess(reason);
+    }
+  }
+
+  public void disposeSuspender() {
+    if (myCurrentSuspender != null) {
+      myCurrentSuspender.close();
     }
   }
 }

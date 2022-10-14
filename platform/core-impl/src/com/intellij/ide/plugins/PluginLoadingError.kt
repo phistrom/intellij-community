@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.plugins
 
 import com.intellij.openapi.extensions.PluginId
@@ -7,32 +7,14 @@ import org.jetbrains.annotations.NonNls
 import java.util.function.Supplier
 
 class PluginLoadingError internal constructor(val plugin: IdeaPluginDescriptor,
-                                              private val detailedMessageSupplier: Supplier<String>?,
-                                              private val shortMessageSupplier: Supplier<String>,
+                                              private val detailedMessageSupplier: Supplier<@NlsContexts.DetailedDescription String>?,
+                                              private val shortMessageSupplier: Supplier<@NlsContexts.Label String>,
                                               val isNotifyUser: Boolean,
                                               @JvmField val disabledDependency: PluginId? = null) {
-  internal constructor(plugin: IdeaPluginDescriptor,
-                       detailedMessageSupplier: Supplier<String>?,
-                       shortMessageSupplier: Supplier<String>) : this(plugin = plugin,
-                                                                      detailedMessageSupplier = detailedMessageSupplier,
-                                                                      shortMessageSupplier = shortMessageSupplier,
-                                                                      isNotifyUser = true)
-
-  @get:NlsContexts.DetailedDescription
-  val detailedMessage: String
-    get() = detailedMessageSupplier!!.get()
-
-  override fun toString() = internalMessage
-
-  val internalMessage: @NonNls String
-    get() = formatErrorMessage(plugin, (detailedMessageSupplier ?: shortMessageSupplier).get())
-
-  @get:NlsContexts.Label
-  val shortMessage: String
-    get() = shortMessageSupplier.get()
-
   companion object {
-    fun formatErrorMessage(descriptor: IdeaPluginDescriptor, message: String): @NonNls String {
+    internal val DISABLED = Supplier { "" }
+
+    private fun formatErrorMessage(descriptor: IdeaPluginDescriptor, message: String): @NonNls String {
       val builder = StringBuilder()
       builder.append("The ").append(descriptor.name).append(" (id=").append(descriptor.pluginId).append(", path=")
       builder.append(pluginPathToUserString(descriptor.pluginPath))
@@ -44,4 +26,28 @@ class PluginLoadingError internal constructor(val plugin: IdeaPluginDescriptor,
       return builder.toString()
     }
   }
+
+  internal constructor(plugin: IdeaPluginDescriptor,
+                       detailedMessageSupplier: Supplier<@NlsContexts.DetailedDescription String>?,
+                       shortMessageSupplier: Supplier<@NlsContexts.Label String>) :
+    this(plugin = plugin,
+      detailedMessageSupplier = detailedMessageSupplier,
+      shortMessageSupplier = shortMessageSupplier,
+      isNotifyUser = true)
+
+  @get:NlsContexts.DetailedDescription
+  val detailedMessage: String
+    get() = detailedMessageSupplier!!.get()
+
+  internal val isDisabledError: Boolean
+    get() = shortMessageSupplier === DISABLED
+
+  override fun toString() = internalMessage
+
+  val internalMessage: @NonNls String
+    get() = formatErrorMessage(plugin, (detailedMessageSupplier ?: shortMessageSupplier).get())
+
+  @get:NlsContexts.Label
+  val shortMessage: String
+    get() = shortMessageSupplier.get()
 }

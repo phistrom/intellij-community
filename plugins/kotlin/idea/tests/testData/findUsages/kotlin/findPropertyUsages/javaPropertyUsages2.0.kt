@@ -4,7 +4,7 @@ package server
 
 open class A<T>(open var <caret>foo: T)
 
-open class B: A<String>("") {
+open class B : A<String>("") {
     override var foo: String
         get() {
             println("get")
@@ -15,4 +15,4 @@ open class B: A<String>("") {
         }
 }
 
-// FIR_IGNORE
+// FIR_COMPARISON

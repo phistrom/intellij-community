@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.tools.projectWizard.core.entity.settings
 
@@ -21,6 +21,7 @@ abstract class SettingBuilder<V : Any, T : SettingType<V>>(
     var isSavable: Boolean = false
     var isRequired: Boolean? = null
     var description: String? = null
+    var tooltipText: String? = null
 
     fun value(value: V) = SettingDefaultValue.Value(value)
     fun dynamic(getter: Reader.(SettingReference<V, SettingType<V>>) -> V?) =
@@ -46,6 +47,7 @@ abstract class SettingBuilder<V : Any, T : SettingType<V>>(
         path = path,
         title = title,
         description = description,
+        tooltipText = tooltipText,
         defaultValue = defaultValue,
         isAvailable = isAvailable,
         isRequired = isRequired ?: (defaultValue == null),

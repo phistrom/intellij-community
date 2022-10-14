@@ -1,149 +1,238 @@
+/*******************************************************************************
+ * Copyright 2000-2022 JetBrains s.r.o. and contributors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ ******************************************************************************/
+
 package com.jetbrains.packagesearch.intellij.plugin.fus
 
-import com.intellij.buildsystem.model.unified.UnifiedDependency
 import com.intellij.buildsystem.model.unified.UnifiedDependencyRepository
 import com.intellij.internal.statistic.eventLog.EventLogGroup
+import com.intellij.internal.statistic.eventLog.events.BaseEventId
 import com.intellij.internal.statistic.eventLog.events.EventFields
-import com.intellij.internal.statistic.eventLog.events.EventId3
 import com.intellij.internal.statistic.eventLog.events.EventPair
 import com.intellij.internal.statistic.service.fus.collectors.CounterUsagesCollector
+import com.intellij.openapi.diagnostic.RuntimeExceptionWithAttachments
+import com.intellij.openapi.diagnostic.thisLogger
+import com.jetbrains.packagesearch.intellij.plugin.PackageSearchBundle
+import com.jetbrains.packagesearch.intellij.plugin.extensibility.CoroutineProjectModuleOperationProvider
 import com.jetbrains.packagesearch.intellij.plugin.extensibility.ProjectModule
-import com.jetbrains.packagesearch.intellij.plugin.tryDoing
+import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.models.PackageIdentifier
+import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.models.PackageVersion
 import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.models.TargetModules
+import com.jetbrains.packagesearch.intellij.plugin.util.logDebug
 
-private const val FUS_ENABLED = false
+private const val FUS_ENABLED = true
 
-// See the documentation at https://confluence.jetbrains.com/display/FUS/IntelliJ+Reporting+API
-internal class PackageSearchEventsLogger : CounterUsagesCollector() {
+class PackageSearchEventsLogger : CounterUsagesCollector() {
 
     override fun getGroup() = GROUP
 
-    override fun getVersion() = VERSION
-
     companion object {
 
-        private const val VERSION = 2
+        private const val VERSION = 11
         private val GROUP = EventLogGroup(FUSGroupIds.GROUP_ID, VERSION)
 
         // FIELDS
-        private val coordinatesField = EventFields.StringValidatedByCustomRule(FUSGroupIds.COORDINATES, FUSGroupIds.COORDINATES)
-        private val scopeField = EventFields.StringValidatedByCustomRule(FUSGroupIds.SCOPE, FUSGroupIds.SCOPE)
-        private val buildSystemField = EventFields.StringValidatedByCustomRule(FUSGroupIds.BUILD_SYSTEM, FUSGroupIds.BUILD_SYSTEM)
-        private val repositoryIdField = EventFields.StringValidatedByCustomRule(FUSGroupIds.REPOSITORY_ID, FUSGroupIds.REPOSITORY_ID)
-        private val repositoryUrlField = EventFields.StringValidatedByCustomRule(FUSGroupIds.REPOSITORY_URL, FUSGroupIds.REPOSITORY_URL)
+        private val buildSystemField = EventFields.Class(FUSGroupIds.MODULE_OPERATION_PROVIDER_CLASS)
+        private val packageIdField = EventFields.StringValidatedByCustomRule(FUSGroupIds.PACKAGE_ID, TopPackageIdValidationRule::class.java)
+        private val packageVersionField = EventFields.StringValidatedByRegexp(FUSGroupIds.PACKAGE_VERSION, regexpRef = "version")
+        private val packageFromVersionField = EventFields.StringValidatedByRegexp(FUSGroupIds.PACKAGE_FROM_VERSION, regexpRef = "version")
+        private val repositoryIdField = EventFields.Enum<FUSGroupIds.IndexedRepositories>(FUSGroupIds.REPOSITORY_ID)
+        private val repositoryUrlField = EventFields.String(FUSGroupIds.REPOSITORY_URL, allowedValues = FUSGroupIds.indexedRepositoryUrls)
+        private val repositoryUsesCustomUrlField = EventFields.Boolean(FUSGroupIds.REPOSITORY_USES_CUSTOM_URL)
         private val packageIsInstalledField = EventFields.Boolean(FUSGroupIds.PACKAGE_IS_INSTALLED)
-        internal val preferencesGradleScopesField =
-            EventFields.StringValidatedByCustomRule(FUSGroupIds.PREFERENCES_GRADLE_SCOPES, FUSGroupIds.PREFERENCES_GRADLE_SCOPES)
-        internal val preferencesUpdateScopesOnUsageField =
-            EventFields.StringValidatedByCustomRule(FUSGroupIds.PREFERENCES_UPDATE_SCOPES_ON_USAGE, FUSGroupIds.PREFERENCES_UPDATE_SCOPES_ON_USAGE)
-        internal val preferencesDefaultGradleScopeField =
-            EventFields.StringValidatedByCustomRule(FUSGroupIds.PREFERENCES_DEFAULT_GRADLE_SCOPE, FUSGroupIds.PREFERENCES_DEFAULT_GRADLE_SCOPE)
-        internal val preferencesDefaultMavenScopeField =
-            EventFields.StringValidatedByCustomRule(FUSGroupIds.PREFERENCES_DEFAULT_MAVEN_SCOPE, FUSGroupIds.PREFERENCES_DEFAULT_MAVEN_SCOPE)
-        private val targetModuleNameField = EventFields.String(
-            FUSGroupIds.TARGET_MODULE_NAME,
-            listOfNotNull(
-                TargetModules.None::class.simpleName,
-                TargetModules.One::class.simpleName,
-                TargetModules.All::class.simpleName,
-            )
-        )
-        private val quickFixTypeField = EventFields.Enum(FUSGroupIds.QUICK_FIX_TYPE, FUSGroupIds.QuickFixTypes::class.java)
-        private val quickFixFileTypeField = EventFields.StringValidatedByCustomRule(FUSGroupIds.FILE_TYPE, FUSGroupIds.FILE_TYPE)
-        private val detailsLinkLabelField = EventFields.Enum(FUSGroupIds.DETAILS_LINK_LABEL, FUSGroupIds.DetailsLinkTypes::class.java)
-        private val detailsLinkUrlField = EventFields.StringValidatedByCustomRule(FUSGroupIds.DETAILS_LINK_URL, FUSGroupIds.DETAILS_LINK_URL)
-        private val toggleTypeField = EventFields.Enum(FUSGroupIds.DETAILS_VISIBLE, FUSGroupIds.ToggleTypes::class.java)
-        private val valueField = EventFields.Boolean(FUSGroupIds.DETAILS_VISIBLE)
-        private val searchRequestField = EventFields.StringValidatedByCustomRule(FUSGroupIds.SEARCH_QUERY, FUSGroupIds.SEARCH_QUERY)
+        private val targetModulesField = EventFields.Enum<FUSGroupIds.TargetModulesType>(FUSGroupIds.TARGET_MODULES)
+        private val targetModulesMixedBuildSystemsField = EventFields.Boolean(FUSGroupIds.TARGET_MODULES_MIXED_BUILD_SYSTEMS)
+
+        val preferencesGradleScopeCountField = EventFields.Int(FUSGroupIds.PREFERENCES_GRADLE_SCOPES_COUNT)
+        val preferencesUpdateScopesOnUsageField = EventFields.Boolean(FUSGroupIds.PREFERENCES_UPDATE_SCOPES_ON_USAGE)
+        val preferencesDefaultGradleScopeChangedField = EventFields.Boolean(FUSGroupIds.PREFERENCES_DEFAULT_GRADLE_SCOPE_CHANGED)
+        val preferencesDefaultMavenScopeChangedField = EventFields.Boolean(FUSGroupIds.PREFERENCES_DEFAULT_MAVEN_SCOPE_CHANGED)
+        internal val preferencesAutoAddRepositoriesField = EventFields.Boolean(FUSGroupIds.PREFERENCES_AUTO_ADD_REPOSITORIES)
+
+        private val detailsLinkLabelField = EventFields.Enum<FUSGroupIds.DetailsLinkTypes>(FUSGroupIds.DETAILS_LINK_LABEL)
+        private val toggleTypeField = EventFields.Enum<FUSGroupIds.ToggleTypes>(FUSGroupIds.DETAILS_VISIBLE)
+        private val detailsVisibleField = EventFields.Boolean(FUSGroupIds.DETAILS_VISIBLE)
+        private val searchQueryLengthField = EventFields.Int(FUSGroupIds.SEARCH_QUERY_LENGTH)
 
         // EVENTS
-        private val packageInstalledEvent = GROUP.registerEvent(FUSGroupIds.PACKAGE_INSTALLED, coordinatesField, scopeField, buildSystemField)
-        private val packageRemovedEvent = GROUP.registerEvent(FUSGroupIds.PACKAGE_REMOVED, coordinatesField, scopeField, buildSystemField)
-        private val packageUpdatedEvent = GROUP.registerEvent(FUSGroupIds.PACKAGE_UPDATED, coordinatesField, scopeField, buildSystemField)
-        private val repositoryAddedEvent = GROUP.registerEvent(FUSGroupIds.REPOSITORY_ADDED, repositoryIdField, repositoryUrlField)
-        private val repositoryRemovedEvent = GROUP.registerEvent(FUSGroupIds.REPOSITORY_REMOVED, repositoryIdField, repositoryUrlField)
-        private val preferencesChangedEvent = GROUP.registerVarargEvent(FUSGroupIds.PREFERENCES_CHANGED)
-        private val preferencesResetEvent = GROUP.registerEvent(FUSGroupIds.PREFERENCES_RESET)
-        private val packageSelectedEvent = GROUP.registerEvent(FUSGroupIds.PACKAGE_SELECTED, packageIsInstalledField)
-        private val moduleSelectedEvent = GROUP.registerEvent(FUSGroupIds.MODULE_SELECTED, targetModuleNameField)
-        private val runQuickFixEvent = GROUP.registerEvent(FUSGroupIds.RUN_QUICK_FIX, quickFixTypeField, quickFixFileTypeField)
-        private val detailsLinkClickEvent = GROUP.registerEvent(FUSGroupIds.DETAILS_LINK_CLICK, detailsLinkLabelField, detailsLinkUrlField)
-        private val toggleEvent = GROUP.registerEvent(FUSGroupIds.TOGGLE, toggleTypeField, valueField)
-        private val searchRequestEvent = GROUP.registerEvent(FUSGroupIds.SEARCH_REQUEST, searchRequestField)
+        private val packageInstalledEvent = GROUP.registerEvent(
+            eventId = FUSGroupIds.PACKAGE_INSTALLED,
+            eventField1 = packageIdField,
+            eventField2 = packageVersionField,
+            eventField3 = buildSystemField
+        )
+        private val packageRemovedEvent = GROUP.registerEvent(
+            eventId = FUSGroupIds.PACKAGE_REMOVED,
+            eventField1 = packageIdField,
+            eventField2 = packageVersionField,
+            eventField3 = buildSystemField
+        )
+        private val packageUpdatedEvent = GROUP.registerVarargEvent(
+            eventId = FUSGroupIds.PACKAGE_UPDATED,
+            packageIdField, packageFromVersionField, packageVersionField, buildSystemField
+        )
+        private val repositoryAddedEvent = GROUP.registerEvent(
+            eventId = FUSGroupIds.REPOSITORY_ADDED,
+            eventField1 = repositoryIdField,
+            eventField2 = repositoryUrlField
+        )
+        private val repositoryRemovedEvent = GROUP.registerEvent(
+            eventId = FUSGroupIds.REPOSITORY_REMOVED,
+            eventField1 = repositoryIdField,
+            eventField2 = repositoryUrlField,
+            eventField3 = repositoryUsesCustomUrlField
+        )
+        private val preferencesChangedEvent = GROUP.registerVarargEvent(
+            eventId = FUSGroupIds.PREFERENCES_CHANGED,
+            preferencesGradleScopeCountField,
+            preferencesUpdateScopesOnUsageField,
+            preferencesDefaultGradleScopeChangedField,
+            preferencesDefaultMavenScopeChangedField,
+            preferencesAutoAddRepositoriesField
+        )
+        private val preferencesRestoreDefaultsEvent = GROUP.registerEvent(FUSGroupIds.PREFERENCES_RESTORE_DEFAULTS)
+        private val packageSelectedEvent = GROUP.registerEvent(eventId = FUSGroupIds.PACKAGE_SELECTED, packageIsInstalledField)
+        private val targetModulesSelectedEvent = GROUP.registerEvent(
+            eventId = FUSGroupIds.TARGET_MODULES_SELECTED,
+            eventField1 = targetModulesField,
+            eventField2 = targetModulesMixedBuildSystemsField
+        )
+        private val detailsLinkClickEvent = GROUP.registerEvent(
+            eventId = FUSGroupIds.DETAILS_LINK_CLICK,
+            eventField1 = detailsLinkLabelField
+        )
+        private val toggleDetailsEvent = GROUP.registerEvent(
+            eventId = FUSGroupIds.TOGGLE,
+            eventField1 = toggleTypeField,
+            eventField2 = detailsVisibleField
+        )
+        private val searchRequestEvent = GROUP.registerEvent(
+            eventId = FUSGroupIds.SEARCH_REQUEST,
+            eventField1 = searchQueryLengthField
+        )
         private val searchQueryClearEvent = GROUP.registerEvent(FUSGroupIds.SEARCH_QUERY_CLEAR)
         private val upgradeAllEvent = GROUP.registerEvent(FUSGroupIds.UPGRADE_ALL)
 
-        private fun EventId3<String?, String?, String?>.logPackage(dependency: UnifiedDependency, targetModule: ProjectModule) {
-            tryDoing {
-                val coordinates = dependency.coordinates.displayName
-                val scope = dependency.scope
-                val buildSystem = targetModule.buildSystemType.name
-                log(coordinates, scope, buildSystem)
+        fun logPackageInstalled(
+            packageIdentifier: PackageIdentifier,
+            packageVersion: PackageVersion,
+            targetModule: ProjectModule
+        ) = runSafelyIfEnabled(packageInstalledEvent) {
+            val moduleOperationProvider = CoroutineProjectModuleOperationProvider.forProjectModuleType(targetModule.moduleType)
+            if (moduleOperationProvider != null) {
+                log(packageIdentifier.rawValue, packageVersion.versionName, moduleOperationProvider::class.java)
+            } else {
+                logDebug { "Unable to log package installation for target module '${targetModule.name}': no operation provider available" }
             }
         }
 
-        fun logPackageInstalled(dependency: UnifiedDependency, targetModule: ProjectModule) = ifLoggingEnabled {
-            packageInstalledEvent.logPackage(dependency, targetModule)
+        fun logPackageRemoved(
+            packageIdentifier: PackageIdentifier,
+            packageVersion: PackageVersion,
+            targetModule: ProjectModule
+        ) = runSafelyIfEnabled(packageRemovedEvent) {
+            val moduleOperationProvider = CoroutineProjectModuleOperationProvider.forProjectModuleType(targetModule.moduleType)
+            if (moduleOperationProvider != null) {
+                log(packageIdentifier.rawValue, packageVersion.versionName, moduleOperationProvider::class.java)
+            } else {
+                logDebug { "Unable to log package removal for target module '${targetModule.name}': no operation provider available" }
+            }
         }
 
-        fun logPackageRemoved(dependency: UnifiedDependency, targetModule: ProjectModule) = ifLoggingEnabled {
-            packageRemovedEvent.logPackage(dependency, targetModule)
+        fun logPackageUpdated(
+            packageIdentifier: PackageIdentifier,
+            packageFromVersion: PackageVersion,
+            packageVersion: PackageVersion,
+            targetModule: ProjectModule
+        ) = runSafelyIfEnabled(packageUpdatedEvent) {
+            val moduleOperationProvider = CoroutineProjectModuleOperationProvider.forProjectModuleType(targetModule.moduleType)
+            if (moduleOperationProvider != null) {
+                log(
+                    packageIdField.with(packageIdentifier.rawValue),
+                    packageFromVersionField.with(packageFromVersion.versionName),
+                    packageVersionField.with(packageVersion.versionName),
+                    buildSystemField.with(moduleOperationProvider::class.java)
+                )
+            } else {
+                logDebug { "Unable to log package update for target module '${targetModule.name}': no operation provider available" }
+            }
         }
 
-        fun logPackageUpdated(dependency: UnifiedDependency, targetModule: ProjectModule) = ifLoggingEnabled {
-            packageUpdatedEvent.logPackage(dependency, targetModule)
+        fun logRepositoryAdded(model: UnifiedDependencyRepository) = runSafelyIfEnabled(repositoryAddedEvent) {
+            log(FUSGroupIds.IndexedRepositories.forId(model.id), FUSGroupIds.IndexedRepositories.validateUrl(model.url))
         }
 
-        fun logRepositoryAdded(model: UnifiedDependencyRepository) = ifLoggingEnabled {
-            repositoryAddedEvent.log(model.id, model.url)
+        fun logRepositoryRemoved(model: UnifiedDependencyRepository) = runSafelyIfEnabled(repositoryRemovedEvent) {
+            val repository = FUSGroupIds.IndexedRepositories.forId(model.id)
+            val validatedUrl = FUSGroupIds.IndexedRepositories.validateUrl(model.url)
+            val usesCustomUrl = repository != FUSGroupIds.IndexedRepositories.NONE &&
+                repository != FUSGroupIds.IndexedRepositories.OTHER &&
+                validatedUrl == null
+            log(repository, validatedUrl, usesCustomUrl)
         }
 
-        fun logRepositoryRemoved(model: UnifiedDependencyRepository) = ifLoggingEnabled {
-            repositoryRemovedEvent.log(model.id, model.url)
+        fun logPreferencesChanged(vararg preferences: EventPair<*>) = runSafelyIfEnabled(preferencesChangedEvent) {
+            log(*preferences)
         }
 
-        fun logPreferencesChanged(vararg preferences: EventPair<String?>) = ifLoggingEnabled {
-            preferencesChangedEvent.log(*preferences)
+        fun logPreferencesRestoreDefaults() = runSafelyIfEnabled(preferencesRestoreDefaultsEvent) {
+            log()
         }
 
-        fun logPreferencesReset() = ifLoggingEnabled {
-            preferencesResetEvent.log()
+        fun logTargetModuleSelected(targetModules: TargetModules) = runSafelyIfEnabled(targetModulesSelectedEvent) {
+            log(FUSGroupIds.TargetModulesType.from(targetModules), targetModules.isMixedBuildSystems)
         }
 
-        fun logModuleSelected(targetModuleName: String?) = ifLoggingEnabled {
-            moduleSelectedEvent.log(targetModuleName)
+        fun logPackageSelected(isInstalled: Boolean) = runSafelyIfEnabled(packageSelectedEvent) {
+            log(isInstalled)
         }
 
-        fun logRunQuickFix(type: FUSGroupIds.QuickFixTypes, fileType: String?) = ifLoggingEnabled {
-            runQuickFixEvent.log(type, fileType)
+        fun logDetailsLinkClick(type: FUSGroupIds.DetailsLinkTypes) = runSafelyIfEnabled(detailsLinkClickEvent) {
+            log(type)
         }
 
-        fun logPackageSelected(isInstalled: Boolean) = ifLoggingEnabled {
-            packageSelectedEvent.log(isInstalled)
+        fun logToggle(type: FUSGroupIds.ToggleTypes, state: Boolean) = runSafelyIfEnabled(toggleDetailsEvent) {
+            log(type, state)
         }
 
-        fun logDetailsLinkClick(type: FUSGroupIds.DetailsLinkTypes, url: String) = ifLoggingEnabled {
-            detailsLinkClickEvent.log(type, url)
+        fun logSearchRequest(query: String) = runSafelyIfEnabled(searchRequestEvent) {
+            log(query.length)
         }
 
-        fun logToggle(type: FUSGroupIds.ToggleTypes, state: Boolean) = ifLoggingEnabled {
-            toggleEvent.log(type, state)
+        fun logSearchQueryClear() = runSafelyIfEnabled(searchQueryClearEvent) {
+            log()
         }
 
-        fun logSearchRequest(query: String) = ifLoggingEnabled {
-            searchRequestEvent.log(query)
+        fun logUpgradeAll() = runSafelyIfEnabled(upgradeAllEvent) {
+            log()
         }
 
-        fun logSearchQueryClear() = ifLoggingEnabled {
-            searchQueryClearEvent.log()
-        }
-
-        fun logUpgradeAll() {
-            upgradeAllEvent.log()
-        }
-
-        private fun ifLoggingEnabled(action: () -> Unit) {
-            if (FUS_ENABLED) tryDoing { action() }
+        private fun <T : BaseEventId> runSafelyIfEnabled(event: T, action: T.() -> Unit) {
+            if (FUS_ENABLED) {
+                try {
+                    event.action()
+                } catch (e: RuntimeException) {
+                    thisLogger().error(
+                        PackageSearchBundle.message("packagesearch.logging.error", event.eventId),
+                        RuntimeExceptionWithAttachments(
+                            "Non-critical error while logging analytics event. This doesn't impact plugin functionality.",
+                            e
+                        )
+                    )
+                }
+            }
         }
     }
 }

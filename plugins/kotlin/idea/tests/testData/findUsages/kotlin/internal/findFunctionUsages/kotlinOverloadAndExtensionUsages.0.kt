@@ -1,6 +1,5 @@
 // PSI_ELEMENT: org.jetbrains.kotlin.psi.KtNamedFunction
 // OPTIONS: overloadUsages
-// FIR_IGNORE
 
 interface X<T> {
 }
@@ -13,7 +12,7 @@ fun bar(x: X<String>) {
     x.foo(1, 2)
 }
 
-open class A<T>: X<T> {
+open class A<T> : X<T> {
     internal open fun <caret>foo(t: T) {
         println(t)
     }

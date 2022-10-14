@@ -1,5 +1,5 @@
-// "Add ''@IgnoredOnParcel'' annotation" "true"
-// WITH_RUNTIME
+// "Add '@IgnoredOnParcel' annotation" "true"
+// WITH_STDLIB
 
 package com.myapp.activity
 

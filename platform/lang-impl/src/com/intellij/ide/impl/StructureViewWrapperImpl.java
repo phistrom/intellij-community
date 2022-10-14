@@ -1,8 +1,7 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.impl;
 
 import com.intellij.ide.ActivityTracker;
-import com.intellij.ide.CommonActionsManager;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.projectView.impl.ProjectRootsUtil;
 import com.intellij.ide.structureView.*;
@@ -13,6 +12,7 @@ import com.intellij.lang.PsiStructureViewFactory;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.impl.Utils;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
@@ -40,6 +40,7 @@ import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.psi.PsiElement;
+import com.intellij.ui.ExperimentalUI;
 import com.intellij.ui.components.JBPanelWithEmptyText;
 import com.intellij.ui.content.*;
 import com.intellij.ui.switcher.QuickActionProvider;
@@ -50,6 +51,7 @@ import com.intellij.util.ui.TimerUtil;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.update.MergingUpdateQueue;
 import com.intellij.util.ui.update.Update;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -58,17 +60,19 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.HierarchyEvent;
 import java.awt.event.HierarchyListener;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-
-import static com.intellij.openapi.application.ApplicationManager.getApplication;
+import java.util.Optional;
 
 /**
  * @author Eugene Belyaev
  */
 public final class StructureViewWrapperImpl implements StructureViewWrapper, Disposable {
   public static final Topic<Runnable> STRUCTURE_CHANGED = new Topic<>("structure view changed", Runnable.class, Topic.BroadcastDirection.NONE);
+
+  @ApiStatus.Experimental
+  public static final DataKey<Optional<VirtualFile>> STRUCTURE_VIEW_TARGET_FILE_KEY = DataKey.create("STRUCTURE_VIEW_TARGET_FILE_KEY");
+
   private static final Logger LOG = Logger.getInstance(StructureViewWrapperImpl.class);
   private static final DataKey<StructureViewWrapper> WRAPPER_DATA_KEY = DataKey.create("WRAPPER_DATA_KEY");
   private static final int REFRESH_TIME = 100; // time to check if a context file selection is changed or not
@@ -161,6 +165,10 @@ public final class StructureViewWrapperImpl implements StructureViewWrapper, Dis
             }
           }
         }
+        if (ExperimentalUI.isNewUI() && myStructureView instanceof StructureViewComponent) {
+          DefaultActionGroup additional = ((StructureViewComponent)myStructureView).getDotsActions();
+          myToolWindow.setAdditionalGearActions(additional);
+        }
       }
     });
     Disposer.register(myToolWindow.getContentManager(), this);
@@ -168,7 +176,7 @@ public final class StructureViewWrapperImpl implements StructureViewWrapper, Dis
     PsiStructureViewFactory.EP_NAME.addChangeListener(this::clearCaches, this);
 
     StructureViewBuilder.EP_NAME.addChangeListener(this::clearCaches, this);
-    getApplication().getMessageBus().connect(this).subscribe(STRUCTURE_CHANGED, this::clearCaches);
+    ApplicationManager.getApplication().getMessageBus().connect(this).subscribe(STRUCTURE_CHANGED, this::clearCaches);
   }
 
   private void clearCaches() {
@@ -201,21 +209,34 @@ public final class StructureViewWrapperImpl implements StructureViewWrapper, Dis
     }
     else {
       DataContext asyncDataContext = Utils.wrapDataContext(dataContext);
-      ReadAction.nonBlocking(() -> CommonDataKeys.VIRTUAL_FILE_ARRAY.getData(asyncDataContext))
-        .finishOnUiThread(ModalityState.defaultModalityState(), files -> {
-          if (files != null && files.length == 1) {
-            setFile(files[0]);
-          }
-          else if (files != null && files.length > 1) {
-            setFile(null);
+      ReadAction.nonBlocking(() -> getTargetVirtualFile(asyncDataContext))
+        .coalesceBy(this, owner)
+        .finishOnUiThread(ModalityState.defaultModalityState(), file -> {
+          if (file != null) {
+            setFile(file);
           }
           else if (myFirstRun) {
             setFileFromSelectionHistory();
+          }
+          else {
+            setFile(null);
           }
           myFirstRun = false;
         })
         .submit(AppExecutorUtil.getAppExecutorService());
     }
+  }
+
+  private static @Nullable VirtualFile getTargetVirtualFile(@NotNull DataContext asyncDataContext) {
+    final var explicitlySpecifiedFile = STRUCTURE_VIEW_TARGET_FILE_KEY.getData(asyncDataContext);
+    // explicitlySpecifiedFile == null           means no value was specified for this key
+    // explicitlySpecifiedFile.isEmpty() == true means target virtual file (and structure view itself) is explicitly suppressed
+    //noinspection OptionalAssignedToNull
+    if (explicitlySpecifiedFile != null) {
+      return explicitlySpecifiedFile.orElse(null);
+    }
+    final var commonFiles = CommonDataKeys.VIRTUAL_FILE_ARRAY.getData(asyncDataContext);
+    return commonFiles != null && commonFiles.length == 1 ? commonFiles[0] : null;
   }
 
   private void setFileFromSelectionHistory() {
@@ -296,9 +317,7 @@ public final class StructureViewWrapperImpl implements StructureViewWrapper, Dis
       @Override
       public void run() {
         if (myProject.isDisposed()) return;
-        if (!getApplication().isDispatchThread()) {
-          LOG.error("EDT-based MergingUpdateQueue on background thread");
-        }
+        ApplicationManager.getApplication().assertIsDispatchThread();
         loggedRun("rebuild a structure: ", StructureViewWrapperImpl.this::rebuild);
       }
     });
@@ -307,15 +326,10 @@ public final class StructureViewWrapperImpl implements StructureViewWrapper, Dis
   public void rebuild() {
     if (myProject.isDisposed()) return;
 
-    Dimension referenceSize = null;
-
     Container container = myToolWindow.getComponent();
     boolean wasFocused = UIUtil.isFocusAncestor(container);
 
     if (myStructureView != null) {
-      if (myStructureView instanceof StructureView.Scrollable) {
-        referenceSize = ((StructureView.Scrollable)myStructureView).getCurrentSize();
-      }
 
       myStructureView.storeState();
       Disposer.dispose(myStructureView);
@@ -364,10 +378,6 @@ public final class StructureViewWrapperImpl implements StructureViewWrapper, Dis
           myFileEditor = editor;
           Disposer.register(this, myStructureView);
 
-          if (myStructureView instanceof StructureView.Scrollable) {
-            ((StructureView.Scrollable)myStructureView).setReferenceSizeWhileInitializing(referenceSize);
-          }
-
           if (myStructureView instanceof StructureViewComposite) {
             final StructureViewComposite composite = (StructureViewComposite)myStructureView;
             final StructureViewComposite.StructureViewDescriptor[] views = composite.getStructureViews();
@@ -402,7 +412,7 @@ public final class StructureViewWrapperImpl implements StructureViewWrapper, Dis
     }
 
     for (int i = 0; i < myPanels.length; i++) {
-      final Content content = ContentFactory.SERVICE.getInstance().createContent(myPanels[i], names[i], false);
+      final Content content = ContentFactory.getInstance().createContent(myPanels[i], names[i], false);
       contentManager.addContent(content);
       if (i == 0 && myStructureView != null) {
         Disposer.register(content, myStructureView);
@@ -423,13 +433,17 @@ public final class StructureViewWrapperImpl implements StructureViewWrapper, Dis
   }
 
   private void updateHeaderActions(@Nullable StructureView structureView) {
-    List<AnAction> titleActions = Collections.emptyList();
+    List<AnAction> titleActions;
     if (structureView instanceof StructureViewComponent) {
-      JTree tree = ((StructureViewComponent)structureView).getTree();
-      CommonActionsManager commonActionManager = CommonActionsManager.getInstance();
-      titleActions = Arrays.asList(
-        commonActionManager.createExpandAllHeaderAction(tree),
-        commonActionManager.createCollapseAllHeaderAction(tree));
+      if (ExperimentalUI.isNewUI()) {
+        titleActions = List.of(((StructureViewComponent)structureView).getViewActions());
+      }
+      else {
+        titleActions = ((StructureViewComponent)structureView).addExpandCollapseActions();
+      }
+    }
+    else {
+      titleActions = Collections.emptyList();
     }
     myToolWindow.setTitleActions(titleActions);
   }
@@ -450,8 +464,8 @@ public final class StructureViewWrapperImpl implements StructureViewWrapper, Dis
   private StructureViewBuilder createStructureViewBuilder(@NotNull VirtualFile file) {
     if (file.getLength() > PersistentFSConstants.getMaxIntellisenseFileSize()) return null;
 
-    FileEditorProvider[] providers = FileEditorProviderManager.getInstance().getProviders(myProject, file);
-    FileEditorProvider provider = providers.length == 0 ? null : providers[0];
+    List<FileEditorProvider> providers = FileEditorProviderManager.getInstance().getProviderList(myProject, file);
+    FileEditorProvider provider = providers.size() == 0 ? null : providers.get(0);
     if (provider == null) return null;
     if (provider instanceof TextEditorProvider) {
       return StructureViewBuilder.PROVIDER.getStructureViewBuilder(file.getFileType(), file, myProject);

@@ -82,8 +82,12 @@ abstract class ProjectLayoutPanel<T> extends JPanel {
     depsPanel.setBorder(IdeBorderFactory.createTitledBorder(getDependenciesTitle(), false));
     splitter.setSecondComponent(depsPanel);
 
+    DefaultActionGroup toolbarActions = createEntriesToolbarActions();
+    ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar("ProjectLayoutPanel.Entries", toolbarActions, true);
+    toolbar.setTargetComponent(myEntriesChooser);
+
     JPanel groupPanel = new JPanel(new BorderLayout());
-    groupPanel.add(createEntriesActionToolbar().getComponent(), BorderLayout.NORTH);
+    groupPanel.add(toolbar.getComponent(), BorderLayout.NORTH);
     groupPanel.add(splitter, BorderLayout.CENTER);
     groupPanel.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
 
@@ -109,7 +113,7 @@ abstract class ProjectLayoutPanel<T> extends JPanel {
     });
   }
 
-  private ActionToolbar createEntriesActionToolbar() {
+  private DefaultActionGroup createEntriesToolbarActions() {
     final DefaultActionGroup entriesActions = new DefaultActionGroup();
 
     final RenameAction rename = new RenameAction();
@@ -124,7 +128,7 @@ abstract class ProjectLayoutPanel<T> extends JPanel {
     split.registerCustomShortcutSet(new CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_F4, 0)), this);
     entriesActions.add(split);
 
-    return ActionManager.getInstance().createActionToolbar("ProjectLayoutPanel.Entries", entriesActions, true);
+    return entriesActions;
   }
 
   public final ModuleInsight getInsight() {
@@ -362,6 +366,10 @@ abstract class ProjectLayoutPanel<T> extends JPanel {
       e.getPresentation().setEnabled(myEntriesChooser.getSelectedElements().size() > 1);
     }
 
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
+    }
   }
 
   private final class SplitAction extends AnAction {
@@ -399,6 +407,11 @@ abstract class ProjectLayoutPanel<T> extends JPanel {
       final List<T> elements = myEntriesChooser.getSelectedElements();
       e.getPresentation().setEnabled(elements.size() == 1 && getContent(elements.get(0)).size() > 1);
     }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
+    }
   }
 
   private final class RenameAction extends AnAction {
@@ -429,6 +442,11 @@ abstract class ProjectLayoutPanel<T> extends JPanel {
     @Override
     public void update(@NotNull final AnActionEvent e) {
       e.getPresentation().setEnabled(myEntriesChooser.getSelectedElements().size() == 1);
+    }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
     }
   }
 

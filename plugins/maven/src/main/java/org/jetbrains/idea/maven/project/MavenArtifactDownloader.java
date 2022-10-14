@@ -16,6 +16,7 @@ import org.jetbrains.idea.maven.server.MavenEmbedderWrapper;
 import org.jetbrains.idea.maven.utils.MavenLog;
 import org.jetbrains.idea.maven.utils.MavenProcessCanceledException;
 import org.jetbrains.idea.maven.utils.MavenProgressIndicator;
+import org.jetbrains.idea.maven.utils.MavenUtil;
 
 import java.io.File;
 import java.util.*;
@@ -84,7 +85,7 @@ public final class MavenArtifactDownloader {
       return download(artifacts, downloadedFiles);
     }
     finally {
-      boolean isAsync = !ApplicationManager.getApplication().isUnitTestMode();
+      boolean isAsync = !MavenUtil.isMavenUnitTestModeEnabled();
 
       Set<File> filesToRefresh = new HashSet<>(); // We have to refresh parents of downloaded files, because some additional files  may have been download.
       for (File file : downloadedFiles) {
@@ -181,14 +182,14 @@ public final class MavenArtifactDownloader {
                   downloadedFiles.add(file);
 
                   switch (eachElement.type) {
-                    case SOURCES:
+                    case SOURCES -> {
                       result.resolvedSources.add(id);
                       result.unresolvedSources.remove(id);
-                      break;
-                    case DOCS:
+                    }
+                    case DOCS -> {
                       result.resolvedDocs.add(id);
                       result.unresolvedDocs.remove(id);
-                      break;
+                    }
                   }
                 }
               }

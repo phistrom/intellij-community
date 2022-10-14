@@ -17,7 +17,7 @@ public interface JBTabsPresentation {
   /**
    * @deprecated You should implement {@link JBTabsBorder} abstract class
    */
-  @Deprecated
+  @Deprecated(forRemoval = true)
   JBTabsPresentation setPaintBorder(int top, int left, int right, int bottom);
   /**
    * @deprecated You should implement {@link JBTabsBorder} abstract class

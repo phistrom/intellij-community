@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.plugins.groovy.annotator.intentions;
 
@@ -122,7 +122,7 @@ public abstract class CreateClassFix {
         PsiElement qualifier = myRefElement.getQualifier();
 
         if (qualifier == null ||
-            qualifier instanceof GrReferenceElement && ((GrReferenceElement)qualifier).resolve() instanceof PsiPackage) {
+            qualifier instanceof GrReferenceElement && ((GrReferenceElement<?>)qualifier).resolve() instanceof PsiPackage) {
           createTopLevelClass(project, groovyFile);
         }
         else {
@@ -184,25 +184,24 @@ public abstract class CreateClassFix {
 
       @Nullable
       private PsiClass createTemplate(JVMElementFactory factory, String name) {
-        switch (getType()) {
-          case ENUM:
-            return factory.createEnum(name);
-          case TRAIT:
-            if (factory instanceof GroovyPsiElementFactory) {
-              return ((GroovyPsiElementFactory)factory).createTrait(name);
+        return switch (getType()) {
+          case ENUM -> factory.createEnum(name);
+          case TRAIT -> {
+            if (factory instanceof GroovyPsiElementFactory groovyFactory) {
+              yield groovyFactory.createTrait(name);
             }
-            else {
-              return null;
+            yield null;
+          }
+          case CLASS -> factory.createClass(name);
+          case INTERFACE -> factory.createInterface(name);
+          case ANNOTATION -> factory.createAnnotationType(name);
+          case RECORD -> {
+            if (factory instanceof GroovyPsiElementFactory groovyFactory) {
+              yield groovyFactory.createRecord(name);
             }
-          case CLASS:
-            return factory.createClass(name);
-          case INTERFACE:
-            return factory.createInterface(name);
-          case ANNOTATION:
-            return factory.createAnnotationType(name);
-          default:
-            return null;
-        }
+            yield null;
+          }
+        };
       }
 
       private void createTopLevelClass(@NotNull Project project, @NotNull GroovyFileBase file) {
@@ -226,7 +225,7 @@ public abstract class CreateClassFix {
       private String getPackage(@NotNull PsiClassOwner file) {
         final PsiElement qualifier = myRefElement.getQualifier();
         if (qualifier instanceof GrReferenceElement) {
-          final PsiElement resolved = ((GrReferenceElement)qualifier).resolve();
+          final PsiElement resolved = ((GrReferenceElement<?>)qualifier).resolve();
           if (resolved instanceof PsiPackage) {
             return ((PsiPackage)resolved).getQualifiedName();
           }
@@ -256,19 +255,13 @@ public abstract class CreateClassFix {
   }
 
   private static String getTemplateName(GrCreateClassKind createClassKind) {
-    switch (createClassKind) {
-      case TRAIT:
-        return GroovyTemplates.GROOVY_TRAIT;
-      case ENUM:
-        return GroovyTemplates.GROOVY_ENUM;
-      case CLASS:
-        return GroovyTemplates.GROOVY_CLASS;
-      case INTERFACE:
-        return GroovyTemplates.GROOVY_INTERFACE;
-      case ANNOTATION:
-        return GroovyTemplates.GROOVY_ANNOTATION;
-      default:
-        return null;
-    }
+    return switch (createClassKind) {
+      case TRAIT -> GroovyTemplates.GROOVY_TRAIT;
+      case ENUM -> GroovyTemplates.GROOVY_ENUM;
+      case CLASS -> GroovyTemplates.GROOVY_CLASS;
+      case INTERFACE -> GroovyTemplates.GROOVY_INTERFACE;
+      case ANNOTATION -> GroovyTemplates.GROOVY_ANNOTATION;
+      case RECORD -> GroovyTemplates.GROOVY_RECORD;
+    };
   }
 }

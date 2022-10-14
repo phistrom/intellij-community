@@ -1,20 +1,19 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.findUsages
 
 import com.intellij.codeInsight.TargetElementUtil
 import com.intellij.testFramework.UsefulTestCase
 import org.jetbrains.kotlin.executeOnPooledThreadInReadAction
+import org.jetbrains.kotlin.findUsages.AbstractFindUsagesTest.Companion.FindUsageTestType
 import org.jetbrains.kotlin.idea.stubs.AbstractMultiModuleTest
 import org.jetbrains.kotlin.idea.test.IDEA_TEST_DATA_DIR
 import org.jetbrains.kotlin.idea.test.allKotlinFiles
 import org.jetbrains.kotlin.psi.KtDeclaration
 import org.jetbrains.kotlin.psi.KtFile
-import org.jetbrains.kotlin.test.InTextDirectivesUtils
+import org.jetbrains.kotlin.idea.test.InTextDirectivesUtils
 
 abstract class AbstractFindUsagesMultiModuleTest : AbstractMultiModuleTest() {
-    protected open val isFirPlugin: Boolean = false
-
     override fun getTestDataDirectory() = IDEA_TEST_DATA_DIR.resolve("multiModuleFindUsages")
 
     protected val mainFile: KtFile
@@ -45,6 +44,15 @@ abstract class AbstractFindUsagesMultiModuleTest : AbstractMultiModuleTest() {
         UsefulTestCase.assertInstanceOf(caretElement!!, caretElementClass)
 
         val options = parser?.parse(mainFileText, project)
-        findUsagesAndCheckResults(mainFileText, prefix, rootPath, caretElement, options, project, alwaysAppendFileName = true, isFirPlugin = isFirPlugin)
+        findUsagesAndCheckResults(
+            mainFileText,
+            prefix,
+            rootPath,
+            caretElement,
+            options,
+            project,
+            alwaysAppendFileName = true,
+            testType = if (isFirPlugin()) FindUsageTestType.FIR else FindUsageTestType.DEFAULT,
+        )
     }
 }

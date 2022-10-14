@@ -1,18 +1,18 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.refactoring.inline
 
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.refactoring.HelpID
-import org.jetbrains.kotlin.idea.KotlinBundle
+import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
+import org.jetbrains.kotlin.idea.util.application.isUnitTestMode
 import org.jetbrains.kotlin.psi.KtElement
 import org.jetbrains.kotlin.psi.KtTypeAlias
 
 class KotlinInlineTypeAliasHandler : KotlinInlineActionHandler() {
-    override val helpId: String? get() = HelpID.INLINE_VARIABLE
+    override val helpId: String get() = HelpID.INLINE_VARIABLE
 
     override val refactoringName: String get() = KotlinBundle.message("title.inline.type.alias")
 
@@ -31,7 +31,7 @@ class KotlinInlineTypeAliasHandler : KotlinInlineActionHandler() {
             editor = editor,
         )
 
-        if (!ApplicationManager.getApplication().isUnitTestMode) {
+        if (!isUnitTestMode()) {
             dialog.show()
         } else {
             try {

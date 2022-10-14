@@ -1,4 +1,4 @@
-// WITH_RUNTIME
+// WITH_STDLIB
 fun test() {
     listOf("A").forEach {
         setOf(1).map { <caret>_ ->
@@ -7,3 +7,4 @@ fun test() {
         }
     }
 }
+// PROBLEM: none

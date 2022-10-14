@@ -1,4 +1,4 @@
-// "Import" "true"
+// "Import extension function 'H.inc'" "true"
 // ERROR: Unresolved reference: ++
 
 package h
@@ -11,3 +11,4 @@ fun f(h: H?) {
     var h1 = h
     h1++
 }
+/* IGNORE_FIR */

@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.wm.impl.welcomeScreen;
 
 import com.intellij.application.Topics;
@@ -15,12 +15,14 @@ import com.intellij.openapi.actionSystem.impl.MenuItemPresentationFactory;
 import com.intellij.openapi.application.ApplicationInfo;
 import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.application.ex.ApplicationInfoEx;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.ui.VerticalFlowLayout;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.IconLoader;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.wm.StartPagePromoter;
 import com.intellij.openapi.wm.impl.ProjectFrameHelper;
 import com.intellij.ui.BalloonLayout;
 import com.intellij.ui.ClickListener;
@@ -53,10 +55,6 @@ import java.awt.event.MouseEvent;
 import java.util.Collections;
 import java.util.Objects;
 
-import static com.intellij.openapi.wm.impl.welcomeScreen.WelcomeScreenFocusManager.installFocusable;
-import static com.intellij.openapi.wm.impl.welcomeScreen.WelcomeScreenUIManager.*;
-import static com.intellij.util.ui.UIUtil.FontSize.SMALL;
-
 public final class WelcomeScreenComponentFactory {
   @NotNull static JComponent createSmallLogo() {
     ApplicationInfoEx appInfo = ApplicationInfoEx.getInstanceEx();
@@ -65,7 +63,7 @@ public final class WelcomeScreenComponentFactory {
 
     String welcomeScreenLogoUrl = appInfo.getApplicationSvgIconUrl();
     if (welcomeScreenLogoUrl != null) {
-      Icon icon = IconLoader.getIcon(welcomeScreenLogoUrl);
+      Icon icon = IconLoader.getIcon(welcomeScreenLogoUrl, WelcomeScreenComponentFactory.class.getClassLoader());
       float scale = 28f / icon.getIconWidth();
       Icon smallLogoIcon = IconUtil.scale(icon, null, scale);
       JLabel logo = new JLabel(smallLogoIcon);
@@ -92,7 +90,7 @@ public final class WelcomeScreenComponentFactory {
     }
 
     JLabel version = new JLabel(appVersion);
-    version.setFont(UIUtil.getLabelFont(SMALL));
+    version.setFont(UIUtil.getLabelFont(UIUtil.FontSize.SMALL));
     version.setForeground(Gray._128);
     NonOpaquePanel textPanel = new NonOpaquePanel();
     textPanel.setLayout(new VerticalFlowLayout(0, 0));
@@ -124,7 +122,7 @@ public final class WelcomeScreenComponentFactory {
 
     String welcomeScreenLogoUrl = appInfo.getWelcomeScreenLogoUrl();
     if (welcomeScreenLogoUrl != null) {
-      JLabel logo = new JLabel(IconLoader.getIcon(welcomeScreenLogoUrl));
+      JLabel logo = new JLabel(IconLoader.getIcon(welcomeScreenLogoUrl, WelcomeScreenComponentFactory.class.getClassLoader()));
       logo.setBorder(JBUI.Borders.empty(30, 0, 10, 0));
       logo.setHorizontalAlignment(SwingConstants.CENTER);
       panel.add(logo, BorderLayout.NORTH);
@@ -135,7 +133,7 @@ public final class WelcomeScreenComponentFactory {
                              : ApplicationNamesInfo.getInstance().getFullProductName();
     JLabel appName = new JLabel(applicationName);
     appName.setForeground(JBColor.foreground());
-    appName.setFont(getProductFont(36).deriveFont(Font.PLAIN));
+    appName.setFont(WelcomeScreenUIManager.getProductFont(36).deriveFont(Font.PLAIN));
     appName.setHorizontalAlignment(SwingConstants.CENTER);
     String appVersion = IdeBundle.message("welcome.screen.logo.version.label", appInfo.getFullVersion());
 
@@ -144,7 +142,7 @@ public final class WelcomeScreenComponentFactory {
     }
 
     JLabel version = new JLabel(appVersion);
-    version.setFont(getProductFont(16));
+    version.setFont(WelcomeScreenUIManager.getProductFont(16));
     version.setHorizontalAlignment(SwingConstants.CENTER);
     version.setForeground(Gray._128);
 
@@ -163,8 +161,8 @@ public final class WelcomeScreenComponentFactory {
   static JComponent createRecentProjects(Disposable parentDisposable) {
     JPanel panel = new JPanel(new BorderLayout());
     panel.add(new NewRecentProjectPanel(parentDisposable), BorderLayout.CENTER);
-    panel.setBackground(getProjectsBackground());
-    panel.setBorder(new CustomLineBorder(getSeparatorColor(), JBUI.insetsRight(1)));
+    panel.setBackground(WelcomeScreenUIManager.getProjectsBackground());
+    panel.setBorder(new CustomLineBorder(WelcomeScreenUIManager.getSeparatorColor(), JBUI.insetsRight(1)));
     return panel;
   }
 
@@ -256,7 +254,7 @@ public final class WelcomeScreenComponentFactory {
                                      @Nullable Component focusOnLeft) {
     AnAction action = createShowPopupAction(groupId);
     JComponent panel = wrapActionLink(new ActionLink(text, icon, action));
-    installFocusable(parentContainer, panel, action, KeyEvent.VK_DOWN, KeyEvent.VK_UP, focusOnLeft);
+    WelcomeScreenFocusManager.installFocusable(parentContainer, panel, action, KeyEvent.VK_DOWN, KeyEvent.VK_UP, focusOnLeft);
     return panel;
   }
 
@@ -272,7 +270,7 @@ public final class WelcomeScreenComponentFactory {
     // Don't allow focus, as the containing panel is going to be focusable.
     link.setFocusable(false);
     link.setPaintUnderline(false);
-    link.setNormalColor(getLinkNormalColor());
+    link.setNormalColor(WelcomeScreenUIManager.getLinkNormalColor());
     JActionLinkPanel panel = new JActionLinkPanel(link);
     panel.setBorder(JBUI.Borders.empty(4, 6));
     return panel;
@@ -288,22 +286,25 @@ public final class WelcomeScreenComponentFactory {
 
   @NotNull
   public static Component createEventLink(@NotNull @Nls String linkText, @NotNull Disposable parentDisposable) {
-    ActionLink actionLink = new ActionLink(linkText, AllIcons.Ide.Notification.NoEvents, new AnAction() {
+    ActionLink actionLink = new ActionLink(linkText, AllIcons.Ide.Notification.NoEvents, new DumbAwareAction() {
       @Override
       public void actionPerformed(@NotNull AnActionEvent e) {
         BalloonLayout balloonLayout = WelcomeFrame.getInstance().getBalloonLayout();
         if (balloonLayout instanceof WelcomeBalloonLayoutImpl) {
-          WelcomeBalloonLayoutImpl welcomeBalloonLayout = (WelcomeBalloonLayoutImpl)balloonLayout;
-          if (welcomeBalloonLayout.getLocationComponent() == null && e.getInputEvent() != null) {
-            welcomeBalloonLayout.setLocationComponent(e.getInputEvent().getComponent());
-          }
-          welcomeBalloonLayout.showPopup();
+          ((WelcomeBalloonLayoutImpl)balloonLayout).showPopup();
         }
       }
     });
     final JComponent panel = wrapActionLink(actionLink);
     panel.setVisible(false);
     Topics.subscribe(WelcomeBalloonLayoutImpl.BALLOON_NOTIFICATION_TOPIC, parentDisposable, types -> {
+      BalloonLayout balloonLayout = WelcomeFrame.getInstance().getBalloonLayout();
+      if (balloonLayout instanceof WelcomeBalloonLayoutImpl) {
+        WelcomeBalloonLayoutImpl welcomeBalloonLayout = (WelcomeBalloonLayoutImpl)balloonLayout;
+        if (welcomeBalloonLayout.getLocationComponent() == null) {
+          welcomeBalloonLayout.setLocationComponent(actionLink);
+        }
+      }
       if (!types.isEmpty()) {
         NotificationType type = Collections.max(types);
         actionLink.setIcon(type == NotificationType.IDE_UPDATE
@@ -321,10 +322,33 @@ public final class WelcomeScreenComponentFactory {
     if (Boolean.getBoolean("ide.ui.version.in.title")) {
       title += ' ' + ApplicationInfo.getInstance().getFullVersion();
     }
-    String suffix = ProjectFrameHelper.getSuperUserSuffix();
+    String suffix = ProjectFrameHelper.Companion.getSuperUserSuffix();
     if (suffix != null) {
       title += " (" + suffix + ")";
     }
     return title;
+  }
+
+  public static @NotNull JPanel createNotificationPanel(@NotNull Disposable parentDisposable) {
+    JPanel panel = new NonOpaquePanel(new FlowLayout(FlowLayout.RIGHT));
+    panel.setBorder(JBUI.Borders.empty(10, 0, 0, 3));
+    panel.add(createErrorsLink(parentDisposable));
+    panel.add(createEventLink("", parentDisposable));
+    return panel;
+  }
+
+  @Nullable
+  static JPanel getSinglePromotion(boolean isEmptyState) {
+    StartPagePromoter[] extensions = StartPagePromoter.START_PAGE_PROMOTER_EP.getExtensions();
+    JPanel result = null;
+    for (StartPagePromoter promoter : extensions) {
+      JPanel content = promoter.getPromotion(isEmptyState);
+      if (content == null) continue;
+      if (result != null) {
+        Logger.getInstance(WelcomeScreenComponentFactory.class).error("Several welcome screen promotions are found.");
+      }
+      result = content;
+    }
+    return result;
   }
 }

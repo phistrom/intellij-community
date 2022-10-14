@@ -20,9 +20,7 @@ import com.intellij.psi.impl.source.resolve.reference.impl.PsiMultiReference;
 import com.intellij.psi.meta.PsiMetaData;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.util.containers.ContainerUtil;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
@@ -31,8 +29,7 @@ import static com.intellij.patterns.StandardPatterns.not;
 /**
  * @deprecated see {@link CompletionContributor}
  */
-@ApiStatus.ScheduledForRemoval(inVersion = "2021.1")
-@Deprecated
+@Deprecated(forRemoval = true)
 public class CompletionData {
   private static final Logger LOG = Logger.getInstance(CompletionData.class);
   public static final ObjectPattern.Capture<Character> NOT_JAVA_ID = not(CharPattern.javaIdentifierPartCharacter());
@@ -53,8 +50,7 @@ public class CompletionData {
   /**
    * @deprecated see {@link CompletionContributor}
    */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @Deprecated(forRemoval = true)
   protected void registerVariant(CompletionVariant variant){
     myCompletionVariants.add(variant);
   }
@@ -124,18 +120,9 @@ public class CompletionData {
   };
 
   /**
-   * @deprecated {@link CompletionUtil#findReferencePrefix} instead
-   */
-  @Deprecated
-  @Nullable
-  public static String getReferencePrefix(@NotNull PsiElement insertedElement, int offsetInFile) {
-    return CompletionUtil.findReferencePrefix(insertedElement, offsetInFile);
-  }
-
-  /**
    * @deprecated Use {@link CompletionUtil} methods instead
    */
-  @Deprecated
+  @Deprecated(forRemoval = true)
   public static String findPrefixStatic(final PsiElement insertedElement, final int offsetInFile, ElementPattern<Character> prefixStartTrim) {
     if(insertedElement == null) return "";
 
@@ -143,7 +130,7 @@ public class CompletionData {
     assert document != null;
     LOG.assertTrue(!PsiDocumentManager.getInstance(insertedElement.getProject()).isUncommited(document), "Uncommitted");
 
-    final String prefix = getReferencePrefix(insertedElement, offsetInFile);
+    final String prefix = CompletionUtil.findReferencePrefix(insertedElement, offsetInFile);
     if (prefix != null) return prefix;
 
     if (insertedElement.getTextRange().equals(insertedElement.getContainingFile().getTextRange()) || insertedElement instanceof PsiComment) {
@@ -156,7 +143,7 @@ public class CompletionData {
   /**
    * @deprecated Use {@link CompletionUtil} methods instead
    */
-  @Deprecated
+  @Deprecated(forRemoval = true)
   public static String findPrefixStatic(final PsiElement insertedElement, final int offsetInFile) {
     return findPrefixStatic(insertedElement, offsetInFile, NOT_JAVA_ID);
   }
@@ -164,8 +151,7 @@ public class CompletionData {
   /**
    * @deprecated Use {@link CompletionUtil} methods instead
    */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @Deprecated(forRemoval = true)
   public static String findPrefixDefault(final PsiElement insertedElement, final int offset, @NotNull final ElementPattern trimStart) {
     String substr = insertedElement.getText().substring(0, offset - insertedElement.getTextRange().getStartOffset());
     if (substr.length() == 0 || Character.isWhitespace(substr.charAt(substr.length() - 1))) return "";
@@ -258,7 +244,7 @@ public class CompletionData {
         }
         else {
           if (completion instanceof LookupItem) {
-            final Object o = ((LookupItem)completion).getObject();
+            final Object o = ((LookupItem<?>)completion).getObject();
             if (o instanceof PsiElement) {
               if (!filter.isClassAcceptable(o.getClass()) || !filter.isAcceptable(o, position)) continue;
             }

@@ -31,8 +31,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
-/**
- */
 public class Options implements Cloneable {
   public LanguageOptions getOptions(String fileTypeName) {
     LanguageOptions res = options.get(fileTypeName);
@@ -126,10 +124,13 @@ public class Options implements Cloneable {
           String name = option.getAttributeValue("name");
           String val = option.getAttributeValue("value");
           if ("body".equals(name)) {
-            //todo opts.setNotice(val);
+            opts.setNotice(val);
           }
           else if ("location".equals(name)) {
-            opts.setFileLocation(Integer.parseInt(val));
+            if(val != null){
+              opts.setFileLocation(Integer.parseInt(val));
+            }
+
           }
         }
 

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.groovy.intentions.style.parameterToEntry;
 
 import com.intellij.openapi.application.ApplicationManager;
@@ -85,7 +85,7 @@ public class ConvertParameterToMapEntryIntention extends Intention {
     final GrParameter firstParam = getFirstParameter(owner);
 
     switch (analyzeForNamedArguments(owner, occurrences)) {
-      case ERROR: {
+      case ERROR -> {
         final GrNamedElement namedElement = getReferencedElement(owner);
         LOG.assertTrue(namedElement != null);
         final String msg;
@@ -98,16 +98,15 @@ public class ConvertParameterToMapEntryIntention extends Intention {
         showErrorMessage(msg, project);
         return;
       }
-      case MUST_BE_MAP: {
+      case MUST_BE_MAP -> {
         if (firstParam == getAppropriateParameter(element)) {
           final String msg = GroovyBundle.message("convert.cannot.itself");
           showErrorMessage(msg, project);
           return;
         }
         performRefactoring(element, owner, occurrences, false, null, false);
-        break;
       }
-      case IS_NOT_MAP: {
+      case IS_NOT_MAP -> {
         if (!ApplicationManager.getApplication().isUnitTestMode()) {
           final @NlsSafe String[] possibleNames = generateValidNames(MY_POSSIBLE_NAMES, firstParam);
 
@@ -134,7 +133,6 @@ public class ConvertParameterToMapEntryIntention extends Intention {
           performRefactoring(element, owner, occurrences, true,
                              (new GroovyValidationUtil.ParameterNameSuggester("attrs", firstParam)).generateName(), true);
         }
-        break;
       }
     }
   }
@@ -338,7 +336,6 @@ public class ConvertParameterToMapEntryIntention extends Intention {
   /**
    * @param owner       Method or closure
    * @param occurrences references to owner
-   * @return true if there we use owner's first parameter as map, false if we need to add ne one as fist map
    */
   private static FIRST_PARAMETER_KIND analyzeForNamedArguments(final GrParameterListOwner owner, final Collection<PsiElement> occurrences) {
     boolean thereAreNamedArguments = false;

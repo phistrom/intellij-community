@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi.impl.search;
 
 import com.intellij.JavaTestUtil;
@@ -42,11 +42,12 @@ public class FindFunctionalInterfaceTest extends LightJavaCodeInsightFixtureTest
   }
 
   public void testVarargPosition() {
-    myFixture.addClass("\n" +
-                       "class A {  \n" +
-                       "  <T> void foo(T... r) {}\n" +
-                       "  void bar(J i){foo(i, i, () -> {});}\n" +
-                       "}");
+    myFixture.addClass("""
+
+                         class A { \s
+                           <T> void foo(T... r) {}
+                           void bar(J i){foo(i, i, () -> {});}
+                         }""");
 
     doTestOneExpression();
   }
@@ -109,6 +110,11 @@ public class FindFunctionalInterfaceTest extends LightJavaCodeInsightFixtureTest
   public void testStreamOfLikeApiWithLocalVar() {
     configure();
     assertSize(1, FunctionalExpressionSearch.search(findClass("I")).findAll());
+  }
+
+  public void testDefaultInHierarchy() {
+    configure();
+    assertEmpty(FunctionalExpressionSearch.search(findClass("I").getMethods()[0]).findAll());
   }
 
   public void testStreamOfLikeApiWithField() {
@@ -231,14 +237,15 @@ public class FindFunctionalInterfaceTest extends LightJavaCodeInsightFixtureTest
   public void testConstructorReferences() {
     configure();
 
-    myFixture.addClass("class Bar extends Foo {\n" +
-                       "  public Bar() { super(() -> 1); }\n" +
-                       "\n" +
-                       "  {\n" +
-                       "    new Foo(() -> 2) { };\n" +
-                       "    new Foo(() -> 3);\n" +
-                       "  }\n" +
-                       "}");
+    myFixture.addClass("""
+                         class Bar extends Foo {
+                           public Bar() { super(() -> 1); }
+
+                           {
+                             new Foo(() -> 2) { };
+                             new Foo(() -> 3);
+                           }
+                         }""");
 
     assertSize(5, FunctionalExpressionSearch.search(findClassAtCaret()).findAll());
   }

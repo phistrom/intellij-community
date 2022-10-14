@@ -2,8 +2,9 @@
 // OPTIONS: usages
 
 class A(val n: Int) {
-    operator fun <caret>plus(m: Int): A = A(n + m)
-    operator fun plus(a: A): A = this + a.n
+    infix operator fun <caret>plus(m: Int): A = A(n + m)
+    infix operator fun plus(a: A): A = this + a.n
+    operator fun unaryPlus(): Unit = TODO("Not yet implemented")
 }
 
 fun test(array: Array<A>) {
@@ -21,4 +22,5 @@ fun test(array: Array<A>) {
     a1 + 1
 }
 
-// DISABLE-ERRORS
+// FIR_COMPARISON
+// IGNORE_FIR_LOG

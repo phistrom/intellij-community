@@ -81,15 +81,7 @@ public interface FileIndex {
   boolean isInContent(@NotNull VirtualFile fileOrDir);
 
   /**
-   * @deprecated name of this method is unclear, use {@link #isInSourceContent(VirtualFile)} instead and add {@code !file.isDirectory()} check
-   * if you want to accept files only.
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
-  boolean isContentSourceFile(@NotNull VirtualFile file);
-
-  /**
-   * Returns {@code true} if {@code fileOrDir} is a file or directory located under a sources, tests or resources root and not excluded or ignored.
+   * Returns {@code true} if {@code fileOrDir} is a file or directory located under a source root of some module and not excluded or ignored.
    */
   boolean isInSourceContent(@NotNull VirtualFile fileOrDir);
 

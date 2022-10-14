@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.intention;
 
 import com.intellij.codeInsight.AnnotationTargetUtil;
@@ -9,6 +9,7 @@ import com.intellij.codeInsight.NullableNotNullManager;
 import com.intellij.codeInsight.daemon.impl.analysis.AnnotationsHighlightUtil;
 import com.intellij.codeInsight.intention.impl.BaseIntentionAction;
 import com.intellij.codeInspection.LocalQuickFixOnPsiElement;
+import com.intellij.codeInspection.OnTheFlyLocalFix;
 import com.intellij.codeInspection.util.IntentionName;
 import com.intellij.java.analysis.JavaAnalysisBundle;
 import com.intellij.openapi.command.WriteCommandAction;
@@ -19,6 +20,7 @@ import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.impl.light.LightElement;
 import com.intellij.psi.util.JavaElementKind;
+import com.intellij.psi.util.PsiFormatUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.ArrayUtil;
@@ -28,7 +30,6 @@ import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
 import com.siyeh.ig.psiutils.CommentTracker;
 import one.util.streamex.StreamEx;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -38,13 +39,16 @@ import java.util.List;
 import static com.intellij.codeInsight.AnnotationUtil.CHECK_EXTERNAL;
 import static com.intellij.codeInsight.AnnotationUtil.CHECK_TYPE;
 
-public class AddAnnotationPsiFix extends LocalQuickFixOnPsiElement {
+public class AddAnnotationPsiFix extends LocalQuickFixOnPsiElement implements OnTheFlyLocalFix {
   protected final String myAnnotation;
   final String[] myAnnotationsToRemove;
   @SafeFieldForPreview
   final PsiNameValuePair[] myPairs; // not used when registering local quick fix
   protected final @IntentionName String myText;
   private final AnnotationPlace myAnnotationPlace;
+  private final boolean myExistsTypeUseTarget;
+  private final boolean myHasApplicableAnnotations;
+  private final boolean myAvailableInBatchMode;
 
   public AddAnnotationPsiFix(@NotNull String fqn,
                              @NotNull PsiModifierListOwner modifierListOwner,
@@ -72,12 +76,22 @@ public class AddAnnotationPsiFix extends LocalQuickFixOnPsiElement {
     myAnnotationsToRemove = annotationsToRemove;
     myText = calcText(modifierListOwner, myAnnotation);
     myAnnotationPlace = place;
+    myAvailableInBatchMode = place == AnnotationPlace.IN_CODE || 
+                             place == AnnotationPlace.EXTERNAL && ExternalAnnotationsManager.getInstance(modifierListOwner.getProject()).hasConfiguredAnnotationRoot(modifierListOwner);
+
+    PsiClass annotationClass = JavaPsiFacade.getInstance(modifierListOwner.getProject())
+      .findClass(myAnnotation, modifierListOwner.getResolveScope());
+    myExistsTypeUseTarget = annotationClass != null &&
+                           AnnotationTargetUtil.findAnnotationTarget(annotationClass, PsiAnnotation.TargetType.TYPE_USE) != null;
+    PsiAnnotationOwner target = AnnotationTargetUtil.getTarget(modifierListOwner, myExistsTypeUseTarget);
+    myHasApplicableAnnotations =
+      target != null && ContainerUtil.exists(target.getApplicableAnnotations(), anno -> anno.hasQualifiedName(myAnnotation));
   }
 
   public static @IntentionName String calcText(PsiModifierListOwner modifierListOwner, @Nullable String annotation) {
     final String shortName = annotation == null ? null : annotation.substring(annotation.lastIndexOf('.') + 1);
     if (modifierListOwner instanceof PsiNamedElement) {
-      final String name = ((PsiNamedElement)modifierListOwner).getName();
+      final String name = PsiFormatUtil.formatSimple((PsiNamedElement)modifierListOwner);
       if (name != null) {
         JavaElementKind type = JavaElementKind.fromElement(modifierListOwner).lessDescriptive();
         if (shortName == null) {
@@ -167,36 +181,39 @@ public class AddAnnotationPsiFix extends LocalQuickFixOnPsiElement {
   }
 
   @Override
+  public boolean availableInBatchMode() {
+    return myAvailableInBatchMode;
+  }
+  
+  @Override
   public void invoke(@NotNull Project project,
                      @NotNull PsiFile file,
                      @NotNull PsiElement startElement,
                      @NotNull PsiElement endElement) {
-    final PsiModifierListOwner myModifierListOwner = (PsiModifierListOwner)startElement;
-
-    PsiAnnotationOwner target = AnnotationTargetUtil.getTarget(myModifierListOwner, myAnnotation);
-    if (target == null || ContainerUtil.exists(target.getApplicableAnnotations(), anno -> anno.hasQualifiedName(myAnnotation))) {
+    final PsiModifierListOwner modifierListOwner = (PsiModifierListOwner)startElement;
+    final PsiAnnotationOwner target = AnnotationTargetUtil.getTarget(modifierListOwner, myExistsTypeUseTarget);
+    if (target == null || myHasApplicableAnnotations) {
       return;
     }
     final ExternalAnnotationsManager annotationsManager = ExternalAnnotationsManager.getInstance(project);
-    AnnotationPlace place = myAnnotationPlace == AnnotationPlace.NEED_ASK_USER ?
-                                                       annotationsManager.chooseAnnotationsPlace(myModifierListOwner) : myAnnotationPlace;
+    final AnnotationPlace place = myAnnotationPlace == AnnotationPlace.NEED_ASK_USER ?
+                                  annotationsManager.chooseAnnotationsPlace(modifierListOwner) : myAnnotationPlace;
     switch (place) {
-      case NOWHERE:
-        return;
-      case EXTERNAL:
+      case NOWHERE -> { }
+      case EXTERNAL -> {
         for (String fqn : myAnnotationsToRemove) {
-          annotationsManager.deannotate(myModifierListOwner, fqn);
+          annotationsManager.deannotate(modifierListOwner, fqn);
         }
         try {
-          annotationsManager.annotateExternally(myModifierListOwner, myAnnotation, file, myPairs);
+          annotationsManager.annotateExternally(modifierListOwner, myAnnotation, file, myPairs);
         }
         catch (ExternalAnnotationsManager.CanceledConfigurationException ignored) {
         }
-        break;
-      case IN_CODE:
-        final PsiFile containingFile = myModifierListOwner.getContainingFile();
+      }
+      case IN_CODE -> {
+        final PsiFile containingFile = modifierListOwner.getContainingFile();
         Runnable command = () -> {
-          removePhysicalAnnotations(myModifierListOwner, myAnnotationsToRemove);
+          removePhysicalAnnotations(modifierListOwner, myAnnotationsToRemove);
 
           PsiAnnotation inserted = addPhysicalAnnotationTo(myAnnotation, myPairs, target);
           JavaCodeStyleManager.getInstance(project).shortenClassReferences(inserted);
@@ -207,12 +224,12 @@ public class AddAnnotationPsiFix extends LocalQuickFixOnPsiElement {
         }
         else {
           WriteCommandAction.runWriteCommandAction(project, null, null, command, containingFile);
-        } 
+        }
 
         if (containingFile != file) {
           UndoUtil.markPsiFileForUndo(file);
         }
-        break;
+      }
     }
   }
 
@@ -240,26 +257,17 @@ public class AddAnnotationPsiFix extends LocalQuickFixOnPsiElement {
   }
 
   /**
-   * @deprecated use {@link #addPhysicalAnnotationIfAbsent(String, PsiNameValuePair[], PsiAnnotationOwner)}
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2020.3")
-  public static PsiAnnotation addPhysicalAnnotation(String fqn, PsiNameValuePair[] pairs, PsiModifierList modifierList) {
-    return addPhysicalAnnotationTo(fqn, pairs, modifierList);
-  }
-
-  /**
    * Add new physical (non-external) annotation to the annotation owner. Annotation will not be added if it already exists
    * on the same annotation owner (externally or explicitly) or if there's a {@link PsiTypeElement} that follows the owner,
-   * and its innermost component type has the annotation with the same fully-qualified name. 
+   * and its innermost component type has the annotation with the same fully-qualified name.
    * E.g. the method like {@code java.lang.@Foo String[] getStringArray()} will not be annotated with another {@code @Foo}
-   * annotation. 
+   * annotation.
    *
    * @param fqn fully-qualified annotation name
-   * @param pairs name/value pairs for the new annotation (not changed by this method, 
+   * @param pairs name/value pairs for the new annotation (not changed by this method,
    *              could be result of {@link PsiAnnotationParameterList#getAttributes()} of existing annotation).
    * @param owner an owner object to add the annotation to ({@link PsiModifierList} or {@link PsiType}).
-   * @return added physical annotation; null if annotation already exists (in this case, no changes are performed) 
+   * @return added physical annotation; null if annotation already exists (in this case, no changes are performed)
    */
   @Nullable
   public static PsiAnnotation addPhysicalAnnotationIfAbsent(@NotNull String fqn,
@@ -287,7 +295,9 @@ public class AddAnnotationPsiFix extends LocalQuickFixOnPsiElement {
   }
 
   public static PsiAnnotation addPhysicalAnnotationTo(String fqn, PsiNameValuePair[] pairs, PsiAnnotationOwner owner) {
-    owner = expandParameterIfNecessary(owner);
+    if (owner instanceof PsiModifierList) {
+      owner = expandParameterIfNecessary((PsiModifierList)owner);
+    }
     PsiAnnotation inserted;
     try {
       inserted = owner.addAnnotation(fqn);
@@ -306,31 +316,29 @@ public class AddAnnotationPsiFix extends LocalQuickFixOnPsiElement {
     }
     return inserted;
   }
-
-  private static PsiAnnotationOwner expandParameterIfNecessary(PsiAnnotationOwner owner) {
-    if (owner instanceof PsiModifierList) {
-      PsiParameter parameter = ObjectUtils.tryCast(((PsiModifierList)owner).getParent(), PsiParameter.class);
-      if (parameter != null && parameter.getTypeElement() == null) {
-        PsiParameterList list = ObjectUtils.tryCast(parameter.getParent(), PsiParameterList.class);
-        if (list != null && list.getParent() instanceof PsiLambdaExpression) {
-          PsiParameter[] parameters = list.getParameters();
-          int index = ArrayUtil.indexOf(parameters, parameter);
-          PsiParameterList newList;
-          if (PsiUtil.isLanguageLevel11OrHigher(list)) {
-            String newListText = StreamEx.of(parameters).map(p -> PsiKeyword.VAR + " " + p.getName()).joining(",", "(", ")");
-            newList = ((PsiLambdaExpression)JavaPsiFacade.getElementFactory(list.getProject())
-              .createExpressionFromText(newListText+" -> {}", null)).getParameterList();
-            newList = (PsiParameterList)new CommentTracker().replaceAndRestoreComments(list, newList);
-          } else {
-            newList = LambdaUtil.specifyLambdaParameterTypes((PsiLambdaExpression)list.getParent());
-          }
-          if (newList != null) {
-            list = newList;
-            parameter = list.getParameter(index);
-            LOG.assertTrue(parameter != null);
-            owner = parameter.getModifierList();
-            LOG.assertTrue(owner != null);
-          }
+  @NotNull
+  public static PsiModifierList expandParameterIfNecessary(PsiModifierList owner) {
+    PsiParameter parameter = ObjectUtils.tryCast(owner.getParent(), PsiParameter.class);
+    if (parameter != null && parameter.getTypeElement() == null) {
+      PsiParameterList list = ObjectUtils.tryCast(parameter.getParent(), PsiParameterList.class);
+      if (list != null && list.getParent() instanceof PsiLambdaExpression) {
+        PsiParameter[] parameters = list.getParameters();
+        int index = ArrayUtil.indexOf(parameters, parameter);
+        PsiParameterList newList;
+        if (PsiUtil.isLanguageLevel11OrHigher(list)) {
+          String newListText = StreamEx.of(parameters).map(p -> PsiKeyword.VAR + " " + p.getName()).joining(",", "(", ")");
+          newList = ((PsiLambdaExpression)JavaPsiFacade.getElementFactory(list.getProject())
+            .createExpressionFromText(newListText+" -> {}", null)).getParameterList();
+          newList = (PsiParameterList)new CommentTracker().replaceAndRestoreComments(list, newList);
+        } else {
+          newList = LambdaUtil.specifyLambdaParameterTypes((PsiLambdaExpression)list.getParent());
+        }
+        if (newList != null) {
+          list = newList;
+          parameter = list.getParameter(index);
+          LOG.assertTrue(parameter != null);
+          owner = parameter.getModifierList();
+          LOG.assertTrue(owner != null);
         }
       }
     }

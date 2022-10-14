@@ -1,15 +1,14 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.plugins.newui;
 
-import com.intellij.core.CoreBundle;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.plugins.*;
 import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.application.ex.ApplicationInfoEx;
 import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.ui.MessageDialogBuilder;
-import com.intellij.openapi.util.registry.Registry;
 import com.intellij.util.Producer;
 import com.intellij.xml.util.XmlStringUtil;
 import org.jetbrains.annotations.Nls;
@@ -21,7 +20,6 @@ import java.util.*;
 import java.util.function.Function;
 
 import static com.intellij.openapi.util.text.StringUtil.join;
-import static com.intellij.openapi.util.text.StringUtil.split;
 import static com.intellij.util.containers.ContainerUtil.*;
 
 abstract class SelectionBasedPluginModelAction<C extends JComponent, D extends IdeaPluginDescriptor> extends DumbAwareAction {
@@ -75,7 +73,7 @@ abstract class SelectionBasedPluginModelAction<C extends JComponent, D extends I
                         boolean showShortcut,
                         @NotNull List<? extends C> selection,
                         @NotNull Function<? super C, ? extends IdeaPluginDescriptor> pluginDescriptor) {
-      super(action.toString(),
+      super(action.getPresentableText(),
             pluginModel,
             showShortcut,
             selection,
@@ -96,13 +94,8 @@ abstract class SelectionBasedPluginModelAction<C extends JComponent, D extends I
 
       boolean disabled = pluginIds.isEmpty() ||
                          !all(states, myAction::isApplicable) ||
-                         (myAction == PluginEnableDisableAction.DISABLE_GLOBALLY ||
-                          myAction == PluginEnableDisableAction.DISABLE_FOR_PROJECT) &&
-                         exists(pluginIds, myPluginModel::isRequiredPluginForProject) ||
-                         myAction.isPerProject() && (e.getProject() == null ||
-                                                     !PluginEnabler.isPerProjectEnabled() ||
-                                                     exists(pluginIds, EnableDisableAction::isPluginExcluded) ||
-                                                     exists(descriptors, myPluginModel::requiresRestart));
+                         myAction == PluginEnableDisableAction.DISABLE_GLOBALLY &&
+                         exists(pluginIds, myPluginModel::isRequiredPluginForProject);
 
       boolean enabled = !disabled;
       e.getPresentation().setEnabledAndVisible(isForceEnableAll || enabled);
@@ -114,14 +107,14 @@ abstract class SelectionBasedPluginModelAction<C extends JComponent, D extends I
     }
 
     @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.BGT;
+    }
+
+    @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
       myPluginModel.setEnabledState(getAllDescriptors(),
                                     myAction);
-    }
-
-    private static boolean isPluginExcluded(@NotNull PluginId pluginId) {
-      return split(Registry.stringValue("ide.plugins.per.project.exclusion.list"), ",")
-        .contains(pluginId.getIdString());
     }
   }
 
@@ -143,7 +136,7 @@ abstract class SelectionBasedPluginModelAction<C extends JComponent, D extends I
                     @NotNull JComponent uiParent,
                     @NotNull List<? extends C> selection,
                     @NotNull Function<? super C, ? extends IdeaPluginDescriptor> pluginDescriptor) {
-      super(CoreBundle.message("plugins.configurable.uninstall"),
+      super(IdeBundle.message("plugins.configurable.uninstall"),
             pluginModel,
             showShortcut,
             selection,
@@ -167,15 +160,22 @@ abstract class SelectionBasedPluginModelAction<C extends JComponent, D extends I
     }
 
     @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.BGT;
+    }
+
+    @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
       Map<C, IdeaPluginDescriptorImpl> selection = getSelection();
       if (!askToUninstall(getUninstallAllMessage(selection.values()), myUiParent)) {
         return;
       }
 
+      ApplicationInfoEx applicationInfo = ApplicationInfoEx.getInstanceEx();
       for (Map.Entry<C, IdeaPluginDescriptorImpl> entry : selection.entrySet()) {
         IdeaPluginDescriptorImpl descriptor = entry.getValue();
-        List<IdeaPluginDescriptorImpl> dependents = myPluginModel.getDependents(descriptor);
+        List<IdeaPluginDescriptorImpl> dependents = MyPluginModel.getDependents(descriptor,
+                                                                                applicationInfo, PluginManagerCore.buildPluginIdMap());
 
         if (dependents.isEmpty() ||
             askToUninstall(getUninstallDependentsMessage(descriptor, dependents), entry.getKey())) {

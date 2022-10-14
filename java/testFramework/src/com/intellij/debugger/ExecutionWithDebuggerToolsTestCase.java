@@ -78,17 +78,15 @@ public abstract class ExecutionWithDebuggerToolsTestCase extends ExecutionTestCa
     int depth = 0;
     while (startPos < input.length()) {
       switch (input.charAt(startPos)) {
-        case '(':
-          depth++;
-          break;
-        case ')':
+        case '(' -> depth++;
+        case ')' -> {
           if (depth == 1) {
             return startPos;
           }
           else {
             depth--;
           }
-          break;
+        }
       }
       startPos++;
     }
@@ -355,19 +353,19 @@ public abstract class ExecutionWithDebuggerToolsTestCase extends ExecutionTestCa
 
             String emulated = readValue(comment, "Emulated");
             if (emulated != null) {
-              ((JavaMethodBreakpointProperties)breakpoint.getXBreakpoint().getProperties()).EMULATED = Boolean.valueOf(emulated);
+              ((JavaMethodBreakpointProperties)breakpoint.getXBreakpoint().getProperties()).EMULATED = Boolean.parseBoolean(emulated);
               println("Emulated = " + emulated, ProcessOutputTypes.SYSTEM);
             }
 
             String entry = readValue(comment, "OnEntry");
             if (entry != null) {
-              ((JavaMethodBreakpointProperties)breakpoint.getXBreakpoint().getProperties()).WATCH_ENTRY = Boolean.valueOf(entry);
+              ((JavaMethodBreakpointProperties)breakpoint.getXBreakpoint().getProperties()).WATCH_ENTRY = Boolean.parseBoolean(entry);
               println("On Entry = " + entry, ProcessOutputTypes.SYSTEM);
             }
 
             String exit = readValue(comment, "OnExit");
             if (exit != null) {
-              ((JavaMethodBreakpointProperties)breakpoint.getXBreakpoint().getProperties()).WATCH_EXIT = Boolean.valueOf(exit);
+              ((JavaMethodBreakpointProperties)breakpoint.getXBreakpoint().getProperties()).WATCH_EXIT = Boolean.parseBoolean(exit);
               println("On Exit = " + exit, ProcessOutputTypes.SYSTEM);
             }
           }

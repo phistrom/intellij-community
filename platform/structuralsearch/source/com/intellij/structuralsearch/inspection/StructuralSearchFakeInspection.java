@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.structuralsearch.inspection;
 
 import com.intellij.codeInsight.daemon.HighlightDisplayKey;
@@ -68,7 +68,7 @@ public class StructuralSearchFakeInspection extends LocalInspectionTool {
   @NotNull
   @Override
   public String getShortName() {
-    return myMainConfiguration.getUuid().toString();
+    return myMainConfiguration.getUuid();
   }
 
   @Override
@@ -125,7 +125,12 @@ public class StructuralSearchFakeInspection extends LocalInspectionTool {
     final JButton button = new JButton(SSRBundle.message("edit.metadata.button"));
     button.addActionListener(__ -> performEditMetaData(button));
 
-    final JList<Configuration> list = new JBList<>(model);
+    final JList<Configuration> list = new JBList<>(model) {
+      @Override
+      protected String itemToText(int index, Configuration value) {
+        return ConfigurationUtil.toXml(value);
+      }
+    };
     list.setCellRenderer(new ConfigurationCellRenderer());
     final JPanel listPanel = ToolbarDecorator.createDecorator(list)
       .setAddAction(b -> performAdd(list, b))
@@ -209,7 +214,6 @@ public class StructuralSearchFakeInspection extends LocalInspectionTool {
   private void performAdd(@NotNull JList<Configuration> list, @NotNull AnActionButton b) {
     final AnAction[] children = new AnAction[]{new AddTemplateAction(list, false), new AddTemplateAction(list, true)};
     final RelativePoint point = b.getPreferredPopupPoint();
-    if (point == null) return;
     JBPopupFactory.getInstance().createActionGroupPopup(null, new DefaultActionGroup(children),
                                                         DataManager.getInstance().getDataContext(b.getContextComponent()),
                                                         JBPopupFactory.ActionSelectionAid.SPEEDSEARCH, true).show(point);
@@ -247,12 +251,12 @@ public class StructuralSearchFakeInspection extends LocalInspectionTool {
     final Project project = CommonDataKeys.PROJECT.getData(DataManager.getInstance().getDataContext(list));
     if (project == null) return;
     final int index = list.getSelectedIndex();
+    if (index < 0) return;
     final Configuration configuration = myConfigurations.get(index);
     if (configuration == null) return;
     final SearchContext searchContext = new SearchContext(project);
     final StructuralSearchDialog dialog = new StructuralSearchDialog(searchContext, !(configuration instanceof SearchConfiguration), true);
     dialog.loadConfiguration(configuration);
-    dialog.setUseLastConfiguration(true);
     if (!dialog.showAndGet()) return;
     final Configuration newConfiguration = dialog.getConfiguration();
     if (configuration.getOrder() == 0) {

@@ -158,7 +158,7 @@ public class ApplyPatchDifferentiatedDialog extends DialogWrapper {
     myRecentPathFileChange = new AtomicReference<>();
     myBinaryShelvedPatches = binaryShelvedPatches;
     myPreselectedChanges = preselectedChanges;
-    myErrorNotificationPanel = new EditorNotificationPanel(LightColors.RED);
+    myErrorNotificationPanel = new EditorNotificationPanel(LightColors.RED, EditorNotificationPanel.Status.Error);
     cleanNotifications();
     myChangesTreeList = new MyChangeTreeList(project,
                                              new Runnable() {
@@ -300,8 +300,10 @@ public class ApplyPatchDifferentiatedDialog extends DialogWrapper {
   public static FileChooserDescriptor createSelectPatchDescriptor() {
     return new FileChooserDescriptor(true, false, false, false, false, false) {
       @Override
-      public boolean isFileSelectable(VirtualFile file) {
-        return FileTypeRegistry.getInstance().isFileOfType(file, PatchFileType.INSTANCE) || FileTypeRegistry.getInstance().isFileOfType(file, FileTypes.PLAIN_TEXT);
+      public boolean isFileSelectable(@Nullable VirtualFile file) {
+        return file != null &&
+               (FileTypeRegistry.getInstance().isFileOfType(file, PatchFileType.INSTANCE) ||
+                FileTypeRegistry.getInstance().isFileOfType(file, FileTypes.PLAIN_TEXT));
       }
     };
   }
@@ -637,21 +639,21 @@ public class ApplyPatchDifferentiatedDialog extends DialogWrapper {
     }
 
     @Override
-    protected void toggleChanges(@NotNull Collection<?> changes) {
+    protected boolean toggleChanges(@NotNull Collection<?> changes) {
       List<AbstractFilePatchInProgress.PatchChange> patchChanges =
         ContainerUtil.findAll(changes, AbstractFilePatchInProgress.PatchChange.class);
 
       if (patchChanges.size() == 1 && !patchChanges.get(0).isValid()) {
-        handleInvalidChangesAndToggle();
+        return handleInvalidChangesAndToggle();
       }
       else {
-        super.toggleChanges(getOnlyValidChanges(patchChanges));
+        return super.toggleChanges(getOnlyValidChanges(patchChanges));
       }
     }
 
-    private void handleInvalidChangesAndToggle() {
+    private boolean handleInvalidChangesAndToggle() {
       new NewBaseSelector(false).run();
-      super.toggleChanges(getOnlyValidChanges(getSelectedChanges()));
+      return super.toggleChanges(getOnlyValidChanges(getSelectedChanges()));
     }
   }
 
@@ -679,6 +681,11 @@ public class ApplyPatchDifferentiatedDialog extends DialogWrapper {
           JBPopupFactory.getInstance().createListPopup(step).showCenteredInCurrentWindow(myProject);
         }
       }
+    }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
     }
 
     @Override
@@ -852,7 +859,7 @@ public class ApplyPatchDifferentiatedDialog extends DialogWrapper {
     }
 
     @Override
-    public PopupStep onChosen(final VirtualFile selectedValue, boolean finalChoice) {
+    public PopupStep<?> onChosen(final VirtualFile selectedValue, boolean finalChoice) {
       if (selectedValue == null) {
         myNewBaseSelector.run();
         return null;
@@ -1066,6 +1073,11 @@ public class ApplyPatchDifferentiatedDialog extends DialogWrapper {
     }
 
     @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
+    }
+
+    @Override
     public void update(@NotNull AnActionEvent e) {
       boolean isEnabled = ContainerUtil.exists(myChangesTreeList.getSelectedChanges(), change -> change.getPatchInProgress().canDown());
       e.getPresentation().setEnabled(isEnabled);
@@ -1081,6 +1093,11 @@ public class ApplyPatchDifferentiatedDialog extends DialogWrapper {
   private class StripUp extends DumbAwareAction {
     StripUp(Supplier<String> text) {
       super(text);
+    }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
     }
 
     @Override
@@ -1114,6 +1131,11 @@ public class ApplyPatchDifferentiatedDialog extends DialogWrapper {
     private MyShowDiff() {
       super(VcsBundle.message("action.name.show.difference"),null, AllIcons.Actions.Diff);
       myMyChangeComparator = new MyChangeComparator();
+    }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
     }
 
     @Override
@@ -1219,6 +1241,19 @@ public class ApplyPatchDifferentiatedDialog extends DialogWrapper {
     @Override
     public FileStatus getFileStatus() {
       return myChange.getFileStatus();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+      MyProducerWrapper wrapper = (MyProducerWrapper)o;
+      return Objects.equals(myProducer, wrapper.myProducer);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(myProducer);
     }
   }
 

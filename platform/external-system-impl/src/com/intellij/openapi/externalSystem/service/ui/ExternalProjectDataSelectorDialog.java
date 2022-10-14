@@ -1,8 +1,9 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.externalSystem.service.ui;
 
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.ActionToolbarPosition;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
@@ -692,6 +693,11 @@ public final class ExternalProjectDataSelectorDialog extends DialogWrapper {
         myShowSelectedRowsOnly = true;
       }
     }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
+    }
   }
 
   private class UnselectAllButton extends AnActionButton {
@@ -716,17 +722,26 @@ public final class ExternalProjectDataSelectorDialog extends DialogWrapper {
         reloadTree();
       }
     }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
+    }
   }
 
   private class ShowSelectedOnlyButton extends ToggleActionButton {
-
     ShowSelectedOnlyButton() {
-      super(ExternalSystemBundle.messagePointer("show.selected.only"), AllIcons.Actions.ShowHiddens);
+      super(ExternalSystemBundle.messagePointer("show.selected.only"), AllIcons.Actions.ToggleVisibility);
     }
 
     @Override
     public boolean isSelected(AnActionEvent e) {
       return myShowSelectedRowsOnly;
+    }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.BGT;
     }
 
     @Override
@@ -770,6 +785,11 @@ public final class ExternalProjectDataSelectorDialog extends DialogWrapper {
         reloadTree();
       }
       updateSelectionState();
+    }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
     }
 
     @Override

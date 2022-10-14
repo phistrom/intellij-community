@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.util.ui;
 
 import com.intellij.openapi.application.Application;
@@ -14,7 +14,6 @@ import com.intellij.ui.components.JBScrollPane.Alignment;
 import com.intellij.ui.scale.JBUIScale;
 import com.intellij.util.Alarm;
 import com.intellij.util.ReflectionUtil;
-import org.jetbrains.annotations.ApiStatus;
 
 import javax.swing.*;
 import javax.swing.event.ChangeEvent;
@@ -32,17 +31,10 @@ import java.lang.reflect.Method;
 public class ButtonlessScrollBarUI extends BasicScrollBarUI {
   private static final Logger LOG = Logger.getInstance(ButtonlessScrollBarUI.class);
 
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @Deprecated(forRemoval = true)
   public static JBColor getTrackBackgroundDefault() {
     return new JBColor(LightColors.SLIGHTLY_GRAY, UIUtil.getListBackground());
   }
-
-  @Deprecated
-  public static JBColor getTrackBorderColorDefault() {
-    return new JBColor(Gray._230, UIUtil.getListBackground());
-  }
-
   private JBColor getTrackBackground() {
     return jbColor(LightColors.SLIGHTLY_GRAY, UIUtil.getListBackground());
   }
@@ -52,7 +44,7 @@ public class ButtonlessScrollBarUI extends BasicScrollBarUI {
   }
 
   private JBColor jbColor(final Color regular, final Color dark) {
-    return new JBColor(() -> isDark() ? dark : regular);
+    return JBColor.lazy(() -> isDark() ? dark : regular);
   }
 
   private int getAnimationColorShift() {
@@ -375,7 +367,7 @@ public class ButtonlessScrollBarUI extends BasicScrollBarUI {
     }
   }
 
-  @Deprecated
+  @Deprecated(forRemoval = true)
   public static BasicScrollBarUI createNormal() {
     return new ButtonlessScrollBarUI();
   }
@@ -443,12 +435,8 @@ public class ButtonlessScrollBarUI extends BasicScrollBarUI {
             && setValueFrom != null) {
 
           switch (scrollbar.getOrientation()) {
-            case Adjustable.VERTICAL:
-              offset = getThumbBounds().height / 2;
-              break;
-            case Adjustable.HORIZONTAL:
-              offset = getThumbBounds().width / 2;
-              break;
+            case Adjustable.VERTICAL -> offset = getThumbBounds().height / 2;
+            case Adjustable.HORIZONTAL -> offset = getThumbBounds().width / 2;
           }
           isDragging = true;
           try {
@@ -522,7 +510,7 @@ public class ButtonlessScrollBarUI extends BasicScrollBarUI {
       };
 
 
-      myMacScrollbarFadeTimer = new Alarm(Alarm.ThreadToUse.SWING_THREAD);
+      myMacScrollbarFadeTimer = new Alarm();
       myMacScrollbarFadeAnimator = new Animator("Mac scrollbar fade animator", 30, 300, false) {
         @Override
         protected void paintCycleEnd() {
@@ -753,19 +741,13 @@ public class ButtonlessScrollBarUI extends BasicScrollBarUI {
   @Deprecated
   protected int getThumbOffset(int value) {
     // com.intellij.ui.components.AbstractScrollBarUI.scale
-    float scale = JBUIScale.scale(10);
-    //noinspection EnumSwitchStatementWhichMissesCases
-    switch (UIUtil.getComponentStyle(scrollbar)) {
-      case LARGE:
-        scale *= 1.15f;
-        break;
-      case SMALL:
-        scale *= 0.857f;
-        break;
-      case MINI:
-        scale *= 0.714f;
-        break;
-    }
+    float multiplier = switch (UIUtil.getComponentStyle(scrollbar)) {
+      case LARGE -> 1.15f;
+      case SMALL -> 0.857f;
+      case MINI -> 0.714f;
+      case REGULAR -> 1f;
+    };
+    float scale = JBUIScale.scale(10) * multiplier;
     return value - (int)scale;
   }
 

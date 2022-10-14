@@ -1,12 +1,28 @@
+/*******************************************************************************
+ * Copyright 2000-2022 JetBrains s.r.o. and contributors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ ******************************************************************************/
+
 package com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.panels.management.packages.columns.renderers
 
 import com.intellij.openapi.util.NlsSafe
-import com.intellij.ui.JBColor
+import com.intellij.ui.hover.TableHoverListener
 import com.jetbrains.packagesearch.intellij.plugin.PackageSearchBundle
+import com.jetbrains.packagesearch.intellij.plugin.normalizeWhitespace
 import com.jetbrains.packagesearch.intellij.plugin.ui.PackageSearchUI
 import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.panels.management.packages.PackagesTableItem
 import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.panels.management.packages.TagComponent
-import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.panels.management.packages.columns.colors
 import com.jetbrains.packagesearch.intellij.plugin.ui.util.scaled
 import com.jetbrains.packagesearch.intellij.plugin.ui.util.scaledInsets
 import net.miginfocom.layout.AC
@@ -16,7 +32,7 @@ import net.miginfocom.layout.DimConstraint
 import net.miginfocom.layout.LC
 import net.miginfocom.layout.UnitValue
 import net.miginfocom.swing.MigLayout
-import org.apache.commons.lang3.StringUtils
+import java.awt.Color
 import java.awt.Dimension
 import java.awt.Graphics
 import javax.swing.JLabel
@@ -45,11 +61,6 @@ internal object PackageNameCellRenderer : TableCellRenderer {
         )
     }
 
-    private val tagForeground = JBColor(0x808080, 0x9C9C9C)
-    private val tagBackground = JBColor(0xE5E5E5, 0x666B6E)
-    private val tagForegroundSelected = JBColor(0xFFFFFF, 0xFFFFFF)
-    private val tagBackgroundSelected = JBColor(0x4395E2, 0x78ADE2)
-
     private fun componentConstraint(x: Int = 0, y: Int = 0, gapAfter: Int? = null): CC = CC().apply {
         cellX = x
         cellY = y
@@ -65,28 +76,52 @@ internal object PackageNameCellRenderer : TableCellRenderer {
         column: Int
     ): JPanel {
         val columnWidth = table.tableHeader.columnModel.getColumn(0).width
+        val isHover = TableHoverListener.getHoveredRow(table) == row
 
         return when (value as PackagesTableItem<*>) {
             is PackagesTableItem.InstalledPackage -> {
                 val packageModel = value.packageModel
 
-                val name: String? = StringUtils.normalizeSpace(packageModel.remoteInfo?.name)
-                val identifier = packageModel.identifier
+                val name: String? = packageModel.remoteInfo?.name.normalizeWhitespace()
+                val rawIdentifier = packageModel.identifier.rawValue
 
-                createNamePanel(columnWidth, name, identifier, packageModel.isKotlinMultiplatform, isSelected).apply {
-                    table.colors.applyTo(this, isSelected)
-                }
+                val colors = computeColors(isSelected, isHover, isSearchResult = false)
+                val additionalColors = AdditionalCellColors(
+                    secondaryForeground = PackageSearchUI.getTextColorSecondary(isSelected),
+                    tagBackground = PackageSearchUI.Colors.PackagesTable.Tag.background(isSelected, isHover),
+                    tagForeground = PackageSearchUI.Colors.PackagesTable.Tag.foreground(isSelected, isHover),
+                )
+
+                createNamePanel(
+                    columnWidth = columnWidth,
+                    name = name,
+                    identifier = rawIdentifier,
+                    isKotlinMultiplatform = packageModel.isKotlinMultiplatform,
+                    colors = colors,
+                    additionalColors = additionalColors
+                )
             }
             is PackagesTableItem.InstallablePackage -> {
                 val packageModel = value.packageModel
 
-                val name: String? = StringUtils.normalizeSpace(packageModel.remoteInfo?.name)
-                val identifier = packageModel.identifier
+                val name: String? = packageModel.remoteInfo?.name.normalizeWhitespace()
+                val rawIdentifier = packageModel.identifier.rawValue
 
-                createNamePanel(columnWidth, name, identifier, packageModel.isKotlinMultiplatform, isSelected).apply {
-                    table.colors.applyTo(this, isSelected)
-                    if (!isSelected) background = PackageSearchUI.ListRowHighlightBackground
-                }
+                val colors = computeColors(isSelected, isHover, isSearchResult = true)
+                val additionalColors = AdditionalCellColors(
+                    secondaryForeground = PackageSearchUI.getTextColorSecondary(isSelected),
+                    tagBackground = PackageSearchUI.Colors.PackagesTable.SearchResult.Tag.background(isSelected, isHover),
+                    tagForeground = PackageSearchUI.Colors.PackagesTable.SearchResult.Tag.foreground(isSelected, isHover),
+                )
+
+                createNamePanel(
+                    columnWidth = columnWidth,
+                    name = name,
+                    identifier = rawIdentifier,
+                    isKotlinMultiplatform = packageModel.isKotlinMultiplatform,
+                    colors = colors,
+                    additionalColors = additionalColors
+                )
             }
         }
     }
@@ -96,42 +131,48 @@ internal object PackageNameCellRenderer : TableCellRenderer {
         @NlsSafe name: String?,
         @NlsSafe identifier: String,
         isKotlinMultiplatform: Boolean,
-        isSelected: Boolean
-    ) = TagPaintingJPanel(columnWidth, isSelected).apply {
+        colors: CellColors,
+        additionalColors: AdditionalCellColors
+    ) = TagPaintingJPanel(columnWidth).apply {
+        colors.applyTo(this)
+
         if (!name.isNullOrBlank() && name != identifier) {
             add(
                 JLabel(name).apply {
-                    foreground = PackageSearchUI.getTextColorPrimary(isSelected)
+                    colors.applyTo(this)
                 },
                 componentConstraint(gapAfter = componentGapX)
             )
             add(
                 JLabel(identifier).apply {
-                    foreground = PackageSearchUI.getTextColorSecondary(isSelected)
+                    colors.applyTo(this)
                 },
                 componentConstraint().gapAfter("0:push")
             )
         } else {
             add(
                 JLabel(identifier).apply {
-                    foreground = PackageSearchUI.getTextColorPrimary(isSelected)
+                    colors.applyTo(this)
                 },
                 componentConstraint()
             )
         }
 
         if (isKotlinMultiplatform) {
-            add(
-                TagComponent(PackageSearchBundle.message("packagesearch.terminology.kotlinMultiplatform"))
-                    .apply { isVisible = false },
-                componentConstraint(1, 0)
-            )
+            val tagComponent = TagComponent(PackageSearchBundle.message("packagesearch.terminology.kotlinMultiplatform"))
+                .apply { isVisible = false }
+
+            add(tagComponent, componentConstraint(1, 0))
+
+            tagComponent.background = additionalColors.tagBackground
+            tagComponent.foreground = additionalColors.tagForeground
         }
     }
 
-    // This is a hack; ideally we should have this done by the layout itself, but MigLayout wasn't cooperating
+    // This is a hack; ideally we should have this done by the layout itself,
+    // but MigLayout wasn't cooperating
     // TODO Use a custom layout to do this in a less hacky fashion
-    private class TagPaintingJPanel(private val columnWidth: Int, private val isSelected: Boolean) : JPanel(
+    private class TagPaintingJPanel(private val columnWidth: Int) : JPanel(
         MigLayout(layoutConstraints.width("${columnWidth}px!"), columnConstraints)
     ) {
 
@@ -140,8 +181,8 @@ internal object PackageNameCellRenderer : TableCellRenderer {
             maximumSize = Dimension(columnWidth, Int.MAX_VALUE)
         }
 
-        override fun paintChildren(g: Graphics) {
-            super.paintChildren(g)
+        override fun paint(g: Graphics) {
+            super.paint(g)
 
             val tagComponent = components.find { it is TagComponent } as? TagComponent ?: return
             val tagX = columnWidth - tagComponent.width
@@ -152,15 +193,19 @@ internal object PackageNameCellRenderer : TableCellRenderer {
                 color = background
                 fillRect(tagX - componentGapX, 0, columnWidth - tagX, height)
 
-                // Then we manually translate the tag to the right hand side of the row and paint it
+                // Then we manually translate the tag to the right-hand side of the row and paint it
                 translate(tagX, tagY)
                 tagComponent.apply {
                     isVisible = true
-                    foreground = JBColor.namedColor("Plugins.tagForeground", if (isSelected) tagForegroundSelected else tagForeground)
-                    background = JBColor.namedColor("Plugins.tagBackground", if (isSelected) tagBackgroundSelected else tagBackground)
                     paint(g)
                 }
             }
         }
     }
+
+    private data class AdditionalCellColors(
+        val secondaryForeground: Color,
+        val tagBackground: Color,
+        val tagForeground: Color,
+    )
 }

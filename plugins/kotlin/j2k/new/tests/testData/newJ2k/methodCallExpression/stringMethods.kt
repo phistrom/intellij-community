@@ -78,15 +78,17 @@ internal class A {
         s.regionMatches(0, "st", 1, 2)
         s.replace("\\w+".toRegex(), "---")
             .replaceFirst("([s-t])".toRegex(), "A$1")
-        /* TODO
-        s.matches("\\w+");
-        useSplit(s.split("\\s+"));
-        useSplit(s.split("\\s+", 0));
-        useSplit(s.split("\\s+", -1));
-        useSplit(s.split("\\s+", 2));
-        int limit = 5;
-        useSplit(s.split("\\s+", limit));
-        */s.trim { it <= ' ' }
+        useSplit(s.split("\\s+".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray())
+        useSplit(s.split("\\s+".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray())
+        useSplit(s.split("\\s+".toRegex()).toTypedArray())
+        useSplit(s.split("\\s+".toRegex(), limit = 2).toTypedArray())
+        val pattern = "\\s+"
+        useSplit(s.split(pattern.toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray())
+        val limit = 5
+        useSplit(s.split("\\s+".toRegex(), limit.coerceAtLeast(0)).toTypedArray())
+        useSplit(s.split("\\s+".toRegex(), (limit + 5).coerceAtLeast(0)).toTypedArray())
+        s.matches("\\w+".toRegex())
+        s.trim { it <= ' ' }
         "$s another"
         s.toByteArray()
         s.toByteArray(Charset.forName("utf-8"))

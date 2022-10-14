@@ -1,9 +1,11 @@
 // Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.template.impl;
 
+import com.intellij.codeInsight.template.LiveTemplateContextService;
 import com.intellij.ide.CopyProvider;
 import com.intellij.ide.DeleteProvider;
 import com.intellij.ide.PasteProvider;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.DataProvider;
 import com.intellij.openapi.actionSystem.PlatformDataKeys;
@@ -27,9 +29,6 @@ import java.awt.datatransfer.StringSelection;
 import java.util.Collections;
 import java.util.Set;
 
-/**
- * @author peter
- */
 class LiveTemplateTree extends CheckboxTree implements DataProvider, CopyProvider, PasteProvider, DeleteProvider {
   private final TemplateListPanel myConfigurable;
 
@@ -51,7 +50,7 @@ class LiveTemplateTree extends CheckboxTree implements DataProvider, CopyProvide
 
   @Override
   protected void installSpeedSearch() {
-    new TreeSpeedSearch(this, o -> {
+    new TreeSpeedSearch(this, true, o -> {
       Object object = ((DefaultMutableTreeNode)o.getLastPathComponent()).getUserObject();
       if (object instanceof TemplateGroup) {
         return ((TemplateGroup)object).getName();
@@ -64,7 +63,7 @@ class LiveTemplateTree extends CheckboxTree implements DataProvider, CopyProvide
                template.getTemplateText();
       }
       return "";
-    }, true).setComparator(new SubstringSpeedSearchComparator());
+    }).setComparator(new SubstringSpeedSearchComparator());
   }
 
   @Nullable
@@ -76,6 +75,11 @@ class LiveTemplateTree extends CheckboxTree implements DataProvider, CopyProvide
       return this;
     }
     return null;
+  }
+
+  @Override
+  public @NotNull ActionUpdateThread getActionUpdateThread() {
+    return ActionUpdateThread.EDT;
   }
 
   @Override
@@ -123,8 +127,10 @@ class LiveTemplateTree extends CheckboxTree implements DataProvider, CopyProvide
     assert buffer != null;
 
     try {
+      LiveTemplateContextService ltContextService = LiveTemplateContextService.getInstance();
       for (Element templateElement : JDOMUtil.load("<root>" + buffer + "</root>").getChildren(TemplateSettings.TEMPLATE)) {
-        TemplateImpl template = TemplateSettings.readTemplateFromElement(group.getName(), templateElement, getClass().getClassLoader());
+        TemplateImpl template = TemplateSettings.readTemplateFromElement(group.getName(), templateElement, getClass().getClassLoader(),
+                                                                         ltContextService);
         while (group.containsTemplate(template.getKey(), template.getId())) {
           template.setKey(template.getKey() + "1");
           if (template.getId() != null) {

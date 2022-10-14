@@ -174,7 +174,6 @@ public final class PyNames {
   public static final String DUNDER_AWAIT = "__await__";
   public static final String SIZEOF = "__sizeof__";
   public static final String INIT_SUBCLASS = "__init_subclass__";
-  public static final String FSPATH = "__fspath__";
   public static final String COMPLEX = "__complex__";
   public static final String FLOAT = "__float__";
   public static final String INT = "__int__";
@@ -299,6 +298,7 @@ public final class PyNames {
   private static final BuiltinDescription _self_key_descr = new BuiltinDescription("(self, key)");
   private static final BuiltinDescription _exit_descr = new BuiltinDescription("(self, exc_type, exc_val, exc_tb)");
 
+  @SuppressWarnings("JavacQuirks")
   private static final Map<String, BuiltinDescription> BuiltinMethods = Map.ofEntries(
     Map.entry(ABS, _only_self_descr),
     Map.entry("__add__", _self_other_descr),
@@ -468,7 +468,7 @@ public final class PyNames {
     "__dir__", new BuiltinDescription("()"));
 
   @SafeVarargs
-  private static <K,V> Map<K,V> concat(Map<K,V> map, Map.Entry<K,V>... additional) {
+  private static <K,V> Map<K,V> concat(Map<? extends K, ? extends V> map, Map.Entry<K,V>... additional) {
     Map<K, V> r = new HashMap<>(map);
     r.putAll(Map.ofEntries(additional));
     return Map.copyOf(r);
@@ -594,8 +594,8 @@ public final class PyNames {
    * @param name what to check
    * @return true iff the name is either a keyword or a reserved name, like None.
    */
-  public static boolean isReserved(@NonNls String name) {
-    return KEYWORDS.contains(name) || NONE.equals(name);
+  public static boolean isReserved(@Nullable @NonNls String name) {
+    return name != null && KEYWORDS.contains(name) || NONE.equals(name);
   }
 
   // NOTE: includes unicode only good for py3k
@@ -639,21 +639,14 @@ public final class PyNames {
 
   @Nullable
   private static String leftToRightComparisonOperatorName(@NotNull String name) {
-    switch (name) {
-      case "__lt__":
-        return "__gt__";
-      case "__gt__":
-        return "__lt__";
-      case "__ge__":
-      return "__le__";
-      case "__le__":
-        return "__ge__";
-      case "__eq__":
-      case "__ne__":
-        return name;
-      default:
-        return null;
-    }
+    return switch (name) {
+      case "__lt__" -> "__gt__";
+      case "__gt__" -> "__lt__";
+      case "__ge__" -> "__le__";
+      case "__le__" -> "__ge__";
+      case "__eq__", "__ne__" -> name;
+      default -> null;
+    };
   }
 
   /**

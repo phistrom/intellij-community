@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.editor
 
@@ -29,6 +29,7 @@ class KotlinSmartEnterHandler : SmartEnterProcessorWithFixers() {
 
             KotlinWhenSubjectCaretFixer(),
             KotlinMissingWhenBodyFixer(),
+            KotlinMissingWhenEntryBodyFixer(),
 
             KotlinDoWhileFixer(),
 
@@ -101,14 +102,11 @@ class KotlinSmartEnterHandler : SmartEnterProcessorWithFixers() {
         ) {
             commit(editor)
             val settings = file.kotlinCommonSettings
-            val old = settings.KEEP_SIMPLE_BLOCKS_IN_ONE_LINE
-            settings.KEEP_SIMPLE_BLOCKS_IN_ONE_LINE = false
-            val elt = file.findElementAt(caretOffset - 1)?.getStrictParentOfType<KtBlockExpression>()
-            if (elt != null) {
-                reformat(elt)
-            }
+            val old = settings.KEEP_LINE_BREAKS
+            settings.KEEP_LINE_BREAKS = true
+            file.findElementAt(caretOffset - 1)?.getStrictParentOfType<KtBlockExpression>()?.let(::reformat)
 
-            settings.KEEP_SIMPLE_BLOCKS_IN_ONE_LINE = old
+            settings.KEEP_LINE_BREAKS = old
             editor.caretModel.moveToOffset(caretOffset - 1)
         }
     }

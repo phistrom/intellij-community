@@ -3,6 +3,7 @@ package com.intellij.openapi.roots.ui.configuration.projectRoot;
 
 import com.intellij.CommonBundle;
 import com.intellij.ide.JavaUiBundle;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
@@ -187,7 +188,8 @@ public abstract class BaseLibrariesConfigurable extends BaseStructureConfigurabl
     if (fromPopup) {
       final BaseLibrariesConfigurable targetGroup = getOppositeGroup();
       actions.add(new ChangeLibraryLevelAction(myProject, myTree, this, targetGroup));
-      actions.add(new AddLibraryToModuleDependenciesAction(myProject, this));
+      actions.add(new AddLibraryToModuleDependenciesAction(this));
+      actions.add(new RefreshRootsLibraryAction(this));
     }
     return actions;
   }
@@ -381,6 +383,11 @@ public abstract class BaseLibrariesConfigurable extends BaseStructureConfigurabl
       } else {
         e.getPresentation().setEnabled(getSelectedObject() instanceof LibraryEx);
       }
+    }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
     }
   }
 }

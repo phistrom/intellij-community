@@ -33,7 +33,7 @@ public final class Comparing {
   }
 
   /** @deprecated same as {@link Arrays#equals(Object[], Object[])} */
-  @Deprecated @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @Deprecated @ApiStatus.ScheduledForRemoval
   public static <T> boolean equal(@Nullable T[] arr1, @Nullable T[] arr2) {
     return Arrays.equals(arr1, arr2);
   }
@@ -130,7 +130,7 @@ public final class Comparing {
   }
 
   public static int compare(byte o1, byte o2) {
-    return o1 < o2 ? -1 : o1 == o2 ? 0 : 1;
+    return Byte.compare(o1, o2);
   }
 
   public static int compare(boolean o1, boolean o2) {
@@ -138,11 +138,11 @@ public final class Comparing {
   }
 
   public static int compare(int o1, int o2) {
-    return o1 < o2 ? -1 : o1 == o2 ? 0 : 1;
+    return Integer.compare(o1, o2);
   }
 
   public static int compare(long o1, long o2) {
-    return o1 < o2 ? -1 : o1 == o2 ? 0 : 1;
+    return Long.compare(o1, o2);
   }
 
   public static int compare(double o1, double o2) {

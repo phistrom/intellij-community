@@ -11,6 +11,7 @@ import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.ui.ExecutionConsole;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.execution.ui.RunnerLayoutUi;
+import com.intellij.execution.ui.layout.ViewContext;
 import com.intellij.execution.ui.layout.impl.GridImpl;
 import com.intellij.execution.ui.layout.impl.RunnerContentUi;
 import com.intellij.icons.AllIcons;
@@ -30,15 +31,13 @@ import com.intellij.ui.tabs.JBTabs;
 import com.intellij.ui.tabs.JBTabsEx;
 import com.intellij.ui.tabs.TabInfo;
 import com.intellij.util.ArrayUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 
 public abstract class RunTab implements DataProvider, Disposable {
   /**
@@ -47,15 +46,8 @@ public abstract class RunTab implements DataProvider, Disposable {
    * This option has to be set into {@link AnAction#getTemplatePresentation()}.
    * Works only if new UI is enabled.
    */
-  public static final Key<Boolean> TAKE_OUT_OF_MORE_GROUP = Key.create("RunTab.putOnToolbar");
-
-  /**
-   * Hides some actions from the toolbar.
-   * <p>
-   * This option has to be set into {@link AnAction#getTemplatePresentation()}.
-   * Works only if new UI is enabled.
-   */
-  public static final Key<Boolean> HIDE_FROM_TOOLBAR = Key.create("RunTab.hideFromToolbar");
+  @ApiStatus.Experimental
+  public static final Key<PreferredPlace> PREFERRED_PLACE = Key.create("RunTab.preferredActionPlace");
 
   @NotNull
   protected final RunnerLayoutUi myUi;
@@ -161,6 +153,7 @@ public abstract class RunTab implements DataProvider, Disposable {
 
     @Nullable
     private final ActionGroup myActionGroup;
+    private final Map<TabInfo, Content> myTabInfoContentMap = new LinkedHashMap<>();
     private boolean myMoveToolbar = false;
 
     public RunTabSupplier(@Nullable ActionGroup group) {
@@ -196,6 +189,10 @@ public abstract class RunTab implements DataProvider, Disposable {
         }
 
         @Override
+        public @NotNull ActionUpdateThread getActionUpdateThread() {
+          return ActionUpdateThread.EDT;
+        }
+        @Override
         public boolean isDumbAware() {
           return true;
         }
@@ -226,6 +223,29 @@ public abstract class RunTab implements DataProvider, Disposable {
     public boolean isClosable(@NotNull TabInfo tab) {
       List<Content> gridContents = ((GridImpl)tab.getComponent()).getContents();
       return gridContents.size() > 0 && gridContents.get(0).isCloseable();
+    }
+
+    @Override
+    public void close(@NotNull TabInfo tab) {
+      GridImpl grid = (GridImpl)tab.getComponent();
+      ViewContext context = ViewContext.CONTEXT_KEY.getData(grid);
+      Content[] content = ViewContext.CONTENT_KEY.getData(grid);
+      if (context == null || content == null || content.length == 0) {
+        SingleContentSupplier.super.close(tab);
+        return;
+      }
+      context.getContentManager().removeContent(content[0], context.isToDisposeRemovedContent());
+    }
+
+    @Override
+    public void addSubContent(@NotNull TabInfo tabInfo, @NotNull Content content) {
+      myTabInfoContentMap.put(tabInfo, content);
+    }
+
+    @NotNull
+    @Override
+    public Collection<Content> getSubContents() {
+      return myTabInfoContentMap.values();
     }
 
     public boolean isMoveToolbar() {

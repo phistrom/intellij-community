@@ -1,5 +1,5 @@
-// "Import" "true"
-// WITH_RUNTIME
+// "Import extension function 'let'" "true"
+// WITH_STDLIB
 
 import kotlin.let as let1
 

@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -79,7 +80,7 @@ public class PyOperatorReference extends PyReferenceImpl {
 
   public String getReadableOperatorName() {
     final String name = myElement.getReferencedName();
-    if (PyNames.SUBSCRIPTION_OPERATORS.contains(name)) {
+    if (name != null && PyNames.SUBSCRIPTION_OPERATORS.contains(name)) {
       return "[]";
     }
     else {
@@ -132,14 +133,12 @@ public class PyOperatorReference extends PyReferenceImpl {
           PyTypeUtil
             .toStream(type)
             .nonNull()
-            .map(
+            .flatCollection(
               it -> it instanceof PyClassLikeType && ((PyClassLikeType)it).isDefinition()
                     ? resolveDefinitionMember((PyClassLikeType)it, object, name)
                     : it.resolveMember(name, object, AccessDirection.of(myElement), myContext)
             )
-            .filter(Objects::nonNull)
-            .flatMap(List::stream)
-            .collect(Collectors.toList());
+            .toList();
 
         if (!ContainerUtil.isEmpty(res)) {
           results.addAll(res);

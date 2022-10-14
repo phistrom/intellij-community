@@ -17,7 +17,6 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Collection;
 
 /**
- * @author peter
  * @see FindUsagesHandlerFactory
  */
 public abstract class FindUsagesHandler extends FindUsagesHandlerBase implements FindUsagesHandlerUi {
@@ -40,7 +39,7 @@ public abstract class FindUsagesHandler extends FindUsagesHandlerBase implements
                                                                        boolean toShowInNewTab,
                                                                        boolean mustOpenInNewTab,
                                                                        @NotNull FindUsagesHandlerBase handler) {
-    @SuppressWarnings("deprecation") DataContext ctx = DataManager.getInstance().getDataContext();
+    DataContext ctx = DataManager.getInstance().getDataContext();
     return new CommonFindUsagesDialog(handler.getPsiElement(), handler.getProject(), handler.getFindUsagesOptions(ctx), toShowInNewTab, mustOpenInNewTab, isSingleFile,
                                       handler);
   }

@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.application.ex;
 
 import com.intellij.openapi.application.Application;
@@ -24,11 +24,6 @@ public interface ApplicationEx extends Application {
   int EXIT_CONFIRMED = 0x02;
   int SAVE = 0x04;
   int ELEVATE = 0x08;
-
-  /**
-   * Loads the application configuration.
-   */
-  void load();
 
   /**
    * @return true if this thread is inside read action.
@@ -66,7 +61,7 @@ public interface ApplicationEx extends Application {
 
   void setSaveAllowed(boolean value);
 
-  default void exit(@SuppressWarnings("unused") int flags) {
+  default void exit(int flags) {
     exit();
   }
 
@@ -111,7 +106,8 @@ public interface ApplicationEx extends Application {
   void restart(boolean exitConfirmed, boolean elevate);
 
   /**
-   * Runs modal process. For internal use only, see {@link Task}
+   * Runs modal process. For internal use only, see {@link Task}.
+   * Consider also {@code ProgressManager.getInstance().runProcessWithProgressSynchronously}
    */
   @ApiStatus.Internal
   default boolean runProcessWithProgressSynchronously(@NotNull Runnable process,
@@ -123,7 +119,8 @@ public interface ApplicationEx extends Application {
 
   /**
    * Runs modal or non-modal process.
-   * For internal use only, see {@link Task}
+   * For internal use only, see {@link Task}.
+   * Consider also {@code ProgressManager.getInstance().runProcessWithProgressSynchronously}
    */
   @ApiStatus.Internal
   boolean runProcessWithProgressSynchronously(@NotNull Runnable process,
@@ -139,7 +136,7 @@ public interface ApplicationEx extends Application {
   void assertTimeConsuming();
 
   /**
-   * Tries to acquire the read lock and run the {@code action}
+   * Tries to acquire the read lock and run the {@code action}.
    *
    * @return true if action was run while holding the lock, false if was unable to get the lock and action was not run
    */
@@ -152,7 +149,7 @@ public interface ApplicationEx extends Application {
   }
 
   @ApiStatus.Experimental
-  default boolean runWriteActionWithCancellableProgressInDispatchThread(@NotNull String title,
+  default boolean runWriteActionWithCancellableProgressInDispatchThread(@NotNull @NlsContexts.ProgressTitle String title,
                                                                         @Nullable Project project,
                                                                         @Nullable JComponent parentComponent,
                                                                         @NotNull Consumer<? super ProgressIndicator> action) {
@@ -160,7 +157,7 @@ public interface ApplicationEx extends Application {
   }
 
   @ApiStatus.Experimental
-  default boolean runWriteActionWithNonCancellableProgressInDispatchThread(@NotNull String title,
+  default boolean runWriteActionWithNonCancellableProgressInDispatchThread(@NotNull @NlsContexts.ProgressTitle String title,
                                                                            @Nullable Project project,
                                                                            @Nullable JComponent parentComponent,
                                                                            @NotNull Consumer<? super ProgressIndicator> action) {
@@ -212,4 +209,11 @@ public interface ApplicationEx extends Application {
   default boolean isComponentCreated() {
     return true;
   }
+
+  // in some cases we cannot get service by class
+  /**
+   * Light service is not supported.
+   */
+  @ApiStatus.Internal
+  <T> @Nullable T getServiceByClassName(@NotNull String serviceClassName);
 }

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.plugins.github.authentication.ui
 
 import com.intellij.openapi.progress.ProcessCanceledException
@@ -6,9 +6,8 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.util.ProgressIndicatorUtils
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.ui.AnimatedIcon
-import com.intellij.ui.components.JBLabel
-import com.intellij.ui.layout.*
-import com.intellij.util.ui.UIUtil.getInactiveTextColor
+import com.intellij.ui.dsl.builder.Panel
+import com.intellij.util.ui.NamedColorUtil
 import org.jetbrains.plugins.github.api.GithubApiRequestExecutor
 import org.jetbrains.plugins.github.api.GithubServerPath
 import org.jetbrains.plugins.github.authentication.GHOAuthService
@@ -45,13 +44,12 @@ internal class GHOAuthCredentialsUi(
 
   override fun setBusy(busy: Boolean) = Unit
 
-  override fun LayoutBuilder.centerPanel() {
+  override fun Panel.centerPanel() {
     row {
-      val progressLabel = JBLabel(message("label.login.progress")).apply {
+      label(message("label.login.progress")).applyToComponent {
         icon = AnimatedIcon.Default()
-        foreground = getInactiveTextColor()
+        foreground = NamedColorUtil.getInactiveTextColor()
       }
-      progressLabel()
     }
   }
 

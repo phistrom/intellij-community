@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.util;
 
 import com.intellij.codeInsight.daemon.impl.analysis.JavaModuleGraphUtil;
@@ -27,12 +27,14 @@ import com.intellij.util.ObjectUtils;
 import com.intellij.util.PathUtil;
 import com.intellij.util.PathsList;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.lang.JavaVersion;
 import org.intellij.lang.annotations.MagicConstant;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Field;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 public final class JavaParametersUtil {
@@ -97,15 +99,19 @@ public final class JavaParametersUtil {
     if (virtualFile == null) return null;
     Module classModule = psiClass.isValid() ? ModuleUtilCore.findModuleForPsiElement(psiClass) : null;
     if (classModule == null) classModule = module;
-    ModuleFileIndex fileIndex = ModuleRootManager.getInstance(classModule).getFileIndex();
+    final ModuleRootManager rootManager = ModuleRootManager.getInstance(classModule);
+    final ModuleFileIndex fileIndex = rootManager.getFileIndex();
     if (fileIndex.isInSourceContent(virtualFile)) {
       return !fileIndex.isInTestSourceContent(virtualFile);
     }
-    final List<OrderEntry> entriesForFile = fileIndex.getOrderEntriesForFile(virtualFile);
-    for (OrderEntry entry : entriesForFile) {
+    // the mainClass is located in libraries
+    for (OrderEntry entry : fileIndex.getOrderEntriesForFile(virtualFile)) {
       if (entry instanceof ExportableOrderEntry && ((ExportableOrderEntry)entry).getScope() == DependencyScope.TEST) {
         return false;
       }
+    }
+    if (rootManager.getSourceRoots(false).length == 0) {
+      return false; // there are no 'non-test' sources in the module
     }
     return true;
   }
@@ -150,6 +156,20 @@ public final class JavaParametersUtil {
     }
     return jdk;
   }
+  
+  public static @Nullable JavaVersion getJavaVersion(String jreHome) {
+    final Sdk configuredJdk = ProjectJdkTable.getInstance().findJdk(jreHome);
+    if (configuredJdk != null) {
+      return JavaVersion.tryParse(configuredJdk.getVersionString());
+    }
+
+    if (JdkUtil.checkForJre(jreHome)) {
+      final JavaSdk javaSdk = JavaSdk.getInstance();
+      return JavaVersion.tryParse(javaSdk.getVersionString(jreHome));
+    }
+
+    return null;
+  }
 
   private static Sdk createAlternativeJdk(@NotNull Project project, @NotNull String jreHome) throws CantRunException {
     final Sdk configuredJdk = ProjectJdkTable.getInstance().findJdk(jreHome);
@@ -162,10 +182,8 @@ public final class JavaParametersUtil {
       return javaSdk.createJdk(ObjectUtils.notNull(javaSdk.getVersionString(jreHome), ""), jreHome);
     }
 
-    Sdk resolved = UnknownAlternativeSdkResolver.getInstance(project).tryResolveJre(jreHome);
-    if (resolved != null) return resolved;
-
-    throw new CantRunException(ExecutionBundle.message("jre.path.is.not.valid.jre.home.error.message", jreHome));
+    UnknownAlternativeSdkResolver.getInstance(project).notifyUserToResolveJreAndFail(jreHome);
+    throw new IllegalStateException();
   }
 
   public static void checkAlternativeJRE(@NotNull CommonJavaRunConfigurationParameters configuration) throws RuntimeConfigurationWarning {
@@ -197,9 +215,9 @@ public final class JavaParametersUtil {
                                                  PsiJavaModule module,
                                                  boolean includeTests) {
     Project project = module.getProject();
-    
 
     Set<PsiJavaModule> explicitModules = new LinkedHashSet<>();
+
     explicitModules.add(module);
     collectExplicitlyAddedModules(project, javaParameters, explicitModules);
 
@@ -207,19 +225,21 @@ public final class JavaParametersUtil {
     for (PsiJavaModule explicitModule : explicitModules) {
       forModulePath.addAll(JavaModuleGraphUtil.getAllDependencies(explicitModule));
     }
-    
+
     if (!includeTests) {
-      putProvidersOnModulePath(project, explicitModules, forModulePath);
+      putProvidersOnModulePath(project, forModulePath, forModulePath);
     }
 
     JarFileSystem jarFS = JarFileSystem.getInstance();
     ProjectFileIndex fileIndex = ProjectFileIndex.getInstance(project);
+    JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(project);
 
     PathsList classPath = javaParameters.getClassPath();
     PathsList modulePath = javaParameters.getModulePath();
 
     forModulePath.stream()
       .filter(javaModule -> !PsiJavaModule.JAVA_BASE.equals(javaModule.getName()))
+      .flatMap(javaModule -> psiFacade.findModules(javaModule.getName(), GlobalSearchScope.allScope(project)).stream())
       .map(javaModule -> getClasspathEntry(javaModule, fileIndex, jarFS))
       .filter(Objects::nonNull)
       .forEach(file -> putOnModulePath(modulePath, classPath, file));
@@ -246,9 +266,9 @@ public final class JavaParametersUtil {
     }
   }
 
-  private static void putProvidersOnModulePath(Project project, Set<PsiJavaModule> explicitModules, Set<PsiJavaModule> forModulePath) {
+  private static void putProvidersOnModulePath(Project project, Set<PsiJavaModule> initialModules, Set<PsiJavaModule> forModulePath) {
     Set<String> interfaces = new HashSet<>();
-    for (PsiJavaModule explicitModule : explicitModules) {
+    for (PsiJavaModule explicitModule : initialModules) {
       for (PsiUsesStatement use : explicitModule.getUses()) {
         PsiClassType useClassType = use.getClassType();
         if (useClassType != null) {
@@ -259,6 +279,12 @@ public final class JavaParametersUtil {
 
     if (interfaces.isEmpty()) return;
 
+    Set<PsiJavaModule> added = new HashSet<>();
+    Consumer<PsiJavaModule> registerProviders = javaModule -> {
+      if (forModulePath.add(javaModule)) {
+        added.add(javaModule);
+      }
+    };
     JavaModuleNameIndex index = JavaModuleNameIndex.getInstance();
     for (String key : index.getAllKeys(project)) {
       nextModule: 
@@ -267,11 +293,15 @@ public final class JavaParametersUtil {
         for (PsiProvidesStatement provide : aModule.getProvides()) {
           PsiClassType provideInterfaceType = provide.getInterfaceType();
           if (provideInterfaceType != null && interfaces.contains(provideInterfaceType.getCanonicalText())) {
-            forModulePath.add(aModule);
+            registerProviders.accept(aModule);
+            JavaModuleGraphUtil.getAllDependencies(aModule).forEach(registerProviders);
             continue nextModule;
           }
         }
       }
+    }
+    if (!added.isEmpty()) {
+      putProvidersOnModulePath(project, added, forModulePath);
     }
   }
 
@@ -299,5 +329,18 @@ public final class JavaParametersUtil {
                                                          : moduleExtension.getCompilerOutputPath();
     }
     return null;
+  }
+
+  public static void applyModifications(JavaParameters parameters, List<ModuleBasedConfigurationOptions.ClasspathModification> modifications) {
+    for (ModuleBasedConfigurationOptions.ClasspathModification modification : modifications) {
+      if (modification.getPath() == null) continue;
+      if (modification.getExclude()) {
+        parameters.getClassPath().remove(modification.getPath());
+        parameters.getModulePath().remove(modification.getPath());
+      }
+      else {
+        parameters.getClassPath().addFirst(modification.getPath());
+      }
+    }
   }
 }

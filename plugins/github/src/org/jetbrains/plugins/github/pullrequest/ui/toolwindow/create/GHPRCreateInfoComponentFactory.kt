@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.github.pullrequest.ui.toolwindow.create
 
 import com.intellij.CommonBundle
@@ -21,6 +21,7 @@ import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.panels.HorizontalLayout
 import com.intellij.ui.scale.JBUIScale
 import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.StartupUiUtil
 import com.intellij.util.ui.UIUtil
 import git4idea.GitLocalBranch
 import git4idea.GitPushUtil
@@ -49,7 +50,7 @@ import org.jetbrains.plugins.github.pullrequest.ui.details.GHPRMetadataPanelFact
 import org.jetbrains.plugins.github.pullrequest.ui.toolwindow.GHPRToolWindowTabComponentController
 import org.jetbrains.plugins.github.ui.util.DisableableDocument
 import org.jetbrains.plugins.github.ui.util.HtmlEditorPane
-import org.jetbrains.plugins.github.util.CollectionDelta
+import com.intellij.collaboration.util.CollectionDelta
 import org.jetbrains.plugins.github.util.GHGitRepositoryMapping
 import java.awt.Component
 import java.awt.Container
@@ -101,18 +102,18 @@ internal class GHPRCreateInfoComponentFactory(private val project: Project,
       { model ->
         with(model) {
           val branch = baseBranch ?: return@with null
-          val headRepoPath = headRepo?.ghRepositoryCoordinates?.repositoryPath
-          val baseRepoPath = baseRepo.ghRepositoryCoordinates.repositoryPath
+          val headRepoPath = headRepo?.repository?.repositoryPath
+          val baseRepoPath = baseRepo.repository.repositoryPath
           val showOwner = headRepoPath != null && baseRepoPath != headRepoPath
-          baseRepo.ghRepositoryCoordinates.repositoryPath.toString(showOwner) + ":" + branch.name
+          baseRepo.repository.repositoryPath.toString(showOwner) + ":" + branch.name
         }
       },
 
       { model ->
         with(model) {
           val branch = headBranch ?: return@with null
-          val headRepoPath = headRepo?.ghRepositoryCoordinates?.repositoryPath ?: return@with null
-          val baseRepoPath = baseRepo.ghRepositoryCoordinates.repositoryPath
+          val headRepoPath = headRepo?.repository?.repositoryPath ?: return@with null
+          val baseRepoPath = baseRepo.repository.repositoryPath
           val showOwner = baseRepoPath != headRepoPath
           headRepoPath.toString(showOwner) + ":" + branch.name
         }
@@ -131,7 +132,7 @@ internal class GHPRCreateInfoComponentFactory(private val project: Project,
       lineWrap = true
     }.also {
       CollaborationToolsUIUtil.overrideUIDependentProperty(it) {
-        font = UIUtil.getLabelFont()
+        font = StartupUiUtil.getLabelFont()
       }
       CollaborationToolsUIUtil.registerFocusActions(it)
     }
@@ -143,7 +144,7 @@ internal class GHPRCreateInfoComponentFactory(private val project: Project,
       lineWrap = true
     }.also {
       CollaborationToolsUIUtil.overrideUIDependentProperty(it) {
-        font = UIUtil.getLabelFont()
+        font = StartupUiUtil.getLabelFont()
       }
       CollaborationToolsUIUtil.registerFocusActions(it)
     }
@@ -239,7 +240,7 @@ internal class GHPRCreateInfoComponentFactory(private val project: Project,
       val headBranch = directionModel.headBranch ?: return null
       if (headBranch is GitRemoteBranch) return headBranch
       else headBranch as GitLocalBranch
-      val gitRemote = headRepo.gitRemoteUrlCoordinates
+      val gitRemote = headRepo.remote
       return findPushTarget(gitRemote.repository, gitRemote.remote, headBranch)?.branch
     }
   }
@@ -269,11 +270,11 @@ internal class GHPRCreateInfoComponentFactory(private val project: Project,
           GithubBundle.message("pull.request.create.input.remote.branch.title"),
           GithubBundle.message("pull.request.create.input.remote.branch.name"),
           GithubBundle.message("pull.request.create.input.remote.branch.comment", (headBranch as GitLocalBranch).name,
-                               headRepo.gitRemoteUrlCoordinates.remote.name))
+                               headRepo.remote.remote.name))
         findOrPushRemoteBranch(project,
                                progressIndicator,
-                               headRepo.gitRemoteUrlCoordinates.repository,
-                               headRepo.gitRemoteUrlCoordinates.remote,
+                               headRepo.remote.repository,
+                               headRepo.remote.remote,
                                headBranch,
                                dialogMessages)
       }.thenCompose { remoteHeadBranch ->
@@ -286,7 +287,7 @@ internal class GHPRCreateInfoComponentFactory(private val project: Project,
           .successOnEdt {
             if (!progressIndicator.isCanceled) {
               viewController.viewPullRequest(it)
-              settings.recentNewPullRequestHead = headRepo.ghRepositoryCoordinates
+              settings.recentNewPullRequestHead = headRepo.repository
               viewController.resetNewPullRequestView()
             }
             it

@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.actions;
 
 import com.intellij.ide.AboutPopupDescriptionProvider;
@@ -36,13 +36,19 @@ import java.awt.event.ActionEvent;
 import java.text.DateFormat;
 import java.text.MessageFormat;
 import java.text.SimpleDateFormat;
-import java.util.*;
 import java.util.List;
+import java.util.*;
 
 /**
  * @author Konstantin Bulenkov
  */
 public class AboutDialog extends DialogWrapper {
+
+  /**
+   * Use paragraph to support copy/paste multilines
+   */
+  private static final String EOL = "<p>";
+
   private final List<String> myInfo = new ArrayList<>();
 
   public AboutDialog(@Nullable Project project) {
@@ -52,14 +58,22 @@ public class AboutDialog extends DialogWrapper {
     setTitle(IdeBundle.message("about.popup.about.app", appName));
 
     init();
+  }
 
+  @Override
+  protected JComponent createSouthPanel() {
+    JComponent result = super.createSouthPanel();
+
+    // Register copy action on buttons panel only, because it conflicts with copyable labels in center panel
     new DumbAwareAction() {
       @Override
       public void actionPerformed(@NotNull AnActionEvent e) {
         copyAboutInfoToClipboard();
         close(OK_EXIT_CODE);
       }
-    }.registerCustomShortcutSet(CustomShortcutSet.fromString("meta C", "control C"), getContentPanel(), getDisposable());
+    }.registerCustomShortcutSet(CustomShortcutSet.fromString("meta C", "control C"), result, getDisposable());
+
+    return result;
   }
 
   @Override
@@ -79,8 +93,9 @@ public class AboutDialog extends DialogWrapper {
   @Override
   protected void createDefaultActions() {
     super.createDefaultActions();
-    myCancelAction = new DialogWrapperAction(IdeBundle.message("button.copy")) {
+    myOKAction = new OkAction() {
       {
+        putValue(Action.NAME, IdeBundle.message("button.copy"));
         putValue(Action.SHORT_DESCRIPTION, IdeBundle.message("description.copy.text.to.clipboard"));
       }
 
@@ -90,6 +105,7 @@ public class AboutDialog extends DialogWrapper {
         close(OK_EXIT_CODE);
       }
     };
+    myCancelAction.putValue(Action.NAME, IdeBundle.message("action.close"));
   }
 
   private void copyAboutInfoToClipboard() {
@@ -105,13 +121,15 @@ public class AboutDialog extends DialogWrapper {
 
   @SuppressWarnings("DuplicatedCode")
   private Box getText() {
-    Box lines = Box.createVerticalBox();
+    Box box = Box.createVerticalBox();
+    List<String> lines = new ArrayList<>();
     ApplicationInfoEx appInfo = ApplicationInfoEx.getInstanceEx();
     String appName = appInfo.getFullApplicationName(); //NON-NLS
     String edition = ApplicationNamesInfo.getInstance().getEditionName();
     if (edition != null) appName += " (" + edition + ")";
-    addLine(lines, appName, JBFont.h3().asBold());
-    lines.add(Box.createVerticalStrut(10));
+    box.add(label(appName, JBFont.h3().asBold()));
+    box.add(Box.createVerticalStrut(10));
+    myInfo.add(appName);
 
     String buildInfo = IdeBundle.message("about.box.build.number", appInfo.getBuild().asString());
     String buildInfoNonLocalized = MessageFormat.format("Build #{0}", appInfo.getBuild().asString());
@@ -127,45 +145,50 @@ public class AboutDialog extends DialogWrapper {
       buildInfoNonLocalized += MessageFormat.format(", built on {0}",
                                                     DateFormat.getDateInstance(DateFormat.LONG, Locale.US).format(timestamp));
     }
-    addLineWithoutLog(lines, buildInfo);
+    lines.add(buildInfo);
+    lines.add("");
     myInfo.add(buildInfoNonLocalized);
-    addEmptyLine(lines);
 
     LicensingFacade la = LicensingFacade.getInstance();
     if (la != null) {
       final String licensedTo = la.getLicensedToMessage(); //NON-NLS
       if (licensedTo != null) {
-        addLine(lines, licensedTo);
+        lines.add(licensedTo);
+        myInfo.add(licensedTo);
       }
 
-      la.getLicenseRestrictionsMessages()
-        .forEach(text -> addLine(lines, text)); //NON-NLS
+      lines.addAll(la.getLicenseRestrictionsMessages());
+      myInfo.addAll(la.getLicenseRestrictionsMessages());
     }
-    addEmptyLine(lines);
+    lines.add("");
 
     Properties properties = System.getProperties();
     String javaVersion = properties.getProperty("java.runtime.version", properties.getProperty("java.version", "unknown"));
     String arch = properties.getProperty("os.arch", "");
     String jreInfo = IdeBundle.message("about.box.jre", javaVersion, arch);
-    addLineWithoutLog(lines, jreInfo);
+    lines.add(jreInfo);
     myInfo.add(MessageFormat.format("Runtime version: {0} {1}", javaVersion, arch));
 
     String vmVersion = properties.getProperty("java.vm.name", "unknown");
     String vmVendor = properties.getProperty("java.vendor", "unknown");
     String vmVendorInfo = IdeBundle.message("about.box.vm", vmVersion, vmVendor);
-    addLineWithoutLog(lines, vmVendorInfo);
+    lines.add(vmVendorInfo);
+    lines.add("");
     myInfo.add(MessageFormat.format("VM: {0} by {1}", vmVersion, vmVendor));
-    addEmptyLine(lines);
 
     //Print extra information from plugins
     ExtensionPointName<AboutPopupDescriptionProvider> ep = new ExtensionPointName<>("com.intellij.aboutPopupDescriptionProvider");
     for (AboutPopupDescriptionProvider aboutInfoProvider : ep.getExtensions()) {
       String description = aboutInfoProvider.getDescription(); //NON-NLS
       if (description != null) {
-        addLineWithoutLog(lines, description);
-        addEmptyLine(lines);
+        lines.add(description);
+        lines.add("");
       }
     }
+
+    String text = String.join(EOL, lines); //NON-NLS
+    box.add(label(text, getDefaultTextFont()));
+    addEmptyLine(box);
 
     //Link to open-source projects
     HyperlinkLabel openSourceSoftware = new HyperlinkLabel();
@@ -173,7 +196,7 @@ public class AboutDialog extends DialogWrapper {
     openSourceSoftware.setTextWithHyperlink(IdeBundle.message("about.box.powered.by.open.source"));
     openSourceSoftware.addHyperlinkListener(new HyperlinkAdapter() {
       @Override
-      protected void hyperlinkActivated(HyperlinkEvent e) {
+      protected void hyperlinkActivated(@NotNull HyperlinkEvent e) {
         AboutPopup.showOpenSoftwareSources(ObjectUtils.notNull(AboutPopup.loadThirdPartyLibraries(), ""));
       }
     });
@@ -181,13 +204,13 @@ public class AboutDialog extends DialogWrapper {
     JBLabel poweredBy = new JBLabel(IdeBundle.message("about.box.powered.by") + " ").withFont(getDefaultTextFont());
     BorderLayoutPanel panel = JBUI.Panels.simplePanel(openSourceSoftware).addToLeft(poweredBy);
     panel.setAlignmentX(Component.LEFT_ALIGNMENT);
-    lines.add(panel);
+    box.add(panel);
 
     //Copyright
-    addLineWithoutLog(lines, AboutPopup.getCopyrightText());
-    addEmptyLine(lines);
+    box.add(label(AboutPopup.getCopyrightText(), getDefaultTextFont()));
+    addEmptyLine(box);
 
-    return lines;
+    return box;
   }
 
   private static JBFont getDefaultTextFont() {
@@ -198,23 +221,9 @@ public class AboutDialog extends DialogWrapper {
     box.add(Box.createVerticalStrut(18));
   }
 
-  private void addLine(JComponent panel, @NlsContexts.Label String text, JBFont font) {
-    addLine(panel, text, font, true);
-  }
-  private void addLine(JComponent panel, @NlsContexts.Label String text, JBFont font, boolean log) {
+  private static JLabel label(@NlsContexts.Label String text, JBFont font) {
     JBLabel label = new JBLabel(text).withFont(font);
-    panel.add(label);
-
-    if (log) {
-      myInfo.add(text);
-    }
-  }
-
-  private void addLineWithoutLog(JComponent panel, @NlsContexts.Label String text) {
-    addLine(panel, text, getDefaultTextFont(), false);
-  }
-
-  private void addLine(JComponent panel, @NlsContexts.Label String text) {
-    addLine(panel, text, getDefaultTextFont());
+    label.setCopyable(true);
+    return label;
   }
 }

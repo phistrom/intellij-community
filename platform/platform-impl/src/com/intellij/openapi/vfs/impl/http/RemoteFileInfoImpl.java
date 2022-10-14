@@ -1,7 +1,7 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vfs.impl.http;
 
-import com.intellij.ide.IdeBundle;
+import com.intellij.ide.IdeCoreBundle;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.diagnostic.Logger;
@@ -86,7 +86,7 @@ public class RemoteFileInfoImpl implements RemoteContentProvider.DownloadingCall
       }
       catch (IOException e) {
         LOG.info(e);
-        errorOccurred(IdeBundle.message("cannot.create.local.file", e.getMessage()), false);
+        errorOccurred(IdeCoreBundle.message("cannot.create.local.file", e.getMessage()), false);
         return;
       }
       myCancelled.set(false);
@@ -238,7 +238,7 @@ public class RemoteFileInfoImpl implements RemoteContentProvider.DownloadingCall
       localVirtualFile = myLocalVirtualFile;
     }
     final RemoteContentProvider contentProvider = myManager.findContentProvider(myUrl);
-    if ((localVirtualFile == null || !contentProvider.equals(myContentProvider) || !contentProvider.isUpToDate(myUrl, localVirtualFile))) {
+    if (localVirtualFile == null || !contentProvider.equals(myContentProvider) || !contentProvider.isUpToDate(myUrl, localVirtualFile)) {
       myContentProvider = contentProvider;
       addDownloadingListener(new MyRefreshingDownloadingListener(postRunnable));
       restartDownloading();
@@ -280,19 +280,15 @@ public class RemoteFileInfoImpl implements RemoteContentProvider.DownloadingCall
   @NotNull
   public Promise<VirtualFile> download() {
     synchronized (myLock) {
-      switch (getState()) {
-        case DOWNLOADING_NOT_STARTED:
+      return switch (getState()) {
+        case DOWNLOADING_NOT_STARTED -> {
           startDownloading();
-          return createDownloadedCallback(this);
-        case DOWNLOADING_IN_PROGRESS:
-          return createDownloadedCallback(this);
-        case DOWNLOADED:
-          return Promises.resolvedPromise(myLocalVirtualFile);
-
-        case ERROR_OCCURRED:
-        default:
-          return rejectedPromise("errorOccurred");
-      }
+          yield createDownloadedCallback(this);
+        }
+        case DOWNLOADING_IN_PROGRESS -> createDownloadedCallback(this);
+        case DOWNLOADED -> Promises.resolvedPromise(myLocalVirtualFile);
+        case ERROR_OCCURRED -> rejectedPromise("errorOccurred");
+      };
     }
   }
 

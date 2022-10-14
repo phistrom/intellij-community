@@ -15,7 +15,6 @@
  */
 package com.intellij.psi.impl.java.stubs;
 
-import com.google.common.base.MoreObjects;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiType;
 import com.intellij.psi.util.TypeConversionUtil;
@@ -27,9 +26,6 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 
-/**
- * @author peter
- */
 public class FunctionalExpressionKey {
   public static final int UNKNOWN_PARAM_COUNT = -1;
   private final int lambdaParameterCount;
@@ -95,11 +91,11 @@ public class FunctionalExpressionKey {
 
   @Override
   public String toString() {
-    return MoreObjects.toStringHelper(this)
-      .add("lambdaParameterCount", lambdaParameterCount)
-      .add("type", lambdaReturnType)
-      .add("knownType", knownType)
-      .toString();
+    return "FunctionalExpressionKey{" +
+           "lambdaParameterCount=" + lambdaParameterCount +
+           ", lambdaReturnType=" + lambdaReturnType +
+           ", knownType='" + knownType + '\'' +
+           '}';
   }
 
   public enum CoarseType {

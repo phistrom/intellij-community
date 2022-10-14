@@ -1,16 +1,24 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.core.util
 
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.util.NlsContexts
 import org.jetbrains.annotations.TestOnly
+import org.jetbrains.kotlin.idea.util.application.isUnitTestMode
 import java.util.concurrent.ConcurrentHashMap
 import javax.swing.Icon
 
-fun showYesNoCancelDialog(key: String, project: Project, message: String, title: String, icon: Icon, default: Int?): Int {
-    return if (!ApplicationManager.getApplication().isUnitTestMode) {
+fun showYesNoCancelDialog(
+    key: String,
+    project: Project,
+    @NlsContexts.DialogMessage message: String,
+    @NlsContexts.DialogTitle title: String,
+    icon: Icon,
+    default: Int?
+): Int {
+    return if (!isUnitTestMode()) {
         Messages.showYesNoCancelDialog(project, message, title, icon)
     } else {
         callInTestMode(key, default)

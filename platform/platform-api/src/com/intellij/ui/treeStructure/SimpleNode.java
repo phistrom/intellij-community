@@ -12,7 +12,6 @@ import com.intellij.ui.tree.LeafState;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.update.ComparableObject;
 import com.intellij.util.ui.update.ComparableObjectCheck;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -117,7 +116,6 @@ public abstract class SimpleNode extends PresentableNodeDescriptor implements Co
    * or update presentation dynamically by defining {@link #update(PresentationData)}
    */
   @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public final void setNodeText(String text, String tooltip, boolean hasError) {
     clearColoredText();
     SimpleTextAttributes attributes = hasError ? getErrorAttributes() : getPlainAttributes();
@@ -129,19 +127,8 @@ public abstract class SimpleNode extends PresentableNodeDescriptor implements Co
    * or update presentation dynamically by defining {@link #update(PresentationData)}
    */
   @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public final void setPlainText(String aText) {
     clearColoredText();
-    addPlainText(aText);
-  }
-
-  /**
-   * @deprecated use {@link #getTemplatePresentation()} to set constant presentation right in node's constructor
-   * or update presentation dynamically by defining {@link #update(PresentationData)}
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
-  public final void addPlainText(String aText) {
     getTemplatePresentation().addText(new ColoredFragment(aText, getPlainAttributes()));
   }
 
@@ -150,17 +137,6 @@ public abstract class SimpleNode extends PresentableNodeDescriptor implements Co
    * or update presentation dynamically by defining {@link #update(PresentationData)}
    */
   @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
-  public final void addErrorText(String aText, String errorTooltipText) {
-    getTemplatePresentation().addText(new ColoredFragment(aText, errorTooltipText, getErrorAttributes()));
-  }
-
-  /**
-   * @deprecated use {@link #getTemplatePresentation()} to set constant presentation right in node's constructor
-   * or update presentation dynamically by defining {@link #update(PresentationData)}
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public final void clearColoredText() {
     getTemplatePresentation().clearText();
   }
@@ -170,7 +146,6 @@ public abstract class SimpleNode extends PresentableNodeDescriptor implements Co
    * or update presentation dynamically by defining {@link #update(PresentationData)}
    */
   @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public final void addColoredFragment(String aText, SimpleTextAttributes aAttributes) {
     addColoredFragment(aText, null, aAttributes);
   }
@@ -180,19 +155,8 @@ public abstract class SimpleNode extends PresentableNodeDescriptor implements Co
    * or update presentation dynamically by defining {@link #update(PresentationData)}
    */
   @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public final void addColoredFragment(String aText, String toolTip, SimpleTextAttributes aAttributes) {
     getTemplatePresentation().addText(new ColoredFragment(aText, toolTip, aAttributes));
-  }
-
-  /**
-   * @deprecated use {@link #getTemplatePresentation()} to set constant presentation right in node's constructor
-   * or update presentation dynamically by defining {@link #update(PresentationData)}
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
-  public final void addColoredFragment(ColoredFragment fragment) {
-    getTemplatePresentation().addText(new ColoredFragment(fragment.getText(), fragment.getAttributes()));
   }
 
   protected void doUpdate() {
@@ -257,20 +221,9 @@ public abstract class SimpleNode extends PresentableNodeDescriptor implements Co
    * @deprecated use {@link #getTemplatePresentation()} to set constant presentation right in node's constructor
    * or update presentation dynamically by defining {@link #update(PresentationData)}
    */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @Deprecated(forRemoval = true)
   public void setUniformIcon(Icon aIcon) {
     setIcon(aIcon);
-  }
-
-  /**
-   * @deprecated never called by Tree classes
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
-  public final ColoredFragment[] getColoredText() {
-    final List<ColoredFragment> list = getTemplatePresentation().getColoredText();
-    return list.toArray(new ColoredFragment[0]);
   }
 
   @Override

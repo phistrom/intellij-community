@@ -10,11 +10,7 @@ import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.*;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.containers.IntStack;
-import it.unimi.dsi.fastutil.ints.IntArrayList;
-import it.unimi.dsi.fastutil.ints.IntList;
-import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
-import it.unimi.dsi.fastutil.ints.IntSet;
+import it.unimi.dsi.fastutil.ints.*;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -1152,7 +1148,9 @@ public final class ControlFlowUtil {
           PsiElement element = myFlow.getElement(i);
 
           final PsiElement unreachableParent = getUnreachableExpressionParent(element);
-          if (unreachableParent != null) return unreachableParent;
+          if (unreachableParent != null) {
+            return correctUnreachableStatement(unreachableParent);
+          }
 
           if (element == null || !PsiUtil.isStatement(element)) continue;
           if (element.getParent() instanceof PsiExpression) continue;
@@ -1179,20 +1177,64 @@ public final class ControlFlowUtil {
       return null;
     }
 
+    private static PsiElement correctUnreachableStatement(PsiElement statement) {
+      if (!(statement instanceof PsiStatement)) return statement;
+      while (true) {
+        PsiElement parent = statement.getParent();
+        if (parent instanceof PsiDoWhileStatement || parent instanceof PsiLabeledStatement) {
+          statement = parent;
+          continue;
+        }
+        if (parent instanceof PsiCodeBlock && PsiTreeUtil.getPrevSiblingOfType(statement, PsiStatement.class) == null) {
+          PsiElement grandParent = parent.getParent();
+          if (grandParent instanceof PsiBlockStatement) {
+            statement = grandParent;
+            continue;
+          }
+        }
+        return statement;
+      }
+    }
+
     @Nullable
     private static PsiElement getUnreachableExpressionParent(@Nullable PsiElement element) {
       if (element instanceof PsiExpression) {
-        final PsiElement expression = PsiTreeUtil.findFirstParent(element, e -> !(e.getParent() instanceof PsiParenthesizedExpression));
-        if (expression != null) {
+        PsiElement expression = PsiTreeUtil.findFirstParent(element, e -> !(e.getParent() instanceof PsiParenthesizedExpression));
+        while (expression != null) {
           final PsiElement parent = expression.getParent();
           if (parent instanceof PsiExpressionStatement) {
-            return getUnreachableStatementParent(parent);
+            final PsiElement grandParent = parent.getParent();
+            if (grandParent instanceof PsiForStatement) {
+              if (((PsiForStatement)grandParent).getInitialization() == parent) {
+                return grandParent;
+              }
+              return null;
+            }
+            return parent;
+          }
+          if (parent instanceof PsiLocalVariable && ((PsiLocalVariable)parent).getInitializer() == expression) {
+            PsiElement grandParent = parent.getParent();
+            if (grandParent instanceof PsiDeclarationStatement) return grandParent;
+            if (grandParent instanceof PsiResourceList && grandParent.getParent() instanceof PsiTryStatement) {
+              return grandParent.getParent();
+            }
+            return null;
           }
           if (parent instanceof PsiIfStatement && ((PsiIfStatement)parent).getCondition() == expression ||
               parent instanceof PsiSwitchBlock && ((PsiSwitchBlock)parent).getExpression() == expression ||
               parent instanceof PsiWhileStatement && ((PsiWhileStatement)parent).getCondition() == expression ||
-              parent instanceof PsiForeachStatement && ((PsiForeachStatement)parent).getIteratedValue() == expression) {
+              parent instanceof PsiForeachStatement && ((PsiForeachStatement)parent).getIteratedValue() == expression ||
+              parent instanceof PsiReturnStatement && ((PsiReturnStatement)parent).getReturnValue() == expression ||
+              parent instanceof PsiYieldStatement && ((PsiYieldStatement)parent).getExpression() == expression ||
+              parent instanceof PsiThrowStatement && ((PsiThrowStatement)parent).getException() == expression ||
+              parent instanceof PsiSynchronizedStatement && ((PsiSynchronizedStatement)parent).getLockExpression() == expression ||
+              parent instanceof PsiAssertStatement && ((PsiAssertStatement)parent).getAssertCondition() == expression) {
             return parent;
+          }
+          if (parent instanceof PsiExpression) {
+            expression = parent;
+          } else {
+            break;
           }
         }
       }
@@ -2298,11 +2340,11 @@ public final class ControlFlowUtil {
 
     boolean depthFirstSearch(final int startOffset, @NotNull BitSet visitedOffsets) {
       // traverse the graph starting with the startOffset
-      IntStack walkThroughStack = new IntStack(Math.max(size() / 2, 2));
+      IntStack walkThroughStack=new IntArrayList(Math.max(size() / 2, 2));
       visitedOffsets.clear();
       walkThroughStack.push(startOffset);
-      while (!walkThroughStack.empty()) {
-        int currentOffset = walkThroughStack.pop();
+      while (!walkThroughStack.isEmpty()) {
+        int currentOffset = walkThroughStack.popInt();
         if (currentOffset < size() && !visitedOffsets.get(currentOffset)) {
           visitedOffsets.set(currentOffset);
           int[] nextOffsets = getNextOffsets(currentOffset);

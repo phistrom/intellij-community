@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package com.intellij.debugger.actions;
 
@@ -16,6 +16,7 @@ import com.intellij.debugger.jdi.StackFrameProxyImpl;
 import com.intellij.debugger.jdi.ThreadReferenceProxyImpl;
 import com.intellij.idea.ActionsBundle;
 import com.intellij.openapi.actionSystem.ActionPlaces;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
@@ -84,9 +85,8 @@ public class ForceEarlyReturnAction extends DebuggerAction {
                                                   final JavaStackFrame frame,
                                                   final DebugProcessImpl debugProcess,
                                                   @Nullable final DialogWrapper dialog) {
-    //noinspection SSBasedInspection
     SwingUtilities.invokeLater(() -> {
-      if (PopFrameAction.evaluateFinallyBlocks(debugProcess.getProject(),
+      if (JvmDropFrameActionHandler.evaluateFinallyBlocks(debugProcess.getProject(),
                                                UIUtil.removeMnemonic(ActionsBundle.actionText("Debugger.ForceEarlyReturn")),
                                                frame,
                                                new XDebuggerEvaluator.XEvaluationCallback() {
@@ -122,7 +122,6 @@ public class ForceEarlyReturnAction extends DebuggerAction {
           showError(debugProcess.getProject(), JavaDebuggerBundle.message("error.early.return", e.getLocalizedMessage()));
           return;
         }
-        //noinspection SSBasedInspection
         SwingUtilities.invokeLater(() -> {
           if (dialog != null) {
             dialog.close(DialogWrapper.OK_EXIT_CODE);
@@ -164,7 +163,7 @@ public class ForceEarlyReturnAction extends DebuggerAction {
   }
 
   private static void showError(Project project, @NlsContexts.DialogMessage String message) {
-    PopFrameAction.showError(project, message, UIUtil.removeMnemonic(ActionsBundle.actionText("Debugger.ForceEarlyReturn")));
+    JvmDropFrameActionHandler.showError(project, message, UIUtil.removeMnemonic(ActionsBundle.actionText("Debugger.ForceEarlyReturn")));
   }
 
   @Override
@@ -182,5 +181,10 @@ public class ForceEarlyReturnAction extends DebuggerAction {
     else {
       e.getPresentation().setVisible(enable);
     }
+  }
+
+  @Override
+  public @NotNull ActionUpdateThread getActionUpdateThread() {
+    return ActionUpdateThread.EDT;
   }
 }

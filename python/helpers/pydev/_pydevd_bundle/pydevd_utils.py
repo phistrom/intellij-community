@@ -17,7 +17,7 @@ except:
 
 import inspect
 from _pydevd_bundle.pydevd_constants import BUILTINS_MODULE_NAME, IS_PY38_OR_GREATER, dict_iter_items, get_global_debugger, IS_PY3K, LOAD_VALUES_POLICY, \
-    ValuesPolicy
+    ValuesPolicy, GET_FRAME_RETURN_GROUP, GET_FRAME_NORMAL_GROUP
 import sys
 from _pydev_bundle import pydev_log
 from _pydev_imps._pydev_saved_modules import threading
@@ -46,8 +46,11 @@ def save_main_module(file, module_name):
         m = new_module('__main__')
 
     sys.modules['__main__'] = m
-    if hasattr(sys.modules[module_name], '__loader__'):
-        m.__loader__ = getattr(sys.modules[module_name], '__loader__')
+    orig_module = sys.modules[module_name]
+    for attr in ['__loader__', '__spec__']:
+        if hasattr(orig_module, attr):
+            orig_attr = getattr(orig_module, attr)
+            setattr(m, attr, orig_attr)
     m.__file__ = file
 
     return m
@@ -587,7 +590,9 @@ def is_numpy(x):
            or 'float' in type_name or 'complex' in type_name
 
 
-def should_evaluate_full_value(val):
+def should_evaluate_full_value(val, group_type=GET_FRAME_NORMAL_GROUP):
+    if group_type == GET_FRAME_RETURN_GROUP:
+        return None
     return LOAD_VALUES_POLICY == ValuesPolicy.SYNC \
            or ((is_builtin(type(val)) or is_numpy(type(val))) and not isinstance(val, (list, tuple, dict, set, frozenset))) \
            or (is_in_unittests_debugging_mode() and isinstance(val, Exception))
@@ -640,3 +645,10 @@ def is_in_unittests_debugging_mode():
     debugger = get_global_debugger()
     if debugger:
         return debugger.stop_on_failed_tests
+
+def is_current_thread_main_thread():
+    if hasattr(threading, 'main_thread'):
+        return threading.current_thread() is threading.main_thread()
+    else:
+        return isinstance(threading.current_thread(), threading._MainThread)
+

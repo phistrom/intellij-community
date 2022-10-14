@@ -16,6 +16,7 @@ import com.jetbrains.python.console.pydev.PydevCompletionVariant;
 import com.jetbrains.python.debugger.PyDebugValue;
 import com.jetbrains.python.debugger.PyExceptionBreakpointProperties;
 import com.jetbrains.python.debugger.PyExceptionBreakpointType;
+import com.jetbrains.python.debugger.pydev.ProcessDebugger;
 import com.jetbrains.python.debugger.settings.PyDebuggerSettings;
 import com.jetbrains.python.sdk.flavors.PythonSdkFlavor;
 import org.jetbrains.annotations.NotNull;
@@ -938,17 +939,22 @@ public class PythonDebuggerTest extends PyEnvTestCase {
     runPythonTest(new PyDebuggerTask("/debug", "test_type_handler.py") {
       @Override
       public void before() {
-        toggleBreakpoint(getFilePath(getScriptName()), 5);
+        toggleBreakpoint(getFilePath(getScriptName()), 11);
       }
 
       @Override
       public void testing() throws Exception {
         waitForPause();
         eval("s1").hasValue("'\\\\'");
-        eval("s2").hasValue("'\\''");
-        eval("s3").hasValue("'\"'");
-        eval("s4").hasValue("'\n'");
-        eval("s5").hasValue("'\\'foo\\'bar\nbaz\\\\'");
+        eval("s2").hasValue("'\\\\\\\\'");
+        eval("s3").hasValue("\"'\"");
+        eval("s4").hasValue("'\"'");
+        eval("s5").hasValue("'\n'");
+        eval("s6").hasValue("\"'foo'bar\nbaz\\\\\"");
+        eval("s7").hasValue("'^\\\\w+$'");
+        eval("s8").hasValue("\"'459'\"");
+        eval("s9").hasValue("'459'");
+        eval("s10").hasValue("'\u2764'");
       }
     });
   }
@@ -1455,23 +1461,26 @@ public class PythonDebuggerTest extends PyEnvTestCase {
 
       @Override
       public void testing() throws Exception {
-        String[] expectedOutput = ("[True] \t [True]\n" +
-                                   "[False] \t [False]\n" +
-                                   "[None] \t [None]").split("\n");
+        String[] expectedOutput = ("""
+                                     [True] \t [True]
+                                     [False] \t [False]
+                                     [None] \t [None]""").split("\n");
         waitForPause();
         for (String line : expectedOutput) {
           waitForOutput(line);
         }
-        consoleExec("TFN = [True, False, None]\n" +
-                    "for q in TFN:\n" +
-                    "    gen = (c for c in TFN if c == q)\n" +
-                    "    lcomp = [c for c in TFN if c == q]\n" +
-                    "    print(list(gen), \"\\t\", list(lcomp))");
+        consoleExec("""
+                      TFN = [True, False, None]
+                      for q in TFN:
+                          gen = (c for c in TFN if c == q)
+                          lcomp = [c for c in TFN if c == q]
+                          print(list(gen), "\\t", list(lcomp))""");
         if (hasPython2Tag()) {
           // Python 2 formats the output slightly differently.
-          expectedOutput = ("([True], '\\t', [True])\n" +
-                            "([False], '\\t', [False])\n" +
-                            "([None], '\\t', [None])").split("\n");
+          expectedOutput = ("""
+                              ([True], '\\t', [True])
+                              ([False], '\\t', [False])
+                              ([None], '\\t', [None])""").split("\n");
           for (String line : expectedOutput) {
             waitForOutput(line);
           }
@@ -1481,11 +1490,12 @@ public class PythonDebuggerTest extends PyEnvTestCase {
             waitForOutput(line, 2);
           }
         }
-        consoleExec("def g():\n" +
-                    "    print(\"Foo, bar, baz\")\n" +
-                    "def f():\n" +
-                    "    g()\n" +
-                    "f()");
+        consoleExec("""
+                      def g():
+                          print("Foo, bar, baz")
+                      def f():
+                          g()
+                      f()""");
         waitForOutput("Foo, bar, baz");
         resume();
       }
@@ -1601,6 +1611,98 @@ public class PythonDebuggerTest extends PyEnvTestCase {
         assertNotNull(getCurrentStackFrame().getSourcePosition());
         resume();
         waitForTerminate();
+      }
+    });
+  }
+
+  @Test
+  public void testDontStopTwiceOnException() {
+    runPythonTest(new PyDebuggerTask("/debug", "test_double_stop_on_exception.py") {
+      @Override
+      public void before() {
+        toggleBreakpoint(getFilePath(getScriptName()), 3);
+      }
+
+      @Override
+      public void testing() throws Exception {
+        waitForPause();
+        // Check: debugger doesn't stop on the breakpoint second time
+        resume();
+        waitForTerminate();
+      }
+    });
+  }
+
+  @Test
+  public void testLoadElementsForGroupsOnDemand() {
+    runPythonTest(new PyDebuggerTask("/debug", "test_load_elements_for_groups_on_demand.py") {
+      @Override
+      public void before() {
+        toggleBreakpoint(getFilePath(getScriptName()), 2);
+        toggleBreakpoint(getFilePath(getScriptName()), 8);
+        final PyDebuggerSettings debuggerSettings = PyDebuggerSettings.getInstance();
+        debuggerSettings.setWatchReturnValues(true);
+      }
+
+      @Override
+      public void doFinally() {
+        final PyDebuggerSettings debuggerSettings = PyDebuggerSettings.getInstance();
+        debuggerSettings.setWatchReturnValues(false);
+      }
+
+      @Override
+      public void testing() throws Exception {
+        waitForPause();
+        resume();
+        waitForPause();
+
+        List<PyDebugValue> defaultVariables = loadSpecialVariables(ProcessDebugger.GROUP_TYPE.DEFAULT);
+        List<String> names = List.of("_dummy_ret_val", "_dummy_special_var", "boolean", "get_foo", "string");
+        List<String> values = List.of("", "True", "1", "Hello!");
+        containsValue(defaultVariables, names, values);
+
+        List<PyDebugValue> specialVariables = loadSpecialVariables(ProcessDebugger.GROUP_TYPE.SPECIAL);
+        names = List.of("__builtins__", "__doc__", "__file__", "__loader__", "__name__", "__package__", "__spec__");
+        values = List.of("<module 'builtins' (built-in)>", "None", "test_load_elements_for_groups_on_demand.py", " ", "__main__", "");
+        containsValue(specialVariables, names, values);
+
+        List<PyDebugValue> returnVariables = loadSpecialVariables(ProcessDebugger.GROUP_TYPE.RETURN);
+        names = List.of("foo");
+        values = List.of("1");
+        containsValue(returnVariables, names, values);
+
+        resume();
+        waitForTerminate();
+      }
+
+      private void containsValue(List<PyDebugValue> variablesGroup, List<String> names, List<String> values) {
+        for (PyDebugValue elem : variablesGroup) {
+          assertTrue(names.contains(elem.getName()));
+          assertTrue(values.contains(elem.getValue()));
+        }
+      }
+    });
+  }
+
+  @Test
+  public void testDictWithUnicodeOrBytesValuesOrNames() {
+    runPythonTest(new PyDebuggerTaskTagAware("/debug", "test_dict_with_unicode_or_bytes_values_names.py") {
+      private final static String PYTHON2_TAG = "python2";
+
+      @Override
+      public void testing() throws Exception {
+        if (hasPython2Tag()) {
+          waitForOutput("{u\"u'Foo \\u201cFoo\\u201d Bar' (4706573888)\": u'\\u201cFoo\\u201d'}");
+          waitForOutput("{'\\xfc\\x00': '\\x00\\x10'}");
+        }
+        else {
+          waitForOutput("{\"u'Foo “Foo” Bar' (4706573888)\": '“Foo”'}");
+          waitForOutput("{b'\\xfc\\x00': b'\\x00\\x10'}");
+        }
+      }
+
+      private boolean hasPython2Tag() throws NullPointerException {
+        return hasTag(PYTHON2_TAG);
       }
     });
   }

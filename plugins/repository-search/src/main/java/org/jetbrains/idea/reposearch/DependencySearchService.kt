@@ -1,75 +1,41 @@
 package org.jetbrains.idea.reposearch
 
-import com.intellij.openapi.application.ReadAction
-import com.intellij.openapi.extensions.ExtensionPointListener
-import com.intellij.openapi.extensions.PluginDescriptor
+import com.intellij.openapi.Disposable
+import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.service
+import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.progress.ProgressIndicatorProvider
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.util.ProgressWrapper
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.text.StringUtil
 import com.intellij.util.concurrency.AppExecutorUtil
-import com.intellij.util.containers.ContainerUtil
+import com.intellij.util.containers.CollectionFactory
 import org.jetbrains.annotations.ApiStatus
-import org.jetbrains.annotations.TestOnly
 import org.jetbrains.concurrency.AsyncPromise
 import org.jetbrains.concurrency.Promise
 import org.jetbrains.concurrency.all
 import org.jetbrains.concurrency.resolvedPromise
+import org.jetbrains.idea.maven.onlinecompletion.model.MavenRepositoryArtifactInfo
 import java.util.*
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.CompletableFuture.completedFuture
-import java.util.concurrent.ExecutorService
 import java.util.function.BiConsumer
 import java.util.function.Consumer
 
 typealias ResultConsumer = (RepositoryArtifactData) -> Unit
 
+
 @ApiStatus.Experimental
-class DependencySearchService(private val myProject: Project) {
-  private val myExecutorService: ExecutorService
-  private val cache: MutableMap<String, CompletableFuture<Collection<RepositoryArtifactData>>> = ContainerUtil.createConcurrentWeakKeyWeakValueMap()
-  private val remoteProviders: MutableList<DependencySearchProvider> = ArrayList()
-  private val localProviders: MutableList<DependencySearchProvider> = ArrayList()
+@Service(Service.Level.PROJECT)
+class DependencySearchService(private val project: Project) : Disposable {
+  private val executorService = AppExecutorUtil.createBoundedScheduledExecutorService("DependencySearch", 2)
+  private val cache = CollectionFactory.createConcurrentWeakKeyWeakValueMap<String, CompletableFuture<Collection<RepositoryArtifactData>>>()
+  private fun remoteProviders() = EP_NAME.extensionList.flatMap { it.getProviders(project) }.filter { !it.isLocal }
+  private fun localProviders() = EP_NAME.extensionList.flatMap { it.getProviders(project) }.filter { it.isLocal }
 
-
-  init {
-    DependencySearchProvidersFactory.EXTENSION_POINT_NAME.addExtensionPointListener(
-      object : ExtensionPointListener<DependencySearchProvidersFactory> {
-        override fun extensionAdded(extension: DependencySearchProvidersFactory,
-                                    pluginDescriptor: PluginDescriptor) {
-          updateProviders()
-        }
-
-        override fun extensionRemoved(extension: DependencySearchProvidersFactory,
-                                      pluginDescriptor: PluginDescriptor) {
-          updateProviders()
-        }
-      }, myProject)
+  override fun dispose() {
   }
 
-  fun updateProviders() {
-    ReadAction.nonBlocking {
-      remoteProviders.clear()
-      localProviders.clear()
-      cache.clear()
-      if (myProject.isDisposed) return@nonBlocking;
-      for (f in DependencySearchProvidersFactory.EXTENSION_POINT_NAME.extensionList) {
-        if (!f.isApplicable(myProject)) {
-          continue
-        }
-
-        for (provider in f.getProviders(myProject)) {
-          if (provider.isLocal) {
-            localProviders.add(provider)
-          }
-          else {
-            remoteProviders.add(provider)
-          }
-        }
-      }
-    }.executeSynchronously()
-
-  }
 
   private fun performSearch(cacheKey: String,
                             parameters: SearchParameters,
@@ -77,7 +43,7 @@ class DependencySearchService(private val myProject: Project) {
                             searchMethod: (DependencySearchProvider, ResultConsumer) -> Unit): Promise<Int> {
 
     if (parameters.useCache()) {
-      val cachedValue = foundInCache(cacheKey, parameters, consumer)
+      val cachedValue = foundInCache(cacheKey, consumer)
       if (cachedValue != null) {
         return cachedValue
       }
@@ -91,11 +57,13 @@ class DependencySearchService(private val myProject: Project) {
 
 
     val localResultSet: MutableSet<RepositoryArtifactData> = LinkedHashSet()
-    localProviders.forEach { lp -> searchMethod(lp) { localResultSet.add(it) } }
+    localProviders().forEach { lp -> searchMethod(lp) { localResultSet.add(it) } }
     localResultSet.forEach(consumer)
 
+    val remoteProviders = remoteProviders()
 
-    if (parameters.isLocalOnly || remoteProviders.size == 0) {
+    if (parameters.isLocalOnly || remoteProviders.isEmpty()) {
+      thisNewFuture.complete(localResultSet)
       return resolvedPromise(0)
     }
 
@@ -105,12 +73,12 @@ class DependencySearchService(private val myProject: Project) {
       val promise = AsyncPromise<Void>()
       promises.add(promise)
       val wrapper = ProgressWrapper.wrap(ProgressIndicatorProvider.getInstance().progressIndicator)
-      myExecutorService.submit {
+      executorService.submit {
         try {
           ProgressManager.getInstance().runProcess({
                                                      searchMethod(provider) { if (resultSet.add(it)) consumer(it) }
                                                      promise.setResult(null)
-                                                   }, wrapper);
+                                                   }, wrapper)
         }
         catch (e: Exception) {
           promise.setError(e)
@@ -154,7 +122,45 @@ class DependencySearchService(private val myProject: Project) {
     }
   }
 
-  private fun foundInCache(searchString: String, parameters: SearchParameters, consumer: ResultConsumer): Promise<Int>? {
+  fun getGroupIds(pattern: String?): Set<String>{
+    val result = mutableSetOf<String>()
+    fulltextSearch(pattern ?: "", SearchParameters(true, true)) {
+      if (it is MavenRepositoryArtifactInfo) {
+        result.add(it.groupId)
+      }
+    }
+    return result
+  }
+
+  fun getArtifactIds(groupId: String): Set<String>{
+    ProgressIndicatorProvider.checkCanceled()
+    val result = mutableSetOf<String>()
+    fulltextSearch("$groupId:", SearchParameters(true, true)) {
+      if (it is MavenRepositoryArtifactInfo) {
+        if (StringUtil.equals(groupId, it.groupId)) {
+          result.add(it.artifactId)
+        }
+      }
+    }
+    return result
+  }
+
+  fun getVersions(groupId: String, artifactId: String): Set<String>{
+    ProgressIndicatorProvider.checkCanceled()
+    val result = mutableSetOf<String>()
+    fulltextSearch("$groupId:$artifactId", SearchParameters(true, true)) {
+      if (it is MavenRepositoryArtifactInfo) {
+        if (StringUtil.equals(groupId, it.groupId) && StringUtil.equals(artifactId, it.artifactId)) {
+          for (item in it.items) {
+            if (item.version != null) result.add(item.version!!)
+          }
+        }
+      }
+    }
+    return result
+  }
+
+  private fun foundInCache(searchString: String, consumer: ResultConsumer): Promise<Int>? {
     val future = cache[searchString]
     if (future != null) {
       return fillResultsFromCache(future, consumer)
@@ -180,35 +186,16 @@ class DependencySearchService(private val myProject: Project) {
 
 
   companion object {
+
+    @JvmField
+    val EP_NAME = ExtensionPointName<DependencySearchProvidersFactory>("org.jetbrains.idea.reposearch.provider")
+
     @JvmStatic
-    fun getInstance(project: Project): DependencySearchService {
-      return project.getService(DependencySearchService::class.java)
-    }
+    fun getInstance(project: Project): DependencySearchService = project.service()
   }
 
-  init {
-    myExecutorService = AppExecutorUtil.createBoundedScheduledExecutorService("DependencySearch", 2)
-    DependencySearchProvidersFactory.EXTENSION_POINT_NAME.addExtensionPointListener(
-      object : ExtensionPointListener<DependencySearchProvidersFactory?> {
-        override fun extensionAdded(extension: DependencySearchProvidersFactory,
-                                    pluginDescriptor: PluginDescriptor) {
-          updateProviders()
-        }
-
-        override fun extensionRemoved(extension: DependencySearchProvidersFactory,
-                                      pluginDescriptor: PluginDescriptor) {
-          updateProviders()
-        }
-      }, myProject)
-    updateProviders()
+  fun clearCache() {
+    cache.clear()
   }
 
-  @TestOnly
-  fun setProviders(local: List<DependencySearchProvider>, remote: List<DependencySearchProvider>) {
-    remoteProviders.clear()
-    localProviders.clear()
-
-    remoteProviders.addAll(remote)
-    localProviders.addAll(local)
-  }
 }

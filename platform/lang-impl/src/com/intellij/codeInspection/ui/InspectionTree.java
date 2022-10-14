@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package com.intellij.codeInspection.ui;
 
@@ -14,13 +14,17 @@ import com.intellij.codeInspection.reference.RefElement;
 import com.intellij.codeInspection.reference.RefEntity;
 import com.intellij.codeInspection.ui.util.SynchronizedBidiMultiMap;
 import com.intellij.ide.DataManager;
+import com.intellij.ide.IdeTooltipManager;
 import com.intellij.ide.OccurenceNavigator;
 import com.intellij.ide.util.PsiNavigationSupport;
-import com.intellij.openapi.actionSystem.ActionPlaces;
-import com.intellij.openapi.actionSystem.IdeActions;
+import com.intellij.openapi.Disposable;
+import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.Navigatable;
 import com.intellij.profile.codeInspection.ui.inspectionsTree.InspectionsConfigTreeComparator;
@@ -30,14 +34,15 @@ import com.intellij.psi.SmartPsiElementPointer;
 import com.intellij.ui.PopupHandler;
 import com.intellij.ui.SmartExpander;
 import com.intellij.ui.TreeSpeedSearch;
+import com.intellij.ui.UIBundle;
 import com.intellij.ui.tree.AsyncTreeModel;
 import com.intellij.ui.tree.TreeCollector.TreePathRoots;
 import com.intellij.ui.tree.TreePathUtil;
 import com.intellij.ui.treeStructure.Tree;
 import com.intellij.util.*;
+import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
-import com.intellij.util.containers.Stack;
 import com.intellij.util.containers.TreeTraversal;
 import com.intellij.util.ui.EdtInvocationManager;
 import com.intellij.util.ui.tree.TreeModelAdapter;
@@ -45,11 +50,19 @@ import com.intellij.util.ui.tree.TreeUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.concurrency.CancellablePromise;
+import org.jetbrains.concurrency.Promise;
 
 import javax.swing.event.TreeModelEvent;
 import javax.swing.tree.TreePath;
+import java.awt.*;
 import java.awt.event.MouseEvent;
+import java.util.List;
 import java.util.*;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
 
 import static com.intellij.codeInspection.CommonProblemDescriptor.DESCRIPTOR_COMPARATOR;
@@ -62,9 +75,18 @@ public class InspectionTree extends Tree {
   private boolean myQueueUpdate;
   private final OccurenceNavigator myOccurenceNavigator = new MyOccurrenceNavigator();
   private final InspectionResultsView myView;
+  private final ConcurrentHashMap<ProblemDescriptionNode, CancellablePromise<String>> scheduledTooltipTasks = new ConcurrentHashMap<>();
 
   public InspectionTree(@NotNull InspectionResultsView view) {
     myView = view;
+    Disposer.register(myView, new Disposable() {
+      @Override
+      public void dispose() {
+        scheduledTooltipTasks.forEach((node, promise) -> promise.cancel());
+        scheduledTooltipTasks.clear();
+      }
+    });
+
     myModel = new InspectionTreeModel();
     Disposer.register(view, myModel);
     setModel(new AsyncTreeModel(myModel, false, view));
@@ -86,7 +108,7 @@ public class InspectionTree extends Tree {
       EditSourceOnEnterKeyHandler.install(this);
       TreeUtil.installActions(this);
       PopupHandler.installPopupMenu(this, IdeActions.INSPECTION_TOOL_WINDOW_TREE_POPUP, ActionPlaces.CODE_INSPECTION);
-      new TreeSpeedSearch(this, o -> InspectionsConfigTreeComparator.getDisplayTextToSort(o.getLastPathComponent().toString()));
+      new TreeSpeedSearch(this, false, o -> InspectionsConfigTreeComparator.getDisplayTextToSort(o.getLastPathComponent().toString()));
     }
 
     getModel().addTreeModelListener(new TreeModelAdapter() {
@@ -189,13 +211,71 @@ public class InspectionTree extends Tree {
     return resultWrapper;
   }
 
+  @Nullable
+  public static InspectionToolWrapper<?, ?> findWrapper(Object[] selectedNode) {
+    InspectionToolWrapper<?, ?> resultWrapper = null;
+    for (Object node : selectedNode) {
+      if (node instanceof InspectionGroupNode) {
+        return null;
+      }
+
+      InspectionToolWrapper wrapper = null;
+      if (node instanceof InspectionNode) {
+        wrapper = ((InspectionNode)node).getToolWrapper();
+      }
+      else if (node instanceof SuppressableInspectionTreeNode) {
+        wrapper = ((SuppressableInspectionTreeNode)node).getPresentation().getToolWrapper();
+      }
+      if (wrapper != null) {
+        if (resultWrapper == null) {
+          resultWrapper = wrapper;
+        }
+        else if (resultWrapper != wrapper) {
+          return null;
+        }
+      }
+    }
+    return resultWrapper;
+  }
+
   @Override
   public String getToolTipText(MouseEvent e) {
     TreePath path = getPathForLocation(e.getX(), e.getY());
     if (path == null) return null;
     Object lastComponent = path.getLastPathComponent();
     if (!(lastComponent instanceof ProblemDescriptionNode)) return null;
-    return ((ProblemDescriptionNode)lastComponent).getToolTipText();
+    final ProblemDescriptionNode node = (ProblemDescriptionNode) lastComponent;
+
+    if (!node.needCalculateTooltip()) return node.getToolTipText();
+
+    Promise<@NlsContexts.Tooltip String> tooltipLazy = scheduledTooltipTasks.computeIfAbsent(node, key -> {
+      final var tooltipManager = IdeTooltipManager.getInstance();
+      final Component component = e.getComponent();
+
+      return ReadAction.nonBlocking(() -> node.getToolTipText())
+        .finishOnUiThread(ModalityState.any(), tooltipText -> {
+          tooltipManager.updateShownTooltip(component);
+        })
+        .submit(AppExecutorUtil.getAppExecutorService())
+        .onError(throwable -> {
+          if (!(throwable instanceof CancellationException)) {
+            LOG.error("Exception in ProblemDescriptionNode#getToolTipText", throwable);
+          }
+          scheduledTooltipTasks.remove(node);
+        })
+        .onSuccess(tooltipText -> scheduledTooltipTasks.remove(node));
+    });
+
+    if (tooltipLazy.isSucceeded()) {
+      try {
+        final String text = tooltipLazy.blockingGet(0);
+        return text;
+      }
+      catch (TimeoutException | ExecutionException error) {
+        LOG.error(error);
+      }
+    }
+    return UIBundle.message("crumbs.calculating.tooltip");
   }
 
   @Nullable
@@ -228,11 +308,11 @@ public class InspectionTree extends Tree {
   }
 
   public void selectNode(InspectionTreeNode node) {
-    TreePath path = getPathFor(node);
-    TreeUtil.selectPath(this, path);
+    TreePath path = TreePathUtil.pathToTreeNode(node);
+    if (path != null) TreeUtil.promiseSelect(this, path);
   }
 
-  private static void addElementsInNode(InspectionTreeNode node, Set<? super RefEntity> out) {
+  public static void addElementsInNode(InspectionTreeNode node, Set<? super RefEntity> out) {
     if (!node.isValid()) return;
     if (node instanceof RefElementNode) {
       final RefEntity element = ((RefElementNode)node).getElement();
@@ -267,10 +347,28 @@ public class InspectionTree extends Tree {
     }
     if (paths == null) return Collections.emptyList();
     // key can be node or VirtualFile (if problem descriptor node parent is a file/member RefElementNode).
-    MultiMap<Object, CommonProblemDescriptor> parentToChildNode = new MultiMap<>();
     //TODO expected thread
+    List<InspectionTreeNode> nodes = ContainerUtil.map(paths, p -> (InspectionTreeNode)p.getLastPathComponent());
+    return getSelectedDescriptors(sortedByPosition, readOnlyFilesSink, allowResolved, nodes);
+  }
+
+   public CommonProblemDescriptor @NotNull [] getSelectedDescriptors(AnActionEvent e) {
+     Object[] selectedNodes = e.getData(PlatformCoreDataKeys.SELECTED_ITEMS);
+     if (selectedNodes == null) {
+       return CommonProblemDescriptor.EMPTY_ARRAY;
+     }
+     List<CommonProblemDescriptor[]> descriptors = getSelectedDescriptors(false, null, false, ContainerUtil.map(selectedNodes, o -> (InspectionTreeNode)o));
+     return BatchModeDescriptorsUtil.flattenDescriptors(descriptors);
+  }
+  
+  @NotNull
+  private List<CommonProblemDescriptor[]> getSelectedDescriptors(boolean sortedByPosition,
+                                                                 @Nullable Set<? super VirtualFile> readOnlyFilesSink,
+                                                                 boolean allowResolved,
+                                                                 List<InspectionTreeNode> nodes) {
+    MultiMap<Object, CommonProblemDescriptor> parentToChildNode = new MultiMap<>();
     TreeTraversal.PLAIN_BFS.traversal(
-      ContainerUtil.map(paths, p -> (InspectionTreeNode)p.getLastPathComponent()),
+        nodes,
       (InspectionTreeNode n) -> myModel.getChildren(n))
       .filter(ProblemDescriptionNode.class)
       .filter(node -> node.getDescriptor() != null && isNodeValidAndIncluded(node, allowResolved))
@@ -288,7 +386,7 @@ public class InspectionTree extends Tree {
       if (sortedByPosition) {
         stream = stream.sorted(DESCRIPTOR_COMPARATOR);
       }
-      descriptors.add(stream.toArray(CommonProblemDescriptor.ARRAY_FACTORY::create));
+      descriptors.add(stream.distinct().toArray(CommonProblemDescriptor.ARRAY_FACTORY::create));
     }
 
     return descriptors;
@@ -500,6 +598,29 @@ public class InspectionTree extends Tree {
     return entity;
   }
 
+  @Nullable
+  public static PsiElement getSelectedElement(AnActionEvent e) {
+    PsiElement element = e.getData(CommonDataKeys.PSI_ELEMENT);
+    if (element != null) {
+      return element;
+    }
+    RefEntity[] entities = getSelectedRefElements(e);
+    RefEntity refEntity = ContainerUtil.find(entities, entity -> entity instanceof RefElement);
+    return refEntity != null ? ((RefElement)refEntity).getPsiElement() : null;
+  }
+
+  public static RefEntity[] getSelectedRefElements(AnActionEvent e) {
+    Object[] nodes = e.getData(PlatformCoreDataKeys.SELECTED_ITEMS);
+    if (nodes != null) {
+      HashSet<RefEntity> entities = new HashSet<>();
+      for (Object node : nodes) {
+        addElementsInNode((InspectionTreeNode)node, entities);
+      }
+      return entities.toArray(entities.toArray(RefEntity.EMPTY_ELEMENTS_ARRAY));
+    }
+    return RefEntity.EMPTY_ELEMENTS_ARRAY;
+  }
+
   private class MyOccurrenceNavigator implements OccurenceNavigator {
     @Override
     public boolean hasNextOccurence() {
@@ -616,21 +737,5 @@ public class InspectionTree extends Tree {
       }
       return false;
     }
-  }
-
-  private TreePath getPathFor(InspectionTreeNode node) {
-    TreePath result = TreePathUtil.pathToTreeNode(node);
-
-    Stack<TreePath> s = new Stack<>();
-    TreePath current = result;
-    while (current != null) {
-      s.add(current);
-      current = current.getParentPath();
-    }
-    while (!s.isEmpty()) {
-      TreePath p = s.pop();
-      expandPath(p);
-    }
-    return result;
   }
 }

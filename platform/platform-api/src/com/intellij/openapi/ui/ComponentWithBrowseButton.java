@@ -4,9 +4,11 @@ package com.intellij.openapi.ui;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.DataManager;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CustomShortcutSet;
 import com.intellij.openapi.actionSystem.ShortcutSet;
+import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.keymap.KeymapUtil;
@@ -25,7 +27,6 @@ import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.accessibility.ScreenReader;
 import com.intellij.util.ui.update.Activatable;
 import com.intellij.util.ui.update.UiNotifyConnector;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -225,8 +226,7 @@ public class ComponentWithBrowseButton<Comp extends JComponent> extends JPanel i
    * @see #setButtonVisible
    * @see #setButtonEnabled
    */
-  @ApiStatus.ScheduledForRemoval(inVersion = "2022.2")
-  @Deprecated
+  @Deprecated(forRemoval = true)
   public FixedSizeButton getButton() {
     return myBrowseButton;
   }
@@ -238,6 +238,11 @@ public class ComponentWithBrowseButton<Comp extends JComponent> extends JPanel i
     private final FixedSizeButton myBrowseButton;
     public MyDoClickAction(FixedSizeButton browseButton) {
       myBrowseButton = browseButton;
+    }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
     }
 
     @Override
@@ -306,14 +311,6 @@ public class ComponentWithBrowseButton<Comp extends JComponent> extends JPanel i
     if (e.isConsumed()) return true;
     return super.processKeyBinding(ks, e, condition, pressed);
   }
-  /**
-   * @deprecated use {@link #addActionListener(ActionListener)} instead
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
-  public void addBrowseFolderListener(@Nullable Project project, final BrowseFolderActionListener<Comp> actionListener, boolean autoRemoveOnHide) {
-    addActionListener(actionListener);
-  }
 
   private static final class LazyDisposable implements Activatable {
     private final WeakReference<ComponentWithBrowseButton<?>> reference;
@@ -327,10 +324,16 @@ public class ComponentWithBrowseButton<Comp extends JComponent> extends JPanel i
     public void showNotify() {
       ComponentWithBrowseButton<?> component = reference.get();
       if (component == null) return; // component is collected
-      Disposable disposable = ApplicationManager.getApplication() == null ? null :
-                              UI_DISPOSABLE.getData(DataManager.getInstance().getDataContext(component));
-      if (disposable == null) return; // parent disposable not found
-      Disposer.register(disposable, component);
+      Application app = ApplicationManager.getApplication();
+      if (app != null) {
+        DataManager dataManager = app.getServiceIfCreated(DataManager.class);
+        if (dataManager != null) {
+          Disposable disposable = UI_DISPOSABLE.getData(dataManager.getDataContext(component));
+          if (disposable != null) {
+            Disposer.register(disposable, component);
+          }
+        }
+      }
     }
   }
 }

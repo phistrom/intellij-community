@@ -2,6 +2,7 @@
 package com.intellij.execution.wsl.target
 
 import com.intellij.execution.target.*
+import com.intellij.execution.wsl.target.wizard.WslTargetCustomToolStep
 import com.intellij.execution.wsl.target.wizard.WslTargetIntrospectionStep
 import com.intellij.execution.wsl.target.wizard.WslTargetLanguageStep
 import com.intellij.execution.wsl.target.wizard.WslTargetWizardModel
@@ -41,10 +42,15 @@ class WslTargetType : TargetEnvironmentType<WslTargetEnvironmentConfiguration>(T
                                        configToConfigure: WslTargetEnvironmentConfiguration,
                                        runtimeType: LanguageRuntimeType<*>?): List<AbstractWizardStepEx> {
     val model = WslTargetWizardModel(project, configToConfigure, runtimeType, null)
-    return listOf(WslTargetIntrospectionStep(model), WslTargetLanguageStep(model))
+    val isCustomToolConfiguration = runtimeType is CustomToolLanguageRuntimeType
+    model.isCustomToolConfiguration = isCustomToolConfiguration
+    return listOf(
+      WslTargetIntrospectionStep(model),
+      if (isCustomToolConfiguration) WslTargetCustomToolStep(model) else WslTargetLanguageStep(model)
+    )
   }
 
-  override fun createEnvironmentRequest(project: Project, config: WslTargetEnvironmentConfiguration): TargetEnvironmentRequest {
+  override fun createEnvironmentRequest(project: Project?, config: WslTargetEnvironmentConfiguration): TargetEnvironmentRequest {
     return WslTargetEnvironmentRequest(config)
   }
 
@@ -60,14 +66,15 @@ class WslTargetType : TargetEnvironmentType<WslTargetEnvironmentConfiguration>(T
                                              title: String?,
                                              textComponentAccessor: TextComponentAccessor<T>,
                                              component: T,
-                                             configurationSupplier: Supplier<TargetEnvironmentConfiguration>): ActionListener = ActionListener {
+                                             configurationSupplier: Supplier<out TargetEnvironmentConfiguration>,
+                                             targetBrowserHints: TargetBrowserHints): ActionListener = ActionListener {
     val configuration = configurationSupplier.get()
     if (configuration is WslTargetEnvironmentConfiguration) {
       configuration.distribution?.let {
         WslPathBrowser(object : TextAccessor {
           override fun setText(text: String) = textComponentAccessor.setText(component, text)
           override fun getText() = textComponentAccessor.getText(component)
-        }).browsePath(it, component)
+        }).browsePath(it, component, accessWindowsFs = targetBrowserHints.showLocalFsInBrowser)
         return@ActionListener
       }
     }
@@ -76,6 +83,7 @@ class WslTargetType : TargetEnvironmentType<WslTargetEnvironmentConfiguration>(T
 
   companion object {
     const val TYPE_ID = "wsl"
+
     @NlsSafe
     const val DISPLAY_NAME = "WSL"
     private val LOG = logger<WslTargetType>()

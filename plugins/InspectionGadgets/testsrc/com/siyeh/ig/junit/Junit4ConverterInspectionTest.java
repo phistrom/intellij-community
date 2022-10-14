@@ -14,11 +14,10 @@ public class Junit4ConverterInspectionTest extends LightJavaInspectionTestCase {
       "public abstract class TestCase extends Assert {\n" +
       "}",
 
-      "package junit.framework;" +
-      "public class Assert {" +
-      " static public void assertEquals(int expected, int actual) {\n" +
-      "}\n" +
-      "}",
+      """
+package junit.framework;public class Assert { static public void assertEquals(int expected, int actual) {
+}
+}""",
 
       "package org.junit;" +
       "public class Assert {" +
@@ -26,31 +25,33 @@ public class Junit4ConverterInspectionTest extends LightJavaInspectionTestCase {
       "}\n" +
       "}",
 
-      "package org.junit;" +
-      "@Retention(RetentionPolicy.RUNTIME)\n" +
-      "@Target({ElementType.METHOD})\n" +
-      "public @interface Test {" +
-      "}"
+      """
+package org.junit;@Retention(RetentionPolicy.RUNTIME)
+@Target({ElementType.METHOD})
+public @interface Test {}"""
     };
   }
 
-  public void test() {
-    doTest("import junit.framework.TestCase;\n" +
-           "class /*'JUnit3TestCase' could be converted to JUnit4 test case*//*_*/JUnit3TestCase/**/ extends TestCase {\n" +
-           "    public void testAddition() {\n" +
-           "        assertEquals(2, 1 + 1);\n" +
-           "    }\n" +
-           "}");
-    checkQuickFix("Convert to JUnit 4 test case", "import junit.framework.TestCase;\n" +
-                                                  "import org.junit.Assert;\n" +
-                                                  "import org.junit.Test;\n" +
-                                                  "\n" +
-                                                  "class JUnit3TestCase {\n" +
-                                                  "    @Test\n" +
-                                                  "    public void testAddition() {\n" +
-                                                  "        Assert.assertEquals(2, 1 + 1);\n" +
-                                                  "    }\n" +
-                                                  "}");
+  @SuppressWarnings("JUnitTestCaseWithNoTests")
+  public void testSimple() {
+    doTest("""
+             import junit.framework.TestCase;
+             class /*'JUnit3Test' could be converted to JUnit4 test case*//*_*/JUnit3Test/**/ extends TestCase {
+                 public void testAddition() {
+                     assertEquals(2, 1 + 1);
+                 }
+             }""");
+    checkQuickFix("Convert to JUnit 4 test case", """
+      import junit.framework.TestCase;
+      import org.junit.Assert;
+      import org.junit.Test;
+
+      class JUnit3Test {
+          @Test
+          public void testAddition() {
+              Assert.assertEquals(2, 1 + 1);
+          }
+      }""");
   }
 
   @Override

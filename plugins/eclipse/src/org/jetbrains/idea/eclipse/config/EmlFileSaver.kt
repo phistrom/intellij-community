@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.idea.eclipse.config
 
 import com.intellij.openapi.components.PathMacroMap
@@ -12,7 +12,11 @@ import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.workspaceModel.ide.impl.legacyBridge.library.LibraryNameGenerator
 import com.intellij.workspaceModel.ide.impl.virtualFile
 import com.intellij.workspaceModel.storage.WorkspaceEntity
-import com.intellij.workspaceModel.storage.bridgeEntities.*
+import com.intellij.workspaceModel.storage.bridgeEntities.api.LibraryEntity
+import com.intellij.workspaceModel.storage.bridgeEntities.api.LibraryTableId
+import com.intellij.workspaceModel.storage.bridgeEntities.api.ModuleDependencyItem
+import com.intellij.workspaceModel.storage.bridgeEntities.api.ModuleEntity
+import com.intellij.workspaceModel.storage.bridgeEntities.asJavaSourceRoot
 import org.jdom.Element
 import org.jetbrains.annotations.NonNls
 import org.jetbrains.idea.eclipse.IdeaXml.*
@@ -89,6 +93,7 @@ internal class EmlFileSaver(private val module: ModuleEntity,
             root.addContent(libTag)
           }
         }
+        else -> {}
       }
     }
     if (libLevels.isNotEmpty()) {
@@ -136,9 +141,9 @@ internal class EmlFileSaver(private val module: ModuleEntity,
       }
       val rootFile = contentRoot.url.virtualFile
       contentRoot.excludedUrls.forEach { excluded ->
-        val excludedFile = excluded.virtualFile
+        val excludedFile = excluded.url.virtualFile
         if (rootFile == null || excludedFile == null || VfsUtilCore.isAncestor(rootFile, excludedFile, false)) {
-          contentRootTag.addContent(Element(EXCLUDE_FOLDER_TAG).setAttribute(URL_ATTR, excluded.url))
+          contentRootTag.addContent(Element(EXCLUDE_FOLDER_TAG).setAttribute(URL_ATTR, excluded.url.url))
         }
       }
       if (!JDOMUtil.isEmpty(contentRootTag)) {

@@ -2,6 +2,7 @@
 package com.intellij.openapi.vcs.changes.ui;
 
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.ex.CheckboxAction;
@@ -95,6 +96,11 @@ public abstract class LocalChangesBrowser extends ChangesBrowserBase implements 
     }
 
     @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
+    }
+
+    @Override
     public boolean isSelected(@NotNull AnActionEvent e) {
       Change change = e.getData(VcsDataKeys.CURRENT_CHANGE);
       if (change == null) return false;
@@ -108,9 +114,11 @@ public abstract class LocalChangesBrowser extends ChangesBrowserBase implements 
 
       if (state) {
         myViewer.includeChange(change);
+        myViewer.logInclusionToggleEvents(false, e);
       }
       else {
         myViewer.excludeChange(change);
+        myViewer.logInclusionToggleEvents(true, e);
       }
     }
   }

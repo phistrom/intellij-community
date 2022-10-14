@@ -1,14 +1,12 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution;
 
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.openapi.actionSystem.DataContext;
-import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.extensions.ProjectExtensionPointName;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -17,17 +15,15 @@ import org.jetbrains.concurrency.Promises;
 
 import javax.swing.*;
 
-public abstract class BeforeRunTaskProvider<T extends BeforeRunTask<?>> {
+/**
+ * This class is responsible for auxiliary tasks (like build process or project-specific scripts execution)
+ * that might be called just before run configuration start.
+ * Exact list of tasks should be specified for every run configuration (or template) by user in dedicated UI.
+ */
+
+public abstract class BeforeRunTaskProvider<@NotNull T extends BeforeRunTask<?>> {
   public static final ProjectExtensionPointName<BeforeRunTaskProvider<BeforeRunTask<?>>> EP_NAME =
     new ProjectExtensionPointName<>("com.intellij.stepsBeforeRunProvider");
-
-  /**
-   * @deprecated Use {@link #EP_NAME}
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
-  public static final ExtensionPointName<BeforeRunTaskProvider<BeforeRunTask<?>>> EXTENSION_POINT_NAME =
-    new ExtensionPointName<>("com.intellij.stepsBeforeRunProvider");
 
   public abstract Key<T> getId();
 
@@ -50,13 +46,13 @@ public abstract class BeforeRunTaskProvider<T extends BeforeRunTask<?>> {
   }
 
   /**
-   * @return 'before run' task for the configuration or null, if the task from this provider is not applicable to the specified configuration
+   * @return 'before run' task for the configuration or null, if the task from this provider is not applicable to the specified configuration.
    */
   public abstract @Nullable T createTask(@NotNull RunConfiguration runConfiguration);
 
   /**
    * @return {@code true} if task configuration is changed
-   * @deprecated do not call directly, use {@link #configureTask(DataContext, RunConfiguration, BeforeRunTask)} instead
+   * @deprecated do not call directly, use {@link #configureTask(DataContext, RunConfiguration, BeforeRunTask)} instead.
    */
   @SuppressWarnings("DeprecatedIsStillUsed")
   @Deprecated
@@ -65,7 +61,7 @@ public abstract class BeforeRunTaskProvider<T extends BeforeRunTask<?>> {
   }
 
   /**
-   * @return {@code true} a promise returning true, if the task was changed
+   * @return {@code true} a promise returning true, if the task was changed.
    */
   public Promise<Boolean> configureTask(@NotNull DataContext context, @NotNull RunConfiguration configuration, @NotNull T task) {
     return Promises.resolvedPromise(configureTask(configuration, task));
@@ -78,7 +74,7 @@ public abstract class BeforeRunTaskProvider<T extends BeforeRunTask<?>> {
   public abstract boolean executeTask(@NotNull DataContext context, @NotNull RunConfiguration configuration, @NotNull ExecutionEnvironment environment, @NotNull T task);
 
   /**
-   * @return {@code true} if at most one task may be configured
+   * @return {@code true} if at most one task may be configured.
    */
   public boolean isSingleton() {
     // by default false because user can configure chain (java compile, generate something, java compile again)

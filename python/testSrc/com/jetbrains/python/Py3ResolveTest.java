@@ -3,11 +3,11 @@ package com.jetbrains.python;
 
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.util.ObjectUtils;
 import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
 import com.jetbrains.python.fixtures.PyResolveTestCase;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.PyBuiltinCache;
+import com.jetbrains.python.psi.impl.PyNamedParameterImpl;
 import com.jetbrains.python.psi.impl.PyPsiUtils;
 import com.jetbrains.python.psi.types.TypeEvalContext;
 import com.jetbrains.python.pyi.PyiUtil;
@@ -567,6 +567,21 @@ public class Py3ResolveTest extends PyResolveTestCase {
     assertResolvesTo(PyTargetExpression.class, "foo");
   }
 
+  // PY-29898
+  public void testKeywordArgumentToDataclassAttribute() {
+    assertResolvesTo(PyTargetExpression.class, "some_attr");
+  }
+
+  // PY-29898
+  public void testKeywordArgumentToAttrsAttribute() {
+    assertResolvesTo(PyTargetExpression.class, "some_attr");
+  }
+
+  // PY-55231
+  public void testKeywordArgumentToConstructorParameter() {
+    assertResolvesTo(PyNamedParameterImpl.class, "param");
+  }
+
   // PY-30942
   public void testUserPyiInsteadUserPy() {
     myFixture.copyDirectoryToProject("resolve/" + getTestName(false), "");
@@ -825,5 +840,35 @@ public class Py3ResolveTest extends PyResolveTestCase {
     final PyTargetExpression target = assertResolvesTo(PyTargetExpression.class, "foo");
     final PyFunction function = assertInstanceOf(ScopeUtil.getScopeOwner(target), PyFunction.class);
     assertEquals("g", function.getName());
+  }
+
+  // PY-48012
+  public void testKeywordPatternResolvesToInstanceAttribute() {
+    assertResolvesTo(PyTargetExpression.class, "foo");
+  }
+
+  // PY-48012
+  public void testKeywordPatternResolvesToClassAttribute() {
+    assertResolvesTo(PyTargetExpression.class, "foo");
+  }
+
+  // PY-48012
+  public void testKeywordPatternResolvesToProperty() {
+    assertResolvesTo(PyFunction.class, "foo");
+  }
+
+  // PY-48012
+  public void testKeywordPatternResolvesToInheritedInstanceAttribute() {
+    assertResolvesTo(PyTargetExpression.class, "foo");
+  }
+
+  // PY-48012
+  public void testKeywordPatternResolvesToInheritedClassAttribute() {
+    assertResolvesTo(PyTargetExpression.class, "foo");
+  }
+
+  // PY-48012
+  public void testKeywordPatternResolvesToInheritedProperty() {
+    assertResolvesTo(PyFunction.class, "foo");
   }
 }

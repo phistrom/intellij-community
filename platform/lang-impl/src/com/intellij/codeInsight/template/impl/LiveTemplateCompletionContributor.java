@@ -36,9 +36,6 @@ import java.util.stream.Collectors;
 
 import static com.intellij.codeInsight.template.impl.ListTemplatesHandler.filterTemplatesByPrefix;
 
-/**
- * @author peter
- */
 public class LiveTemplateCompletionContributor extends CompletionContributor implements DumbAware {
   private static final Key<Boolean> ourShowTemplatesInTests = Key.create("ShowTemplatesInTests");
 
@@ -82,8 +79,10 @@ public class LiveTemplateCompletionContributor extends CompletionContributor imp
         if (showAllTemplates()) {
           final AtomicBoolean templatesShown = new AtomicBoolean(false);
           final CompletionResultSet finalResult = result;
-          if (Registry.is("ide.completion.show.live.templates.on.top")) {
+          boolean showLiveTemplatesOnTop = Registry.is("ide.completion.show.live.templates.on.top");
+          if (showLiveTemplatesOnTop) {
             ensureTemplatesShown(templatesShown, templates, availableTemplates, finalResult, isAutopopup);
+            showCustomLiveTemplates(parameters, result);
           }
 
           result.runRemainingContributors(parameters, completionResult -> {
@@ -94,7 +93,9 @@ public class LiveTemplateCompletionContributor extends CompletionContributor imp
           });
 
           ensureTemplatesShown(templatesShown, templates, availableTemplates, result, isAutopopup);
-          showCustomLiveTemplates(parameters, result);
+          if (!showLiveTemplatesOnTop) {
+            showCustomLiveTemplates(parameters, result);
+          }
           return;
         }
 

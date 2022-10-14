@@ -1,8 +1,8 @@
 // Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.structuralsearch.plugin.ui.filters;
 
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.psi.PsiElement;
 import com.intellij.structuralsearch.NamedScriptableDefinition;
@@ -16,17 +16,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 /**
+ * Classes extending this class define filter user interfaces elements in the Structural Search dialog.
+ * For example the count filter or text filter, which can be added to $variables$ in the template.
+ *
  * @author Bas Leijdekkers
  */
 public abstract class FilterAction extends DumbAwareAction implements Filter {
-
-  /**
-   * This extension points causes memory leaks and other problems, because FilterActions have state.
-   * @deprecated Please use {@link com.intellij.structuralsearch.plugin.ui.filters.FilterProvider} instead.
-   */
-  @Deprecated(forRemoval = true)
-  public static final ExtensionPointName<FilterAction> EP_NAME = ExtensionPointName.create("com.intellij.structuralsearch.filter");
-
   private static final AtomicInteger myFilterCount = new AtomicInteger();
 
   protected final SimpleColoredComponent myLabel = new SimpleColoredComponent();
@@ -50,6 +45,11 @@ public abstract class FilterAction extends DumbAwareAction implements Filter {
     return myPosition;
   }
 
+  /**
+   * The text displayed in the template editor inlays for this filter.
+   * @param variable  variable from which the value of the filter text to be displayed can be retrieved.
+   * @return a short text to display as editor inlay.
+   */
   @NotNull
   public String getShortText(NamedScriptableDefinition variable) {
     return "";
@@ -111,5 +111,10 @@ public abstract class FilterAction extends DumbAwareAction implements Filter {
   @Override
   public final void update(@NotNull AnActionEvent e) {
     e.getPresentation().setEnabledAndVisible(myApplicable && !isActive());
+  }
+
+  @Override
+  public @NotNull ActionUpdateThread getActionUpdateThread() {
+    return ActionUpdateThread.EDT;
   }
 }

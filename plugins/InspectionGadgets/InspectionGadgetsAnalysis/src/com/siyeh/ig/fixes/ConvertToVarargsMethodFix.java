@@ -4,17 +4,20 @@
 package com.siyeh.ig.fixes;
 
 import com.intellij.codeInsight.FileModificationService;
+import com.intellij.codeInsight.intention.preview.IntentionPreviewInfo;
 import com.intellij.codeInspection.ProblemDescriptor;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
 import com.intellij.psi.search.searches.ReferencesSearch;
+import com.intellij.util.ObjectUtils;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.InspectionGadgetsFix;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 
 /**
  * @author Bas Leijdekkers
@@ -108,5 +111,18 @@ public class ConvertToVarargsMethodFix extends InspectionGadgetsFix {
       }
       lastArgument.delete();
     }
+  }
+
+  @Override
+  public @NotNull IntentionPreviewInfo generatePreview(@NotNull Project project, @NotNull ProblemDescriptor previewDescriptor) {
+    final PsiMethod method = ObjectUtils.tryCast(previewDescriptor.getPsiElement(), PsiMethod.class);
+    if (method == null) {
+      return IntentionPreviewInfo.EMPTY;
+    }
+    makeMethodVarargs(method);
+    List<PsiReferenceExpression> refsInFile = SyntaxTraverser.psiTraverser(method.getContainingFile()).filter(PsiReferenceExpression.class)
+      .filter(ref -> ref.isReferenceTo(method)).toList();
+    makeMethodCallsVarargs(refsInFile);
+    return IntentionPreviewInfo.DIFF;
   }
 }

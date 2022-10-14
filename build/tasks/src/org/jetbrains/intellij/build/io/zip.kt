@@ -1,95 +1,110 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.intellij.build.io
 
 import java.nio.channels.FileChannel
 import java.nio.file.*
-import java.time.Duration
 import java.util.*
-import java.util.concurrent.ForkJoinTask
 import java.util.zip.Deflater
-import java.util.zip.ZipEntry
 
-// symlinks not supported but can be easily implemented - see CollectingVisitor.visitFile
-fun zip(targetFile: Path, dirs: Map<Path, String>, compress: Boolean = true, addDirEntries: Boolean = false, logger: System.Logger? = null) {
-  // note - dirs contain duplicated directories (you cannot simply add directory entry on visit - uniqueness must be preserved)
-  // anyway, directory entry are not added
+private val W_OVERWRITE = EnumSet.of(StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE)
+
+enum class AddDirEntriesMode {
+  NONE,
+  RESOURCE_ONLY,
+  ALL
+}
+
+fun zipWithCompression(targetFile: Path,
+                       dirs: Map<Path, String>,
+                       compressionLevel: Int = Deflater.DEFAULT_COMPRESSION,
+                       addDirEntriesMode: AddDirEntriesMode = AddDirEntriesMode.NONE,
+                       overwrite: Boolean = false,
+                       fileFilter: ((name: String) -> Boolean)? = null) {
   Files.createDirectories(targetFile.parent)
-  val start = System.currentTimeMillis()
-  FileChannel.open(targetFile, EnumSet.of(StandardOpenOption.WRITE, StandardOpenOption.CREATE)).use {
-    val zipCreator = ZipFileWriter(it, if (compress) Deflater(Deflater.DEFAULT_COMPRESSION, true) else null)
-
-    val fileAdded: ((String) -> Boolean)?
-    val dirNameSetToAdd: Set<String>
-    if (addDirEntries) {
-      dirNameSetToAdd = LinkedHashSet()
-      fileAdded = { name ->
-        if (!name.endsWith(".class") && !name.endsWith("/package.html") && name != "META-INF/MANIFEST.MF") {
-          var slashIndex = name.lastIndexOf('/')
-          if (slashIndex != -1) {
-            while (dirNameSetToAdd.add(name.substring(0, slashIndex))) {
-              slashIndex = name.lastIndexOf('/', slashIndex - 2)
-              if (slashIndex == -1) {
-                break
-              }
-            }
-          }
-        }
-        true
-      }
+  ZipFileWriter(channel = FileChannel.open(targetFile, if (overwrite) W_OVERWRITE else W_CREATE_NEW),
+                deflater = Deflater(compressionLevel, true)).use { zipFileWriter ->
+    if (addDirEntriesMode == AddDirEntriesMode.NONE) {
+      doArchive(zipFileWriter = zipFileWriter, fileAdded = fileFilter, dirs = dirs)
     }
     else {
-      fileAdded = null
-      dirNameSetToAdd = emptySet()
+      val dirNameSetToAdd = LinkedHashSet<String>()
+      val fileAdded = { name: String ->
+        if (fileFilter != null && !fileFilter(name)) {
+          false
+        }
+        else {
+          if (addDirEntriesMode == AddDirEntriesMode.ALL ||
+              (addDirEntriesMode == AddDirEntriesMode.RESOURCE_ONLY &&
+               !name.endsWith(".class") && !name.endsWith("/package.html") && name != "META-INF/MANIFEST.MF")) {
+            addDirWithParents(name, dirNameSetToAdd)
+          }
+          true
+        }
+      }
+
+      doArchive(zipFileWriter = zipFileWriter, fileAdded = fileAdded, dirs = dirs)
+      for (dir in dirNameSetToAdd) {
+        zipFileWriter.dir(dir)
+      }
     }
-
-    val archiver = ZipArchiver(method = if (compress) ZipEntry.DEFLATED else ZipEntry.STORED, zipCreator, fileAdded)
-    for ((dir, prefix) in dirs.entries) {
-      val normalizedDir = dir.toAbsolutePath().normalize()
-      archiver.setRootDir(normalizedDir, prefix)
-      compressDir(normalizedDir, archiver, excludes = null)
-    }
-
-    if (dirNameSetToAdd.isNotEmpty()) {
-      addDirForResourceFiles(zipCreator, dirNameSetToAdd)
-    }
-    zipCreator.finish(null)
-  }
-
-  logger?.info("${targetFile.fileName} created in ${formatDuration(System.currentTimeMillis() - start)}")
-}
-
-fun bulkZipWithPrefix(commonSourceDir: Path, items: List<Map.Entry<String, Path>>, compress: Boolean, logger: System.Logger) {
-  val tasks = mutableListOf<ForkJoinTask<*>>()
-  logger.debug { "Create ${items.size} archives in parallel (commonSourceDir=$commonSourceDir)" }
-  for (item in items) {
-    tasks.add(ForkJoinTask.adapt(Runnable {
-      zip(item.value, mapOf(commonSourceDir.resolve(item.key) to item.key), compress, logger = logger)
-    }))
-  }
-
-  ForkJoinTask.invokeAll(tasks)
-}
-
-private fun formatDuration(value: Long): String {
-  return Duration.ofMillis(value).toString().substring(2)
-    .replace(Regex("(\\d[HMS])(?!$)"), "$1 ")
-    .lowercase()
-}
-
-private fun addDirForResourceFiles(out: ZipFileWriter, dirNameSetToAdd: Set<String>) {
-  for (dir in dirNameSetToAdd) {
-    out.addDirEntry("$dir/")
   }
 }
 
-internal class ZipArchiver(private val method: Int,
-                           private val zipCreator: ZipFileWriter,
-                           val fileAdded: ((String) -> Boolean)?,) {
+// symlinks not supported but can be easily implemented - see CollectingVisitor.visitFile
+fun zip(targetFile: Path,
+        dirs: Map<Path, String>,
+        addDirEntriesMode: AddDirEntriesMode = AddDirEntriesMode.RESOURCE_ONLY,
+        overwrite: Boolean = false,
+        fileFilter: ((name: String) -> Boolean)? = null) {
+  Files.createDirectories(targetFile.parent)
+  ZipFileWriter(channel = FileChannel.open(targetFile, if (overwrite) W_OVERWRITE else W_CREATE_NEW)).use { zipFileWriter ->
+    if (addDirEntriesMode == AddDirEntriesMode.NONE) {
+      doArchive(zipFileWriter = zipFileWriter, fileAdded = fileFilter, dirs = dirs)
+    }
+    else {
+      val packageIndexBuilder = PackageIndexBuilder()
+      val fileAdded = { name: String ->
+        if (fileFilter != null && !fileFilter(name)) {
+          false
+        }
+        else {
+          packageIndexBuilder.addFile(name, addClassDir = addDirEntriesMode == AddDirEntriesMode.ALL)
+          true
+        }
+      }
+      doArchive(zipFileWriter = zipFileWriter, fileAdded = fileAdded, dirs = dirs)
+      packageIndexBuilder.writePackageIndex(zipFileWriter, addDirEntriesMode = addDirEntriesMode)
+    }
+  }
+}
+
+private fun doArchive(zipFileWriter: ZipFileWriter, fileAdded: ((String) -> Boolean)?, dirs: Map<Path, String>) {
+  val archiver = ZipArchiver(zipFileWriter, fileAdded)
+  for ((dir, prefix) in dirs.entries) {
+    val normalizedDir = dir.toAbsolutePath().normalize()
+    archiver.setRootDir(normalizedDir, prefix)
+    archiveDir(normalizedDir, archiver, excludes = null)
+  }
+}
+
+private fun addDirWithParents(name: String, dirNameSetToAdd: MutableSet<String>) {
+  var slashIndex = name.lastIndexOf('/')
+  if (slashIndex != -1) {
+    while (dirNameSetToAdd.add(name.substring(0, slashIndex))) {
+      slashIndex = name.lastIndexOf('/', slashIndex - 2)
+      if (slashIndex == -1) {
+        break
+      }
+    }
+  }
+}
+
+class ZipArchiver(private val zipCreator: ZipFileWriter, val fileAdded: ((String) -> Boolean)? = null) : AutoCloseable {
   private var localPrefixLength = -1
   private var archivePrefix = ""
 
   // rootDir must be absolute and normalized
-  fun setRootDir(rootDir: Path, prefix: String) {
+  fun setRootDir(rootDir: Path, prefix: String = "") {
     archivePrefix = when {
       prefix.isNotEmpty() && !prefix.endsWith('/') -> "$prefix/"
       prefix == "/" -> ""
@@ -102,19 +117,30 @@ internal class ZipArchiver(private val method: Int,
   fun addFile(file: Path) {
     val name = archivePrefix + file.toString().substring(localPrefixLength).replace('\\', '/')
     if (fileAdded == null || fileAdded.invoke(name)) {
-      zipCreator.writeEntry(name, method, file)
+      zipCreator.file(name, file)
     }
+  }
+
+  override fun close() {
+    zipCreator.close()
   }
 }
 
-internal fun compressDir(startDir: Path, archiver: ZipArchiver, excludes: List<PathMatcher>?) {
+fun archiveDir(startDir: Path, archiver: ZipArchiver, excludes: List<PathMatcher>? = emptyList()) {
   val dirCandidates = ArrayDeque<Path>()
   dirCandidates.add(startDir)
   val tempList = ArrayList<Path>()
   while (true) {
     val dir = dirCandidates.pollFirst() ?: break
     tempList.clear()
-    Files.newDirectoryStream(dir).use {
+    val dirStream = try {
+      Files.newDirectoryStream(dir)
+    }
+    catch (e: NoSuchFileException) {
+      continue
+    }
+
+    dirStream.use {
       if (excludes == null) {
         tempList.addAll(it)
       }
@@ -133,12 +159,24 @@ internal fun compressDir(startDir: Path, archiver: ZipArchiver, excludes: List<P
 
     tempList.sort()
     for (file in tempList) {
-      if (Files.isDirectory(file, LinkOption.NOFOLLOW_LINKS)) {
+      if (Files.isDirectory(file)) {
         dirCandidates.add(file)
       }
       else {
         archiver.addFile(file)
       }
+    }
+  }
+}
+
+inline fun copyZipRaw(sourceFile: Path,
+                      packageIndexBuilder: PackageIndexBuilder,
+                      zipCreator: ZipFileWriter,
+                      crossinline filter: (entryName: String) -> Boolean = { true }) {
+  readZipFile(sourceFile) { name, entry ->
+    if (filter(name)) {
+      packageIndexBuilder.addFile(name)
+      zipCreator.uncompressedData(name, entry.getByteBuffer())
     }
   }
 }

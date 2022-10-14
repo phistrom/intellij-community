@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide;
 
 import com.intellij.ide.lightEdit.LightEditService;
@@ -10,6 +10,7 @@ import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationType;
 import com.intellij.notification.Notifications;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.components.Service;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.colors.EditorColors;
@@ -33,8 +34,8 @@ import org.jetbrains.annotations.Nullable;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Future;
 
+@Service(Service.Level.APP)
 public final class CommandLineWaitingManager {
   private static final Logger LOG = Logger.getInstance(CommandLineWaitingManager.class);
   private static final String DO_NOT_SHOW_KEY = "command.line.waiting.do.not.show";
@@ -69,7 +70,7 @@ public final class CommandLineWaitingManager {
     });
   }
 
-  public @NotNull Future<CliResult> addHookForPath(@NotNull Path path) {
+  public @NotNull CompletableFuture<CliResult> addHookForPath(@NotNull Path path) {
     return addHookAndNotify(path, IdeBundle.message("activation.file.is.waiting.notification", path.toString()));
   }
 
@@ -77,16 +78,16 @@ public final class CommandLineWaitingManager {
     return ApplicationManager.getApplication().getService(CommandLineWaitingManager.class);
   }
 
-  public @NotNull Future<CliResult> addHookForFile(@NotNull VirtualFile file) {
+  public @NotNull CompletableFuture<CliResult> addHookForFile(@NotNull VirtualFile file) {
     return addHookAndNotify(file, IdeBundle.message("activation.file.is.waiting.notification", file.getPath()));
   }
 
-  public @NotNull Future<CliResult> addHookForProject(@NotNull Project project) {
+  public @NotNull CompletableFuture<CliResult> addHookForProject(@NotNull Project project) {
     return addHookAndNotify(project, IdeBundle.message("activation.project.is.waiting.notification", project.getName()));
   }
 
-  private @NotNull Future<CliResult> addHookAndNotify(@NotNull Object fileOrProject,
-                                                      @NotNull @NlsContexts.NotificationContent String notificationText) {
+  private @NotNull CompletableFuture<CliResult> addHookAndNotify(@NotNull Object fileOrProject,
+                                                                 @NotNull @NlsContexts.NotificationContent String notificationText) {
     LOG.info(notificationText);
 
     final CompletableFuture<CliResult> result = new CompletableFuture<>();
@@ -97,7 +98,6 @@ public final class CommandLineWaitingManager {
                                               NotificationType.WARNING).setImportant(true));
 
     EditorNotifications.updateAll();
-
     return result;
   }
 
@@ -140,7 +140,7 @@ public final class CommandLineWaitingManager {
 
   private static final class MyNotificationPanel extends EditorNotificationPanel {
     private MyNotificationPanel(@NotNull VirtualFile virtualFile) {
-      super(EditorColors.GUTTER_BACKGROUND);
+      super(EditorColors.GUTTER_BACKGROUND, Status.Info);
       setText(IdeBundle.message("activation.file.is.waiting.title"));
 
       createActionLabel(IdeBundle.message("activation.file.is.waiting.release"), () -> {

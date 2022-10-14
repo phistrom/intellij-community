@@ -2,19 +2,20 @@
 // OPTIONS: usages
 // FIND_BY_REF
 // WITH_FILE_NAME
-// FIR_IGNORE
 
 package usages
 
 import library.*
 
-class X: A {
-    constructor(): super()
+class X : A {
+    constructor() : super()
 }
 
-class Y(): A()
+class Y() : A()
 
 fun test() {
     val a: A = <caret>A()
     val aa = A(1)
 }
+
+// FIR_COMPARISON

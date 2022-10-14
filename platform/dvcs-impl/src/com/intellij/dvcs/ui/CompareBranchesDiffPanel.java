@@ -1,18 +1,4 @@
-/*
- * Copyright 2000-2012 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.dvcs.ui;
 
 import com.intellij.dvcs.branch.DvcsBranchUtil;
@@ -23,6 +9,7 @@ import com.intellij.history.LocalHistory;
 import com.intellij.history.LocalHistoryAction;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
@@ -38,12 +25,13 @@ import com.intellij.openapi.util.text.HtmlChunk;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangesUtil;
+import com.intellij.openapi.vcs.changes.ui.ChangesTree;
 import com.intellij.openapi.vcs.changes.ui.SimpleChangesBrowser;
 import com.intellij.openapi.vcs.ui.ReplaceFileConfirmationDialog;
 import com.intellij.ui.HyperlinkAdapter;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.ui.UIUtil;
+import com.intellij.util.ui.HTMLEditorKitBuilder;
 import com.intellij.xml.util.XmlStringUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
@@ -84,14 +72,14 @@ public class CompareBranchesDiffPanel extends JPanel {
         getPreferredSize();
       }
     };
-    myLabel.setEditorKit(UIUtil.getHTMLEditorKit());
+    myLabel.setEditorKit(HTMLEditorKitBuilder.simple());
     myLabel.setEditable(false);
     myLabel.setBackground(null);
     myLabel.setOpaque(false);
     myLabel.setFocusable(false);
     myLabel.addHyperlinkListener(new HyperlinkAdapter() {
       @Override
-      protected void hyperlinkActivated(HyperlinkEvent e) {
+      protected void hyperlinkActivated(@NotNull HyperlinkEvent e) {
         boolean swapSides = myVcsSettings.shouldSwapSidesInCompareBranches();
         myVcsSettings.setSwapSidesInCompareBranches(!swapSides);
         refreshView();
@@ -100,6 +88,7 @@ public class CompareBranchesDiffPanel extends JPanel {
     updateLabelText();
 
     myChangesBrowser = new MyChangesBrowser(project, emptyList());
+    myChangesBrowser.getViewer().setTreeStateStrategy(ChangesTree.KEEP_NON_EMPTY);
 
     setLayout(new BorderLayout());
     add(myLabel, BorderLayout.NORTH);
@@ -110,6 +99,11 @@ public class CompareBranchesDiffPanel extends JPanel {
   public void setCompareInfo(@NotNull CommitCompareInfo compareInfo) {
     myCompareInfo = compareInfo;
     refreshView();
+  }
+
+  @NotNull
+  public SimpleChangesBrowser getChangesBrowser() {
+    return myChangesBrowser;
   }
 
   private void refreshView() {
@@ -197,6 +191,11 @@ public class CompareBranchesDiffPanel extends JPanel {
             DvcsBundle.messagePointer("compare.branches.diff.panel.get.from.branch.action.description", myBranchName),
             AllIcons.Actions.Download);
       copyShortcutFrom(ActionManager.getInstance().getAction("Vcs.GetVersion"));
+    }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
     }
 
     @Override

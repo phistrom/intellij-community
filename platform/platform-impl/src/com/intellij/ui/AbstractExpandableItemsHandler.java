@@ -30,7 +30,7 @@ import java.util.Collections;
 public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType extends JComponent> implements ExpandableItemsHandler<KeyType> {
   protected final ComponentType myComponent;
 
-  private final Alarm myUpdateAlarm = new Alarm(Alarm.ThreadToUse.SWING_THREAD);
+  private final Alarm myUpdateAlarm = new Alarm();
   private final CellRendererPane myRendererPane = new CellRendererPane();
   private final JComponent myTipComponent = new JComponent() {
     @Override
@@ -194,7 +194,7 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
   }
 
   private void updateCurrentSelectionOnMoveOrResize() {
-    if (UIUtil.isClientPropertyTrue(myComponent, IGNORE_ITEM_SELECTION)) {
+    if (ClientProperty.isTrue(myComponent, IGNORE_ITEM_SELECTION)) {
       hideHint();
     }
     else {
@@ -207,7 +207,7 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
   }
 
   protected void handleMouseEvent(MouseEvent e, boolean forceUpdate) {
-    if (UIUtil.isClientPropertyTrue(myComponent, IGNORE_MOUSE_HOVER)) return;
+    if (ClientProperty.isTrue(myComponent, IGNORE_MOUSE_HOVER)) return;
     KeyType selected = getCellKeyForPoint(e.getPoint());
     if (forceUpdate || !Comparing.equal(myKey, selected)) {
       handleSelectionChange(selected, true);
@@ -220,7 +220,7 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
   }
 
   protected void handleSelectionChange(KeyType selected) {
-    handleSelectionChange(UIUtil.isClientPropertyTrue(myComponent, IGNORE_ITEM_SELECTION) ? myKey : selected, false);
+    handleSelectionChange(ClientProperty.isTrue(myComponent, IGNORE_ITEM_SELECTION) ? myKey : selected, false);
   }
 
   protected void handleSelectionChange(final KeyType selected, final boolean processIfUnfocused) {
@@ -271,9 +271,7 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
 
   protected boolean isPopup() {
     Window window = SwingUtilities.getWindowAncestor(myComponent);
-    return window != null
-           && !(window instanceof Dialog || window instanceof Frame)
-           && !isHintsAllowed(window);
+    return UIUtil.isSimpleWindow(window) && !isHintsAllowed(window);
   }
 
   private static boolean isHintsAllowed(Window window) {
@@ -333,16 +331,16 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
 
   @Nullable
   private Point createToolTipImage(@NotNull KeyType key) {
-    ComponentUtil.putClientProperty(myComponent, EXPANDED_RENDERER, true);
+    ClientProperty.put(myComponent, EXPANDED_RENDERER, true);
     Pair<Component, Rectangle> rendererAndBounds = getCellRendererAndBounds(key);
-    ComponentUtil.putClientProperty(myComponent, EXPANDED_RENDERER, null);
+    ClientProperty.put(myComponent, EXPANDED_RENDERER, null);
     if (rendererAndBounds == null) return null;
 
     JComponent renderer = ObjectUtils.tryCast(rendererAndBounds.first, JComponent.class);
     if (renderer == null) return null;
-    if (UIUtil.isClientPropertyTrue(renderer, RENDERER_DISABLED)) return null;
+    if (ClientProperty.isTrue(renderer, RENDERER_DISABLED)) return null;
 
-    if (UIUtil.isClientPropertyTrue(rendererAndBounds.getFirst(), USE_RENDERER_BOUNDS)) {
+    if (ClientProperty.isTrue(rendererAndBounds.getFirst(), USE_RENDERER_BOUNDS)) {
       rendererAndBounds.getSecond().translate(renderer.getX(), renderer.getY());
       rendererAndBounds.getSecond().setSize(renderer.getSize());
     }
@@ -365,6 +363,9 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
     SwingUtilities.convertPointToScreen(location, myComponent);
 
     Rectangle screen = ScreenUtil.getScreenRectangle(location);
+
+    // exclude case when myComponent touches screen boundary with its right edge, and popup would be displayed on adjacent screen
+    if (location.x == screen.x) return null;
 
     int borderWidth = isPaintBorder() ? 1 : 0;
     int width = Math.min(screen.width + screen.x - location.x - borderWidth, cellMaxX - visMaxX);

@@ -3,6 +3,7 @@ package com.jetbrains.python.run
 
 import com.intellij.execution.target.value.TargetEnvironmentFunction
 import com.intellij.execution.target.value.constant
+import com.intellij.openapi.vfs.encoding.EncodingManager
 import org.jetbrains.annotations.ApiStatus
 import java.nio.charset.Charset
 
@@ -11,13 +12,13 @@ import java.nio.charset.Charset
  */
 @ApiStatus.Experimental
 sealed class PythonExecution {
-  var workingDir: TargetEnvironmentFunction<String?>? = null
+  var workingDir: TargetEnvironmentFunction<out String?>? = null
 
   val parameters: MutableList<TargetEnvironmentFunction<String>> = mutableListOf()
 
   val envs: MutableMap<String, TargetEnvironmentFunction<String>> = mutableMapOf()
 
-  var charset: Charset? = null
+  var charset: Charset = EncodingManager.getInstance().defaultCharset
 
   fun addParameter(value: String) {
     addParameter(constant(value))
@@ -28,6 +29,10 @@ sealed class PythonExecution {
   }
 
   fun addParameters(vararg parameters: String) {
+    parameters.forEach { parameter -> addParameter(parameter) }
+  }
+
+  fun addParameters(parameters: List<String>) {
     parameters.forEach { parameter -> addParameter(parameter) }
   }
 

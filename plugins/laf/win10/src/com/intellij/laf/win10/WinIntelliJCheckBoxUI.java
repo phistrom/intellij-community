@@ -4,7 +4,8 @@ package com.intellij.laf.win10;
 import com.intellij.ide.ui.laf.darcula.DarculaUIUtil;
 import com.intellij.ide.ui.laf.darcula.ui.DarculaCheckBoxUI;
 import com.intellij.ui.scale.JBUIScale;
-import com.intellij.util.ui.*;
+import com.intellij.util.ui.EmptyIcon;
+import com.intellij.util.ui.UIUtil;
 
 import javax.swing.*;
 import javax.swing.plaf.ComponentUI;
@@ -15,7 +16,7 @@ import java.awt.geom.Rectangle2D;
 /**
  * @author Konstantin Bulenkov
  */
-public class WinIntelliJCheckBoxUI extends DarculaCheckBoxUI {
+public final class WinIntelliJCheckBoxUI extends DarculaCheckBoxUI {
   private static final Icon DEFAULT_ICON = JBUIScale.scaleIcon(EmptyIcon.create(13)).asUIResource();
 
   @SuppressWarnings({"MethodOverridesStaticMethodOfSuperclass", "UnusedDeclaration"})
@@ -26,14 +27,8 @@ public class WinIntelliJCheckBoxUI extends DarculaCheckBoxUI {
   }
 
   @Override
-  protected Rectangle updateViewRect(AbstractButton b, Rectangle viewRect) {
-    JBInsets.removeFrom(viewRect, b.getInsets());
-    return viewRect;
-  }
-
-  @Override
-  protected Dimension computeOurPreferredSize(JComponent c) {
-    return null;
+  protected boolean removeInsetsBeforeLayout(AbstractButton b) {
+    return true;
   }
 
   @Override

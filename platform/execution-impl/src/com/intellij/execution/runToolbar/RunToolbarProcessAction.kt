@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.execution.runToolbar
 
 import com.intellij.execution.ExecutionTargetManager
@@ -24,38 +24,40 @@ open class RunToolbarProcessAction(override val process: RunToolbarProcess, val 
   override fun actionPerformed(e: AnActionEvent) {
     e.project?.let { project ->
       if (canRun(e)) {
-        e.configuration()?.let {
-          e.addWaitingForAProcess(executor.id)
-          ExecutorRegistryImpl.RunnerHelper.run(project, it.configuration, it, e.dataContext, executor)
+        getSelectedConfiguration(e)?.let {
+           ExecutorRegistryImpl.RunnerHelper.run(project, it.configuration, it, e.dataContext, executor)
         }
       }
     }
   }
 
-  override fun update(e: AnActionEvent) {
-    super.update(e)
-    e.presentation.text = executor.actionName
-    e.presentation.isVisible = e.project?.let {
-      e.presentation.isVisible && if (e.isItRunToolbarMainSlot()) {
-        val slotManager = RunToolbarSlotManager.getInstance(it)
-        (e.isOpened() && !e.isActiveProcess() || !slotManager.getState().isActive())
-      }
-      else !e.isActiveProcess()
-    } ?: false
+  override fun checkMainSlotVisibility(state: RunToolbarMainSlotState): Boolean {
+    return state == RunToolbarMainSlotState.CONFIGURATION
+  }
 
-    e.presentation.isEnabled = e.project?.let {
-      canRun(e)
-    } ?: false
+  override fun update(e: AnActionEvent) {
+    e.presentation.text = executor.actionName
+    e.presentation.isVisible = !e.isActiveProcess()
+
+    if (!RunToolbarProcess.isExperimentalUpdatingEnabled) {
+      e.mainState()?.let {
+        e.presentation.isVisible = e.presentation.isVisible && checkMainSlotVisibility(it)
+      }
+    }
+
+    if(e.presentation.isVisible) {
+      e.presentation.isEnabled = canRun(e)
+    }
   }
 
   override fun getSelectedConfiguration(e: AnActionEvent): RunnerAndConfigurationSettings? {
     return e.configuration()
   }
 
-  private fun canRun(e: AnActionEvent): Boolean {
+  protected fun canRun(e: AnActionEvent): Boolean {
     return e.project?.let { project->
       val activeTarget = ExecutionTargetManager.getActiveTarget(project)
-      return e.configuration()?.let {
+      return getSelectedConfiguration(e)?.let {
 
         val target = SettingsAndEffectiveTarget(it.configuration, activeTarget)
 

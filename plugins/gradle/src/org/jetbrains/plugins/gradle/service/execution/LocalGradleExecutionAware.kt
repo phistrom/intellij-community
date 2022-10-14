@@ -1,11 +1,11 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.service.execution
 
 import com.intellij.build.events.impl.*
 import com.intellij.execution.target.TargetEnvironmentConfiguration
 import com.intellij.execution.target.TargetEnvironmentsManager
 import com.intellij.execution.wsl.WSLUtil
-import com.intellij.execution.wsl.WslDistributionManager
+import com.intellij.execution.wsl.WslPath
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.invokeAndWaitIfNeeded
 import com.intellij.openapi.application.runWriteAction
@@ -19,6 +19,7 @@ import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskState.CA
 import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskState.CANCELING
 import com.intellij.openapi.externalSystem.model.task.event.ExternalSystemBuildEvent
 import com.intellij.openapi.externalSystem.service.execution.ExternalSystemJdkException
+import com.intellij.openapi.externalSystem.service.execution.ExternalSystemJdkUtil
 import com.intellij.openapi.externalSystem.service.execution.ExternalSystemRunConfiguration
 import com.intellij.openapi.externalSystem.service.execution.TargetEnvironmentConfigurationProvider
 import com.intellij.openapi.externalSystem.service.internal.ExternalSystemResolveProjectTask
@@ -83,13 +84,13 @@ class LocalGradleExecutionAware : GradleExecutionAware {
     val libs = File(homePath, "lib")
     if (!libs.isDirectory) {
       if (GradleEnvironment.DEBUG_GRADLE_HOME_PROCESSING) {
-        log.info("Gradle sdk check failed for the path '$homePath'. Reason: it doesn't have a child directory named 'lib'")
+        LOG.info("Gradle sdk check failed for the path '$homePath'. Reason: it doesn't have a child directory named 'lib'")
       }
       return false
     }
     val found = findGradleJar(libs.listFiles()) != null
     if (GradleEnvironment.DEBUG_GRADLE_HOME_PROCESSING) {
-      log.info("Gradle home check ${if (found) "passed" else "failed"} for the path '$homePath'")
+      LOG.info("Gradle home check ${if (found) "passed" else "failed"} for the path '$homePath'")
     }
     return found
   }
@@ -103,22 +104,34 @@ class LocalGradleExecutionAware : GradleExecutionAware {
   ): SdkInfo? {
     val settings = use(project) { GradleSettings.getInstance(it) }
     val projectSettings = settings.getLinkedProjectSettings(externalProjectPath) ?: return null
-    val gradleJvm = projectSettings.gradleJvm
 
+    val originalGradleJvm = projectSettings.gradleJvm
     val provider = use(project) { getGradleJvmLookupProvider(it, projectSettings) }
-    var sdkInfo = use(project) { provider.nonblockingResolveGradleJvmInfo(it, externalProjectPath, gradleJvm) }
-    if (sdkInfo is SdkInfo.Unresolved || sdkInfo is SdkInfo.Resolving) {
+    var sdkInfo = use(project) { provider.nonblockingResolveGradleJvmInfo(it, externalProjectPath, originalGradleJvm) }
+    if (sdkInfo is SdkInfo.Undefined || sdkInfo is SdkInfo.Unresolved || sdkInfo is SdkInfo.Resolving) {
       waitForGradleJvmResolving(provider, task, taskNotificationListener)
-      sdkInfo = use(project) { provider.nonblockingResolveGradleJvmInfo(it, externalProjectPath, gradleJvm) }
+      if (projectSettings.gradleJvm == null) {
+        projectSettings.gradleJvm = originalGradleJvm ?: ExternalSystemJdkUtil.USE_PROJECT_JDK
+      }
+      sdkInfo = use(project) { provider.nonblockingResolveGradleJvmInfo(it, externalProjectPath, projectSettings.gradleJvm) }
     }
 
-    if (sdkInfo !is SdkInfo.Resolved) throw jdkConfigurationException("gradle.jvm.is.invalid")
-    val homePath = sdkInfo.homePath ?: throw jdkConfigurationException("gradle.jvm.is.invalid")
+    val gradleJvm = projectSettings.gradleJvm
+    if (sdkInfo !is SdkInfo.Resolved) {
+      LOG.warn("Gradle JVM ($gradleJvm) isn't resolved: $sdkInfo")
+      throw jdkConfigurationException("gradle.jvm.is.invalid")
+    }
+    val homePath = sdkInfo.homePath ?: run {
+      LOG.warn("No Gradle JVM ($gradleJvm) home path: $sdkInfo")
+      throw jdkConfigurationException("gradle.jvm.is.invalid")
+    }
     checkForWslJdkOnWindows(homePath, externalProjectPath, task)
     if (!JdkUtil.checkForJdk(homePath)) {
       if (JdkUtil.checkForJre(homePath)) {
+        LOG.warn("Gradle JVM ($gradleJvm) is JRE instead JDK: $sdkInfo")
         throw jdkConfigurationException("gradle.jvm.is.jre")
       }
+      LOG.warn("Invalid Gradle JVM ($gradleJvm) home path: $sdkInfo")
       throw jdkConfigurationException("gradle.jvm.is.invalid")
     }
     return sdkInfo
@@ -126,8 +139,8 @@ class LocalGradleExecutionAware : GradleExecutionAware {
 
   private fun checkForWslJdkOnWindows(homePath: String, externalProjectPath: String, task: ExternalSystemTask) {
     if (WSLUtil.isSystemCompatible() &&
-        WslDistributionManager.isWslPath(homePath) &&
-        !WslDistributionManager.isWslPath(externalProjectPath)) {
+        WslPath.isWslUncPath(homePath) &&
+        !WslPath.isWslUncPath(externalProjectPath)) {
       val isResolveProjectTask = task is ExternalSystemResolveProjectTask
       val message = GradleBundle.message("gradle.incorrect.jvm.wslJdk.on.win.issue.description")
       throw BuildIssueException(IncorrectGradleJdkIssue(externalProjectPath, homePath, message, isResolveProjectTask))
@@ -177,72 +190,21 @@ class LocalGradleExecutionAware : GradleExecutionAware {
     taskNotificationListener: ExternalSystemTaskNotificationListener
   ): Sdk? {
     if (ApplicationManager.getApplication().isDispatchThread) {
-      log.error("Do not perform synchronous wait for sdk downloading in EDT - causes deadlock.")
+      LOG.error("Do not perform synchronous wait for sdk downloading in EDT - causes deadlock.")
       throw jdkConfigurationException("gradle.jvm.is.being.resolved.error")
     }
 
     val progressIndicator = lookupProvider.progressIndicator ?: ProgressIndicatorBase()
-    submitProgressStarted(task, taskNotificationListener, progressIndicator)
+    submitProgressStarted(task, taskNotificationListener, progressIndicator, progressIndicator, GradleBundle.message("gradle.jvm.is.being.resolved"))
     ProgressIndicatorListener.whenProgressFractionChanged(progressIndicator) {
-      submitProgressStatus(task, taskNotificationListener, progressIndicator)
+      submitProgressStatus(task, taskNotificationListener, progressIndicator, progressIndicator, GradleBundle.message("gradle.jvm.is.being.resolved"))
     }
     whenTaskCanceled(task) { progressIndicator.cancel() }
     val result = lookupProvider.blockingGetSdk()
-    submitProgressFinished(task, taskNotificationListener, progressIndicator)
+    submitProgressFinished(task, taskNotificationListener, progressIndicator, progressIndicator, GradleBundle.message("gradle.jvm.has.been.resolved"))
     return result
   }
 
-  private fun whenTaskCanceled(task: ExternalSystemTask, callback: () -> Unit) {
-    val wrappedCallback = ConcurrencyUtil.once(callback)
-    val progressManager = ExternalSystemProgressNotificationManager.getInstance()
-    val notificationListener = object : ExternalSystemTaskNotificationListenerAdapter() {
-      override fun onCancel(id: ExternalSystemTaskId) {
-        wrappedCallback.run()
-      }
-    }
-    progressManager.addNotificationListener(task.id, notificationListener)
-    if (task.state == CANCELED || task.state == CANCELING) {
-      wrappedCallback.run()
-    }
-  }
-
-  private fun submitProgressStarted(
-    task: ExternalSystemTask,
-    taskNotificationListener: ExternalSystemTaskNotificationListener,
-    progressIndicator: ProgressIndicator
-  ) {
-    val message = progressIndicator.text ?: GradleBundle.message("gradle.jvm.is.being.resolved")
-    val buildEvent = StartEventImpl(progressIndicator, task.id, currentTimeMillis(), message)
-    val notificationEvent = ExternalSystemBuildEvent(task.id, buildEvent)
-    taskNotificationListener.onStatusChange(notificationEvent)
-  }
-
-  private fun submitProgressFinished(
-    task: ExternalSystemTask,
-    taskNotificationListener: ExternalSystemTaskNotificationListener,
-    progressIndicator: ProgressIndicator
-  ) {
-    val result = when {
-      progressIndicator.isCanceled -> SkippedResultImpl()
-      else -> SuccessResultImpl()
-    }
-    val message = progressIndicator.text ?: GradleBundle.message("gradle.jvm.has.been.resolved")
-    val buildEvent = FinishEventImpl(progressIndicator, task.id, currentTimeMillis(), message, result)
-    val notificationEvent = ExternalSystemBuildEvent(task.id, buildEvent)
-    taskNotificationListener.onStatusChange(notificationEvent)
-  }
-
-  private fun submitProgressStatus(
-    task: ExternalSystemTask,
-    taskNotificationListener: ExternalSystemTaskNotificationListener,
-    progressIndicator: ProgressIndicator
-  ) {
-    val progress = (progressIndicator.fraction * 100).toLong()
-    val message = progressIndicator.text ?: GradleBundle.message("gradle.jvm.is.being.resolved")
-    val buildEvent = ProgressBuildEventImpl(progressIndicator, task.id, currentTimeMillis(), message, 100, progress, "%")
-    val notificationEvent = ExternalSystemBuildEvent(task.id, buildEvent)
-    taskNotificationListener.onStatusChange(notificationEvent)
-  }
 
   private fun findGradleJar(files: Array<File?>?): File? {
     if (files == null) return null
@@ -260,7 +222,7 @@ class LocalGradleExecutionAware : GradleExecutionAware {
       if (filesInfo.isNotEmpty()) {
         filesInfo.setLength(filesInfo.length - 1)
       }
-      log.info("Gradle sdk check fails. " +
+      LOG.info("Gradle sdk check fails. " +
                "Reason: no one of the given files matches gradle JAR pattern (${GradleInstallationManager.GRADLE_JAR_FILE_PATTERN}). " +
                "Files: $filesInfo")
     }
@@ -268,7 +230,7 @@ class LocalGradleExecutionAware : GradleExecutionAware {
   }
 
   companion object {
-    private val log = logger<LocalGradleExecutionAware>()
+    private val LOG = logger<LocalGradleExecutionAware>()
     const val LOCAL_TARGET_TYPE_ID = "local"
   }
 }

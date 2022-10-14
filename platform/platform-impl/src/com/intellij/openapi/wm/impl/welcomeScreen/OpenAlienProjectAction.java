@@ -3,10 +3,7 @@ package com.intellij.openapi.wm.impl.welcomeScreen;
 
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.impl.ProjectUtil;
-import com.intellij.openapi.actionSystem.AnAction;
-import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.DefaultActionGroup;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
+import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.util.NlsSafe;
 import org.jetbrains.annotations.NotNull;
@@ -31,6 +28,16 @@ public class OpenAlienProjectAction extends AnAction {
   }
 
   @Override
+  public void update(@NotNull AnActionEvent e) {
+    e.getPresentation().setEnabled(ActionPlaces.WELCOME_SCREEN.equals(e.getPlace()));
+  }
+
+  @Override
+  public @NotNull ActionUpdateThread getActionUpdateThread() {
+    return ActionUpdateThread.BGT;
+  }
+
+  @Override
   public void actionPerformed(@NotNull AnActionEvent e) {
     DefaultActionGroup actionGroup = new DefaultActionGroup();
     for (@NlsSafe String path : myProjectPaths) {
@@ -44,7 +51,7 @@ public class OpenAlienProjectAction extends AnAction {
     }
     JBPopupFactory.getInstance()
       .createActionGroupPopup(IdeBundle.message("popup.title.open.project"), actionGroup, e.getDataContext(), JBPopupFactory.ActionSelectionAid.SPEEDSEARCH,
-                              false).showUnderneathOf(Objects.requireNonNull(e.getData(PlatformDataKeys.CONTEXT_COMPONENT)));
+                              false).showUnderneathOf(Objects.requireNonNull(e.getData(PlatformCoreDataKeys.CONTEXT_COMPONENT)));
   }
 
   protected void projectOpened() {}

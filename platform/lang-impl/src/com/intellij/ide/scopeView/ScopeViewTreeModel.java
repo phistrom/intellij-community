@@ -1,10 +1,10 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.scopeView;
 
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.CopyPasteUtil;
-import com.intellij.ide.bookmarks.Bookmark;
-import com.intellij.ide.bookmarks.BookmarksListener;
+import com.intellij.ide.bookmark.BookmarksListener;
+import com.intellij.ide.bookmark.FileBookmarksListener;
 import com.intellij.ide.projectView.*;
 import com.intellij.ide.projectView.NodeSortOrder;
 import com.intellij.ide.projectView.impl.CompoundIconProvider;
@@ -32,6 +32,7 @@ import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.ui.configuration.ProjectSettingsService;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.IconLoader;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.registry.Registry;
@@ -52,6 +53,7 @@ import com.intellij.psi.impl.file.PsiDirectoryFactory;
 import com.intellij.psi.search.scope.ProjectFilesScope;
 import com.intellij.psi.search.scope.packageSet.NamedScope;
 import com.intellij.psi.util.PsiUtilCore;
+import com.intellij.ui.DeferredIcon;
 import com.intellij.ui.RetrievableIcon;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.ui.icons.CompositeIcon;
@@ -112,22 +114,7 @@ final class ScopeViewTreeModel extends BaseTreeModel<AbstractTreeNode<?>> implem
     Disposer.register(this, model);
     root = new ProjectNode(project, settings);
     MessageBusConnection connection = project.getMessageBus().connect(this);
-    connection.subscribe(BookmarksListener.TOPIC, new BookmarksListener() {
-      @Override
-      public void bookmarkAdded(@NotNull Bookmark bookmark) {
-        bookmarkChanged(bookmark);
-      }
-
-      @Override
-      public void bookmarkRemoved(@NotNull Bookmark bookmark) {
-        bookmarkChanged(bookmark);
-      }
-
-      @Override
-      public void bookmarkChanged(@NotNull Bookmark bookmark) {
-        notifyPresentationChanged(bookmark.getFile());
-      }
-    });
+    connection.subscribe(BookmarksListener.TOPIC, new FileBookmarksListener(file -> notifyPresentationChanged(file)));
     connection.subscribe(ProblemListener.TOPIC, new ProblemListener() {
       @Override
       public void problemsAppeared(@NotNull VirtualFile file) {
@@ -1071,7 +1058,7 @@ final class ScopeViewTreeModel extends BaseTreeModel<AbstractTreeNode<?>> implem
     @Nullable Object getCommonRootID() {
       if (!groups.isEmpty() || roots.isEmpty()) return null;
       Object id = roots.get(0).node.getRootID();
-      return roots.stream().allMatch(root -> root.node.getRootID().equals(id)) ? id : null;
+      return ContainerUtil.and(roots, root -> root.node.getRootID().equals(id)) ? id : null;
     }
 
     @NotNull
@@ -1270,6 +1257,9 @@ final class ScopeViewTreeModel extends BaseTreeModel<AbstractTreeNode<?>> implem
       for (int i = 0; i < composite.getIconCount(); i++) {
         if (is(composite.getIcon(i), expected)) return true;
       }
+    }
+    if (icon instanceof DeferredIcon || icon instanceof IconLoader.LazyIcon) {
+      return false; // do not calculate complex icons at this point
     }
     if (icon instanceof RetrievableIcon) {
       RetrievableIcon retrievable = (RetrievableIcon)icon;

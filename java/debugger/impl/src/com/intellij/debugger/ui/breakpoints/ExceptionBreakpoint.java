@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 /*
  * Class ExceptionBreakpoint
@@ -227,20 +227,18 @@ public class ExceptionBreakpoint extends Breakpoint<JavaExceptionBreakpointPrope
   public void readExternal(Element parentNode) throws InvalidDataException {
     super.readExternal(parentNode);
 
-    //noinspection HardCodedStringLiteral
     String packageName = parentNode.getAttributeValue("package_name");
     setPackageName(packageName != null? packageName : calcPackageName(packageName));
 
     try {
-      getProperties().NOTIFY_CAUGHT = Boolean.valueOf(JDOMExternalizerUtil.readField(parentNode, "NOTIFY_CAUGHT"));
+      getProperties().NOTIFY_CAUGHT = Boolean.parseBoolean(JDOMExternalizerUtil.readField(parentNode, "NOTIFY_CAUGHT"));
     } catch (Exception ignore) {
     }
     try {
-      getProperties().NOTIFY_UNCAUGHT = Boolean.valueOf(JDOMExternalizerUtil.readField(parentNode, "NOTIFY_UNCAUGHT"));
+      getProperties().NOTIFY_UNCAUGHT = Boolean.parseBoolean(JDOMExternalizerUtil.readField(parentNode, "NOTIFY_UNCAUGHT"));
     } catch (Exception ignore) {
     }
 
-    //noinspection HardCodedStringLiteral
     String className = parentNode.getAttributeValue("class_name");
     setQualifiedName(className);
     if(className == null) {

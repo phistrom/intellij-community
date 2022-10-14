@@ -1,15 +1,16 @@
 // PSI_ELEMENT: org.jetbrains.kotlin.psi.KtClass
 // OPTIONS: propertyUsages
+// FIR_COMPARISON
 interface X {
     val a: String
         get() {
             return ""
         }
     var b: Int
-        get () {
+        get() {
             return 0
         }
-        set (value: Int) {
+        set(value: Int) {
 
         }
 
@@ -18,16 +19,16 @@ interface X {
     }
 }
 
-open class <caret>A: X {
+open class <caret>A : X {
     override val a: String
         get() {
             return "?"
         }
     override var b: Int
-        get () {
+        get() {
             return 1
         }
-        set (value: Int) {
+        set(value: Int) {
             println(value)
         }
 

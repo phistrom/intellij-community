@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.codeInsight.surroundWith.expression;
 
@@ -15,6 +15,7 @@ import org.jetbrains.kotlin.psi.KtParenthesizedExpression;
 import org.jetbrains.kotlin.psi.KtPsiFactoryKt;
 
 public class KotlinParenthesesSurrounder extends KotlinExpressionSurrounder {
+    @SuppressWarnings("DialogTitleCapitalization")
     @Override
     public String getTemplateDescription() {
         return CodeInsightBundle.message("surround.with.parenthesis.template");
@@ -26,7 +27,7 @@ public class KotlinParenthesesSurrounder extends KotlinExpressionSurrounder {
         KtParenthesizedExpression parenthesizedExpression = (KtParenthesizedExpression) KtPsiFactoryKt
                 .KtPsiFactory(expression).createExpression("(a)");
         KtExpression expressionWithoutParentheses = parenthesizedExpression.getExpression();
-        assert expressionWithoutParentheses != null : "JetExpression should exists for " + parenthesizedExpression.getText() + " expression";
+        assert expressionWithoutParentheses != null : "KtExpression should exists for " + parenthesizedExpression.getText() + " expression";
         expressionWithoutParentheses.replace(expression);
 
         expression = (KtExpression) expression.replace(parenthesizedExpression);

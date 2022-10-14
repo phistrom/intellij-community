@@ -2,6 +2,7 @@
 package com.intellij.uiDesigner.actions;
 
 import com.intellij.CommonBundle;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.diagnostic.Logger;
@@ -22,10 +23,6 @@ import com.intellij.uiDesigner.wizard.Generator;
 import com.intellij.uiDesigner.wizard.WizardData;
 import org.jetbrains.annotations.NotNull;
 
-/**
- * @author Anton Katilin
- * @author Vladimir Kondratyev
- */
 public final class DataBindingWizardAction extends AnAction{
   private static final Logger LOG = Logger.getInstance(DataBindingWizardAction.class);
 
@@ -116,6 +113,11 @@ public final class DataBindingWizardAction extends AnAction{
   @Override
   public void update(@NotNull final AnActionEvent e) {
     e.getPresentation().setVisible(FormEditingUtil.getActiveEditor(e.getDataContext()) != null);
+  }
+
+  @Override
+  public @NotNull ActionUpdateThread getActionUpdateThread() {
+    return ActionUpdateThread.BGT;
   }
 
 

@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.kotlin.tools.projectWizard.core.entity
 
 
@@ -31,7 +31,7 @@ data class PipelineTask(
     val after: List<PipelineTask>,
     val phase: GenerationPhase,
     val isAvailable: Checker,
-    val title: String?
+    @Nls val title: String?
 ) : Task() {
     class Builder(
         private val name: String,

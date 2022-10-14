@@ -1,22 +1,12 @@
 fragment pullRequestInfo on PullRequest {
   ...pullRequestInfoShort
 
-  bodyHTML
+  body
 
   author {
     ...actorInfo
   }
   createdAt
-
-  reviewRequests(first: 100) {
-    nodes {
-      ... on ReviewRequest {
-        requestedReviewer {
-          ...pullRequestReviewerInfo
-        }
-      }
-    }
-  }
 
   baseRefName
   baseRefOid

@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.debugger.evaluate.variables
 
@@ -7,6 +7,7 @@ import com.intellij.debugger.engine.evaluation.EvaluationContextImpl
 import com.intellij.debugger.jdi.LocalVariableProxyImpl
 import com.intellij.debugger.jdi.StackFrameProxyImpl
 import com.sun.jdi.*
+import org.jetbrains.kotlin.backend.common.descriptors.synthesizedString
 import org.jetbrains.kotlin.codegen.AsmUtil
 import org.jetbrains.kotlin.codegen.AsmUtil.getCapturedFieldName
 import org.jetbrains.kotlin.codegen.AsmUtil.getLabeledThisName
@@ -14,16 +15,18 @@ import org.jetbrains.kotlin.codegen.coroutines.CONTINUATION_VARIABLE_NAME
 import org.jetbrains.kotlin.codegen.coroutines.SUSPEND_FUNCTION_COMPLETION_PARAMETER_NAME
 import org.jetbrains.kotlin.codegen.inline.INLINE_FUN_VAR_SUFFIX
 import org.jetbrains.kotlin.codegen.inline.INLINE_TRANSFORMATION_SUFFIX
-import org.jetbrains.kotlin.idea.debugger.*
+import org.jetbrains.kotlin.idea.debugger.base.util.*
+import org.jetbrains.kotlin.idea.debugger.base.util.evaluate.ExecutionContext
+import org.jetbrains.kotlin.idea.debugger.core.stackFrame.InlineStackFrameProxyImpl
 import org.jetbrains.kotlin.idea.debugger.coroutine.proxy.CoroutineStackFrameProxyImpl
-import org.jetbrains.kotlin.idea.debugger.evaluate.ExecutionContext
 import org.jetbrains.kotlin.idea.debugger.evaluate.compilation.CodeFragmentParameter
-import org.jetbrains.kotlin.idea.debugger.evaluate.compilation.CodeFragmentParameter.*
+import org.jetbrains.kotlin.idea.debugger.evaluate.compilation.CodeFragmentParameter.Kind
 import org.jetbrains.kotlin.idea.debugger.evaluate.compilation.DebugLabelPropertyDescriptorProvider
 import org.jetbrains.kotlin.load.java.JvmAbi
+import org.jetbrains.kotlin.utils.addToStdlib.safeAs
 import kotlin.coroutines.Continuation
-import org.jetbrains.org.objectweb.asm.Type as AsmType
 import com.sun.jdi.Type as JdiType
+import org.jetbrains.org.objectweb.asm.Type as AsmType
 
 class VariableFinder(val context: ExecutionContext) {
     private val frameProxy = context.frameProxy
@@ -135,6 +138,9 @@ class VariableFinder(val context: ExecutionContext) {
         // Local variables – direct search
         findLocalVariable(variables, kind, kind.name)?.let { return it }
 
+        // Local variables - synthetic captured local variable (IR Backend)
+        findLocalVariable(variables, kind, kind.name.synthesizedString)?.let { return it }
+
         // Recursive search in local receiver variables
         findCapturedVariableInReceiver(variables, kind)?.let { return it }
 
@@ -194,7 +200,6 @@ class VariableFinder(val context: ExecutionContext) {
         // Recursive search in captured this
         findCapturedVariableInContainingThis(kind)?.let { return it }
 
-        @Suppress("ConstantConditionIf")
         if (USE_UNSAFE_FALLBACK) {
             // Find an unlabeled this with the compatible type
             findUnlabeledThis(VariableKind.UnlabeledThis(kind.asmType))?.let { return it }
@@ -222,7 +227,6 @@ class VariableFinder(val context: ExecutionContext) {
                 ?.let { return it }
         }
 
-        @Suppress("ConstantConditionIf")
         if (USE_UNSAFE_FALLBACK) {
             // Find an unlabeled this with the compatible type
             findUnlabeledThis(VariableKind.UnlabeledThis(kind.asmType))?.let { return it }
@@ -261,7 +265,9 @@ class VariableFinder(val context: ExecutionContext) {
         kind: VariableKind,
         namePredicate: (String) -> Boolean
     ): Result? {
-        val inlineDepth = getInlineDepth(variables)
+        val inlineDepth =
+            frameProxy.safeAs<InlineStackFrameProxyImpl>()?.inlineDepth
+            ?: getInlineDepth(variables)
 
         findLocalVariable(variables, kind, inlineDepth, namePredicate)?.let { return it }
 

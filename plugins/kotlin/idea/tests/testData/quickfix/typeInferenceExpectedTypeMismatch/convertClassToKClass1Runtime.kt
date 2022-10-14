@@ -1,6 +1,5 @@
 // "Remove '.java'" "true"
-// WITH_RUNTIME
-// COMPILER_ARGUMENTS: -XXLanguage:-NewInference
+// WITH_STDLIB
 fun foo() {
     bar(Foo::class.java<caret>)
 }

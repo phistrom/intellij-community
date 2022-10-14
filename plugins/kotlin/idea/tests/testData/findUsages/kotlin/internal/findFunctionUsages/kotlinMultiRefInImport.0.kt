@@ -10,10 +10,11 @@ fun Int.foo() {
 
 }
 
+@JvmName("fooInt")
 fun foo(n: Int) {
 
 }
 
-val foo: Int
+val foo: Int = 42
 
-// ERROR: Property must be initialized
+// FIR_COMPARISON

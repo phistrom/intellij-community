@@ -1,14 +1,20 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.browsers.actions;
 
+import com.intellij.CommonBundle;
 import com.intellij.ide.IdeBundle;
+import com.intellij.ide.browsers.ReloadMode;
+import com.intellij.ide.browsers.WebBrowserManager;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.FileEditor;
-import com.intellij.openapi.fileEditor.FileEditorLocation;
 import com.intellij.openapi.fileEditor.FileEditorState;
+import com.intellij.openapi.options.SearchableConfigurable;
+import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.Balloon;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.GotItTooltip;
@@ -53,9 +59,26 @@ public class WebPreviewFileEditor extends UserDataHolderBase implements FileEdit
       GotItTooltip gotItTooltip = new GotItTooltip(WEB_PREVIEW_RELOAD_TOOLTIP_ID, BuiltInServerBundle.message("reload.on.save.preview.got.it.content"), this);
       if (!gotItTooltip.canShow()) return;
 
+      if (WebBrowserManager.PREVIEW_RELOAD_MODE_DEFAULT != ReloadMode.RELOAD_ON_SAVE) {
+        Logger.getInstance(WebPreviewFileEditor.class).error(
+          "Default value for " + BuiltInServerBundle.message("reload.on.save.preview.got.it.title") + " has changed, tooltip is outdated.");
+        return;
+      }
+      if (WebBrowserManager.getInstance().getWebPreviewReloadMode() != ReloadMode.RELOAD_ON_SAVE) {
+        // changed before gotIt was shown
+        return;
+      }
+
       gotItTooltip
         .withHeader(BuiltInServerBundle.message("reload.on.save.preview.got.it.title"))
-        .withPosition(Balloon.Position.above);
+        .withPosition(Balloon.Position.above)
+        .withLink(CommonBundle.message("action.text.configure.ellipsis"), () -> {
+          ShowSettingsUtil.getInstance().showSettingsDialog( null, (it) ->
+            it instanceof SearchableConfigurable &&
+            ((SearchableConfigurable)it).getId().equals("reference.settings.ide.settings.web.browsers"),
+          null);
+        });
+
 
       gotItTooltip.show(myPanel.getComponent(), (c, b) ->  new Point(0, 0) );
     });
@@ -79,6 +102,11 @@ public class WebPreviewFileEditor extends UserDataHolderBase implements FileEdit
   @Override
   public void setState(@NotNull FileEditorState state) {
 
+  }
+
+  @Override
+  public @NotNull VirtualFile getFile() {
+    return myFile;
   }
 
   @Override
@@ -106,12 +134,8 @@ public class WebPreviewFileEditor extends UserDataHolderBase implements FileEdit
   }
 
   @Override
-  public @Nullable FileEditorLocation getCurrentLocation() {
-    return null;
-  }
-
-  @Override
   public void dispose() {
     previewsOpened--;
+    Disposer.dispose(myPanel);
   }
 }

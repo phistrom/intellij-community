@@ -8,8 +8,10 @@ public open class Server() {
     open fun processRequest() = foo
 }
 
-public class ServerEx(): Server() {
+public class ServerEx() : Server() {
     override fun processRequest() = "foo" + foo
 }
+
 // DISABLE-ERRORS
 
+// FIR_COMPARISON

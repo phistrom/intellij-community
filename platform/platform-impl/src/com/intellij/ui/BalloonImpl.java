@@ -1,19 +1,21 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ui;
 
 import com.intellij.application.Topics;
 import com.intellij.codeInsight.hint.HintManagerImpl;
 import com.intellij.icons.AllIcons;
-import com.intellij.ide.FrameStateListener;
 import com.intellij.ide.IdeEventQueue;
 import com.intellij.ide.IdeTooltip;
 import com.intellij.ide.RemoteDesktopService;
 import com.intellij.ide.ui.PopupLocationTracker;
 import com.intellij.ide.ui.ScreenAreaConsumer;
+import com.intellij.internal.statistic.collectors.fus.ui.BalloonUsageCollector;
+import com.intellij.notification.ActionCenter;
 import com.intellij.openapi.MnemonicHelper;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.ex.AnActionListener;
+import com.intellij.openapi.application.ApplicationActivationListener;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.ui.GraphicsConfig;
@@ -24,6 +26,7 @@ import com.intellij.openapi.ui.popup.LightweightWindowEvent;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.IdeFocusManager;
+import com.intellij.openapi.wm.IdeFrame;
 import com.intellij.openapi.wm.IdeGlassPane;
 import com.intellij.openapi.wm.WeakFocusStackManager;
 import com.intellij.ui.awt.RelativePoint;
@@ -93,6 +96,7 @@ public final class BalloonImpl implements Balloon, IdeTooltip.Ui, ScreenAreaCons
   private Point myTargetPoint;
   private final boolean myHideOnFrameResize;
   private final boolean myHideOnLinkClick;
+  private boolean myZeroPositionInLayer = true;
 
   private final Color myBorderColor;
   private final Insets myBorderInsets;
@@ -108,6 +112,10 @@ public final class BalloonImpl implements Balloon, IdeTooltip.Ui, ScreenAreaCons
   private ActionProvider myActionProvider;
   private List<ActionButton> myActionButtons;
   private boolean invalidateShadow;
+  /**
+   * Id for feature usage statistics.
+   */
+  private String myId;
 
   private final AWTEventListener myAwtActivityListener = new AWTEventListener() {
     @Override
@@ -232,6 +240,8 @@ public final class BalloonImpl implements Balloon, IdeTooltip.Ui, ScreenAreaCons
 
   public void setPointerColor(Color pointerColor) {
     myPointerColor = pointerColor;
+    myLayeredPane.revalidate();
+    myLayeredPane.repaint();
   }
 
   private final long myFadeoutTime;
@@ -418,31 +428,19 @@ public final class BalloonImpl implements Balloon, IdeTooltip.Ui, ScreenAreaCons
   }
 
   public int getLayer() {
-    Integer result = JLayeredPane.DEFAULT_LAYER;
-    switch (myLayer) {
-      case normal:
-        result = JLayeredPane.POPUP_LAYER;
-        break;
-      case top:
-        result = JLayeredPane.DRAG_LAYER;
-        break;
-    }
-
-    return result;
+    return switch (myLayer) {
+      case normal -> JLayeredPane.POPUP_LAYER;
+      case top -> JLayeredPane.DRAG_LAYER;
+    };
   }
 
   public static AbstractPosition getAbstractPositionFor(@NotNull Position position) {
-    switch (position) {
-      case atLeft:
-        return AT_LEFT;
-      case atRight:
-        return AT_RIGHT;
-      case above:
-        return ABOVE;
-      case below:
-      default:
-        return BELOW;
-    }
+    return switch (position) {
+      case atLeft -> AT_LEFT;
+      case atRight -> AT_RIGHT;
+      case above -> ABOVE;
+      case below -> BELOW;
+    };
   }
 
   @Override
@@ -451,7 +449,7 @@ public final class BalloonImpl implements Balloon, IdeTooltip.Ui, ScreenAreaCons
   }
 
   private Insets getInsetsCopy() {
-    return JBUI.insets(myBorderInsets);
+    return JBInsets.create(myBorderInsets);
   }
 
   private void show(RelativePoint target, AbstractPosition position) {
@@ -644,11 +642,14 @@ public final class BalloonImpl implements Balloon, IdeTooltip.Ui, ScreenAreaCons
       if (editorPane != null) {
         editorPane.addHyperlinkListener(new HyperlinkAdapter() {
           @Override
-          protected void hyperlinkActivated(HyperlinkEvent e) {
+          protected void hyperlinkActivated(@NotNull HyperlinkEvent e) {
             hide();
           }
         });
       }
+    }
+    if (myId != null) {
+      BalloonUsageCollector.BALLOON_SHOWN.log(myId);
     }
   }
 
@@ -773,7 +774,9 @@ public final class BalloonImpl implements Balloon, IdeTooltip.Ui, ScreenAreaCons
     myComp.setBorder(new EmptyBorder(getShadowBorderInsets()));
 
     myLayeredPane.add(myComp);
-    myLayeredPane.setLayer(myComp, getLayer(), 0); // the second balloon must be over the first one
+    if (myZeroPositionInLayer) {
+      myLayeredPane.setLayer(myComp, getLayer(), 0); // the second balloon must be over the first one
+    }
     myPosition.updateBounds(this);
 
     PopupLocationTracker.register(this);
@@ -956,9 +959,9 @@ public final class BalloonImpl implements Balloon, IdeTooltip.Ui, ScreenAreaCons
   public void startSmartFadeoutTimer(int delay) {
     mySmartFadeout = true;
     mySmartFadeoutDelay = delay;
-    Topics.subscribe(FrameStateListener.TOPIC, this, new FrameStateListener() {
+    Topics.subscribe(ApplicationActivationListener.TOPIC, this, new ApplicationActivationListener() {
       @Override
-      public void onFrameDeactivated() {
+      public void applicationDeactivated(@NotNull IdeFrame ideFrame) {
         if (!myFadeoutAlarm.isEmpty()) {
           myFadeoutAlarm.cancelAllRequests();
           mySmartFadeoutDelay = myFadeoutRequestDelay - (int)(System.currentTimeMillis() - myFadeoutRequestMillis);
@@ -979,7 +982,7 @@ public final class BalloonImpl implements Balloon, IdeTooltip.Ui, ScreenAreaCons
         if (mySmartFadeout) {
           setAnimationEnabled(true);
         }
-        hide();
+        hide(ActionCenter.isEnabled());
       }, fadeoutDelay, null);
     }
   }
@@ -1117,6 +1120,10 @@ public final class BalloonImpl implements Balloon, IdeTooltip.Ui, ScreenAreaCons
   public void setHideListener(@NotNull Runnable listener) {
     myHideListener = listener;
     myHideOnMouse = true;
+  }
+
+  public void setZeroPositionInLayer(boolean zeroPositionInLayer) {
+    myZeroPositionInLayer = zeroPositionInLayer;
   }
 
   public void setShowPointer(final boolean show) {
@@ -2158,5 +2165,13 @@ public final class BalloonImpl implements Balloon, IdeTooltip.Ui, ScreenAreaCons
   // For example balloon would ignore clicks and won't hide explicitly or would trigger some actions/navigation
   public boolean isClickProcessor() {
     return myClickHandler != null || !myCloseOnClick || isBlockClicks();
+  }
+
+  public String getId() {
+    return myId;
+  }
+
+  public void setId(String id) {
+    myId = id;
   }
 }

@@ -12,8 +12,5 @@ interface StartPagePromoter {
     val START_PAGE_PROMOTER_EP = ExtensionPointName<StartPagePromoter>("com.intellij.startPagePromoter")
   }
 
-  fun getPromotionForInitialState(): JPanel?
-
-  @Deprecated("This API is not using anymore")
-  fun needToHideSingleProject(path: String): Boolean = false
+  fun getPromotion(isEmptyState: Boolean): JPanel?
 }

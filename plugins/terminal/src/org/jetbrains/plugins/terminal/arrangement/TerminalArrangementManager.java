@@ -14,6 +14,7 @@ import com.intellij.ui.content.ContentManager;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.plugins.terminal.AbstractTerminalRunner;
 import org.jetbrains.plugins.terminal.ShellTerminalWidget;
 import org.jetbrains.plugins.terminal.TerminalTabState;
 import org.jetbrains.plugins.terminal.TerminalView;
@@ -73,10 +74,15 @@ public class TerminalArrangementManager implements PersistentStateComponent<Term
     TerminalArrangementState arrangementState = new TerminalArrangementState();
     ContentManager contentManager = terminalToolWindow.getContentManager();
     for (Content content : contentManager.getContents()) {
+      AbstractTerminalRunner<?> runner = TerminalView.getRunnerByContent(content);
+      if (runner == null || !runner.isTerminalSessionPersistent()) {
+        continue;
+      }
       JBTerminalWidget terminalWidget = TerminalView.getWidgetByContent(content);
       if (terminalWidget == null) continue;
       TerminalTabState tabState = new TerminalTabState();
       tabState.myTabName = content.getTabName();
+      tabState.myIsUserDefinedTabTitle = tabState.myTabName.equals(terminalWidget.getTerminalTitle().getUserDefinedTitle());
       tabState.myWorkingDirectory = myWorkingDirectoryManager.getWorkingDirectory(content);
       tabState.myCommandHistoryFileName = TerminalCommandHistoryManager.getFilename(
         ShellTerminalWidget.getCommandHistoryFilePath(terminalWidget)

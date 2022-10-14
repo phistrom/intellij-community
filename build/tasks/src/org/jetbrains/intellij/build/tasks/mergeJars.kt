@@ -1,39 +1,91 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 @file:JvmName("JarBuilder")
 @file:Suppress("ReplaceJavaStaticMethodWithKotlinAnalog")
-
 package org.jetbrains.intellij.build.tasks
 
-import com.intellij.util.lang.ImmutableZipEntry
-import com.intellij.util.lang.ImmutableZipFile
+import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.api.common.Attributes
+import io.opentelemetry.api.trace.Span
 import org.jetbrains.intellij.build.io.*
-import java.nio.channels.FileChannel
-import java.nio.file.FileSystems
-import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.PathMatcher
-import java.util.*
 import java.util.function.IntConsumer
-import java.util.zip.ZipEntry
+import java.util.zip.Deflater
 
 sealed interface Source {
   val sizeConsumer: IntConsumer?
+
+  val filter: ((String) -> Boolean)?
+    get() = null
 }
 
-data class ZipSource(val file: Path, override val sizeConsumer: IntConsumer? = null) : Source, Comparable<ZipSource> {
+private val USER_HOME = Path.of(System.getProperty("user.home"))
+private val MAVEN_REPO = USER_HOME.resolve(".m2/repository")
+
+data class ZipSource(val file: Path,
+                     val excludes: List<Regex> = emptyList(),
+                     override val filter: ((String) -> Boolean)? = null,
+                     override val sizeConsumer: IntConsumer? = null) : Source, Comparable<ZipSource> {
   override fun compareTo(other: ZipSource) = file.compareTo(other.file)
+
+  override fun toString(): String {
+    val shortPath = if (file.startsWith(MAVEN_REPO)) {
+      MAVEN_REPO.relativize(file).toString()
+    }
+    else if (file.startsWith(USER_HOME)) {
+      "~/" + USER_HOME.relativize(file)
+    }
+    else {
+      file.toString()
+    }
+    return "zip(file=$shortPath)"
+  }
 }
 
-data class DirSource(val dir: Path, val excludes: List<PathMatcher>, override val sizeConsumer: IntConsumer? = null) : Source
+data class DirSource(@JvmField val dir: Path,
+                     @JvmField val excludes: List<PathMatcher> = emptyList(),
+                     override val sizeConsumer: IntConsumer? = null,
+                     @JvmField val prefix: String = "") : Source {
+  override fun toString(): String {
+    val shortPath = if (dir.startsWith(USER_HOME)) {
+      "~/" + USER_HOME.relativize(dir)
+    }
+    else {
+      dir.toString()
+    }
+    return "dir(dir=$shortPath, excludes=${excludes.size})"
+  }
+}
 
-fun createZipSource(file: Path, sizeConsumer: IntConsumer?): Any = ZipSource(file = file, sizeConsumer = sizeConsumer)
+data class InMemoryContentSource(@JvmField val relativePath: String,
+                                 @JvmField val data: ByteArray, override val sizeConsumer: IntConsumer? = null) : Source {
+  override fun toString() = "inMemory(relativePath=$relativePath)"
 
-@JvmOverloads
-fun buildJar(targetFile: Path, sources: List<Source>, logger: System.Logger?, dryRun: Boolean = false) {
-  logger?.debug {
-    "Build JAR (targetFile=$targetFile, sources=$sources)"
+  override fun equals(other: Any?): Boolean {
+    if (this === other) return true
+    if (other !is InMemoryContentSource) return false
+
+    if (relativePath != other.relativePath) return false
+    if (!data.contentEquals(other.data)) return false
+    if (sizeConsumer != other.sizeConsumer) return false
+
+    return true
   }
 
+  override fun hashCode(): Int {
+    var result = relativePath.hashCode()
+    result = 31 * result + data.contentHashCode()
+    result = 31 * result + (sizeConsumer?.hashCode() ?: 0)
+    return result
+  }
+}
+
+@JvmOverloads
+fun buildJar(targetFile: Path,
+             sources: List<Source>,
+             compress: Boolean = false,
+             dryRun: Boolean = false,
+             nativeFiles: MutableMap<ZipSource, MutableList<String>>? = null) {
   if (dryRun) {
     for (source in sources) {
       source.sizeConsumer?.accept(0)
@@ -41,145 +93,164 @@ fun buildJar(targetFile: Path, sources: List<Source>, logger: System.Logger?, dr
     return
   }
 
-  Files.createDirectories(targetFile.parent)
-  FileChannel.open(targetFile, RW_CREATE_NEW).use { outChannel ->
-    val packageIndexBuilder = PackageIndexBuilder()
+  val packageIndexBuilder = if (compress) null else PackageIndexBuilder()
+  writeNewFile(targetFile) { outChannel ->
+    ZipFileWriter(outChannel, if (compress) Deflater(Deflater.DEFAULT_COMPRESSION, true) else null).use { zipCreator ->
+      val uniqueNames = HashMap<String, Path>()
 
-    val zipCreator = ZipFileWriter(outChannel, deflater = null)
-    val uniqueNames = HashSet<String>()
-    for (source in sources) {
-      val positionBefore = outChannel.position()
-      if (source is DirSource) {
-        val archiver = ZipArchiver(method = ZipEntry.STORED, zipCreator, fileAdded = {
-          if (uniqueNames.add(it)) {
-            packageIndexBuilder.addFile(it)
-            true
+      for (source in sources) {
+        val positionBefore = outChannel.position()
+        when (source) {
+          is DirSource -> {
+            val archiver = ZipArchiver(zipCreator, fileAdded = {
+              if (uniqueNames.putIfAbsent(it, source.dir) == null) {
+                packageIndexBuilder?.addFile(it)
+                true
+              }
+              else {
+                false
+              }
+            })
+            val normalizedDir = source.dir.toAbsolutePath().normalize()
+            archiver.setRootDir(normalizedDir, source.prefix)
+            archiveDir(normalizedDir, archiver, excludes = source.excludes.takeIf(List<PathMatcher>::isNotEmpty))
           }
-          else {
-            false
+
+          is InMemoryContentSource -> {
+            if (uniqueNames.putIfAbsent(source.relativePath, Path.of(source.relativePath)) != null) {
+              throw IllegalStateException("in-memory source must always be first " +
+                                          "(targetFile=$targetFile, source=${source.relativePath}, sources=${sources.joinToString()})")
+            }
+
+            packageIndexBuilder?.addFile(source.relativePath)
+            zipCreator.uncompressedData(source.relativePath, source.data.size) {
+              it.put(source.data)
+            }
           }
-        })
-        val normalizedDir = source.dir.toAbsolutePath().normalize()
-        archiver.setRootDir(normalizedDir, "")
-        compressDir(normalizedDir, archiver, excludes = source.excludes.takeIf { it.isNotEmpty() })
-      }
-      else {
-        ImmutableZipFile.load((source as ZipSource).file).use { zipFile ->
-          val entries = getFilteredEntries(zipFile, uniqueNames)
-          writeEntries(entries, zipCreator, zipFile)
-          packageIndexBuilder.add(entries)
+
+          is ZipSource -> {
+            val sourceFile = source.file
+            val requiresMavenFiles = targetFile.fileName.toString().startsWith("junixsocket-")
+            readZipFile(sourceFile) { name, entry ->
+              if (nativeFiles != null && isNative(name)) {
+                if (isDuplicated(uniqueNames, name, sourceFile)) {
+                  return@readZipFile
+                }
+
+                nativeFiles.computeIfAbsent(source) { mutableListOf() }.add(name)
+              }
+              else {
+                val filter = source.filter
+                val isIncluded = if (filter == null) {
+                  checkName(name = name,
+                            excludes = source.excludes,
+                            includeManifest = sources.size == 1,
+                            requiresMavenFiles = requiresMavenFiles)
+                }
+                else {
+                  filter(name)
+                }
+
+                if (isIncluded) {
+                  if (isDuplicated(uniqueNames, name, sourceFile)) {
+                    return@readZipFile
+                  }
+
+                  packageIndexBuilder?.addFile(name)
+                  zipCreator.uncompressedData(name, entry.getByteBuffer())
+                }
+              }
+            }
+          }
         }
+
+        source.sizeConsumer?.accept((zipCreator.resultStream.getChannelPosition() - positionBefore).toInt())
       }
 
-      source.sizeConsumer?.accept((outChannel.position() - positionBefore).toInt())
+      packageIndexBuilder?.writePackageIndex(zipCreator)
     }
-    packageIndexBuilder.writeDirs(zipCreator)
-    packageIndexBuilder.writePackageIndex(zipCreator)
-    zipCreator.finish()
   }
 }
 
-private fun getFilteredEntries(zipFile: ImmutableZipFile, uniqueNames: MutableSet<String>): List<ImmutableZipEntry> {
-  return zipFile.entries.filter {
-    val name = it.name
+private fun isDuplicated(uniqueNames: HashMap<String, Path>, name: String, sourceFile: Path): Boolean {
+  val old = uniqueNames.putIfAbsent(name, sourceFile) ?: return false
+  Span.current().addEvent("$name is duplicated and ignored", Attributes.of(
+    AttributeKey.stringKey("firstSource"), old.toString(),
+    AttributeKey.stringKey("secondSource"), sourceFile.toString(),
+  ))
+  return true
+}
 
-    @Suppress("SpellCheckingInspection")
-    uniqueNames.add(name) &&
-    !name.endsWith(".kotlin_metadata") &&
-    name != "META-INF/MANIFEST.MF" && name != PACKAGE_INDEX_NAME &&
-    name != "license" && !name.startsWith("license/") &&
-    name != "META-INF/services/javax.xml.parsers.SAXParserFactory" &&
-    name != "META-INF/services/javax.xml.stream.XMLEventFactory" &&
-    name != "META-INF/services/javax.xml.parsers.DocumentBuilderFactory" &&
-    name != "META-INF/services/javax.xml.datatype.DatatypeFactory" &&
-    name != "native-image" && !name.startsWith("native-image/") &&
-    name != "native" && !name.startsWith("native/") &&
-    name != "licenses" && !name.startsWith("licenses/") &&
-    name != ".gitkeep" &&
-    name != "META-INF/CHANGES" &&
-    name != "META-INF/DEPENDENCIES" &&
-    name != "META-INF/LICENSE" &&
-    name != "META-INF/LICENSE.txt" &&
-    name != "META-INF/README.txt" &&
-    name != "META-INF/README.md" &&
-    name != "META-INF/NOTICE" &&
-    name != "META-INF/NOTICE.txt" &&
-    name != "LICENSE" &&
-    name != "LICENSE.md" &&
-    name != "module-info.class" &&
-    name != "license.txt" &&
-    name != "LICENSE.txt" &&
-    name != "COPYING.txt" &&
-    name != "about.html" &&
-    name != "pom.xml" &&
-    name != "THIRD_PARTY_LICENSES.txt" &&
-    name != "NOTICE.txt" &&
-    name != "NOTICE.md" &&
-    name != "META-INF/maven" &&
-    !name.startsWith("META-INF/maven/") &&
-    !name.startsWith("META-INF/INDEX.LIST") &&
-    (!name.startsWith("META-INF/") || (!name.endsWith(".DSA") && !name.endsWith(".SF") && !name.endsWith(".RSA")))
-  }
+private fun isNative(name: String): Boolean {
+  return name.endsWith(".jnilib") ||
+         name.endsWith(".dylib") ||
+         name.endsWith(".so") ||
+         name.endsWith(".exe") ||
+         name.endsWith(".dll") ||
+         name.endsWith(".tbd")
 }
 
 @Suppress("SpellCheckingInspection")
-private val excludedFromMergeLibs = java.util.Set.of(
-  "jna", "Log4J", "sqlite", "Slf4j", "async-profiler",
-  "dexlib2", // android-only lib
-  "intellij-coverage", "intellij-test-discovery", // used as agent
-  "winp", "junixsocket-core", "pty4j", "grpc-netty-shaded", // contains native library
-  "protobuf", // https://youtrack.jetbrains.com/issue/IDEA-268753
-)
+private fun getIgnoredNames(): Set<String> {
+  val set = HashSet<String>()
+  // compilation cache on TC
+  set.add(".hash")
+  set.add("classpath.index")
+  @Suppress("SpellCheckingInspection")
+  set.add(".gitattributes")
+  set.add("pom.xml")
+  set.add("about.html")
+  set.add("module-info.class")
+  set.add("META-INF/services/javax.xml.parsers.SAXParserFactory")
+  set.add("META-INF/services/javax.xml.stream.XMLEventFactory")
+  set.add("META-INF/services/javax.xml.parsers.DocumentBuilderFactory")
+  set.add("META-INF/services/javax.xml.datatype.DatatypeFactory")
 
-fun isLibraryMergeable(libName: String): Boolean {
-  return !excludedFromMergeLibs.contains(libName) &&
-         !libName.startsWith("kotlin") &&
-         !libName.startsWith("projector-") &&
-         !libName.contains("-agent-") &&
-         !libName.startsWith("rd-") &&
-         !libName.contains("annotations", ignoreCase = true) &&
-         !libName.startsWith("junit", ignoreCase = true) &&
-         !libName.startsWith("cucumber-", ignoreCase = true) &&
-         !libName.contains("groovy", ignoreCase = true)
+  // duplicates in maven-resolver-transport-http and maven-resolver-transport-file
+  set.add("META-INF/sisu/javax.inject.Named")
+  // duplicates in recommenders-jayes-io-2.5.5 and recommenders-jayes-2.5.5.jar
+  set.add("OSGI-INF/l10n/bundle.properties")
+  // groovy
+  set.add("META-INF/groovy-release-info.properties")
+
+  set.add("native-image")
+  set.add("native")
+  set.add("licenses")
+  set.add("META-INF/LGPL2.1")
+  set.add("META-INF/AL2.0")
+  @Suppress("SpellCheckingInspection")
+  set.add(".gitkeep")
+  set.add(INDEX_FILENAME)
+  for (originalName in listOf("NOTICE", "README", "LICENSE", "DEPENDENCIES", "CHANGES", "THIRD_PARTY_LICENSES", "COPYING")) {
+    for (name in listOf(originalName, originalName.lowercase())) {
+      set.add(name)
+      set.add("$name.txt")
+      set.add("$name.md")
+      set.add("META-INF/$name")
+      set.add("META-INF/$name.txt")
+      set.add("META-INF/$name.md")
+    }
+  }
+  return set
 }
 
-private val commonModuleExcludes = java.util.List.of(
-  FileSystems.getDefault().getPathMatcher("glob:**/icon-robots.txt"),
-  FileSystems.getDefault().getPathMatcher("glob:icon-robots.txt"),
-  FileSystems.getDefault().getPathMatcher("glob:.unmodified"),
-  FileSystems.getDefault().getPathMatcher("glob:classpath.index"),
-)
+private val ignoredNames = java.util.Set.copyOf(getIgnoredNames())
 
-fun addModuleSources(moduleName: String,
-                     moduleNameToSize: MutableMap<String, Int>,
-                     moduleOutputDir: Path,
-                     modulePatches: Collection<Path>,
-                     searchableOptionsRootDir: Path,
-                     extraExcludes: Collection<String>,
-                     sourceList: MutableList<Source>,
-                     logger: System.Logger) {
-  logger.debug { " include output of module '$moduleName'" }
-
-  val sizeConsumer = IntConsumer {
-    moduleNameToSize.merge(moduleName, it) { oldValue, value -> oldValue + value }
-  }
-
-  // must be before module output to override
-  for (moduleOutputPatch in modulePatches) {
-    sourceList.add(DirSource(moduleOutputPatch, Collections.emptyList(), sizeConsumer))
-    logger.debug { " include $moduleOutputPatch with patches for module '$moduleName'" }
-  }
-
-  val searchableOptionsModuleDir = searchableOptionsRootDir.resolve(moduleName)
-  if (Files.exists(searchableOptionsModuleDir)) {
-    sourceList.add(DirSource(searchableOptionsModuleDir, Collections.emptyList(), sizeConsumer))
-  }
-
-  val excludes = if (extraExcludes.isEmpty()) {
-    commonModuleExcludes
-  }
-  else {
-    commonModuleExcludes.plus(extraExcludes.map { FileSystems.getDefault().getPathMatcher("glob:$it") })
-  }
-  sourceList.add(DirSource(dir = moduleOutputDir, excludes = excludes, sizeConsumer = sizeConsumer))
+private fun checkName(name: String,
+                      excludes: List<Regex>,
+                      includeManifest: Boolean,
+                      requiresMavenFiles: Boolean): Boolean {
+  return !ignoredNames.contains(name) &&
+         excludes.none { it.matches(name) } &&
+         !name.endsWith(".kotlin_metadata") &&
+         (includeManifest || name != "META-INF/MANIFEST.MF") &&
+         !name.startsWith("license/") &&
+         !name.startsWith("META-INF/license/") &&
+         !name.startsWith("META-INF/LICENSE-") &&
+         !name.startsWith("native-image/") &&
+         !name.startsWith("native/") &&
+         !name.startsWith("licenses/") &&
+         (requiresMavenFiles || (name != "META-INF/maven" && !name.startsWith("META-INF/maven/"))) &&
+         !name.startsWith("META-INF/INDEX.LIST") &&
+         (!name.startsWith("META-INF/") || (!name.endsWith(".DSA") && !name.endsWith(".SF") && !name.endsWith(".RSA")))
 }

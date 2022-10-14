@@ -34,6 +34,11 @@ public abstract class MultiCaretCodeInsightAction extends AnAction implements Pe
   private static final Logger LOG = Logger.getInstance(MultiCaretCodeInsightAction.class);
 
   @Override
+  public @NotNull ActionUpdateThread getActionUpdateThread() {
+    return ActionUpdateThread.BGT;
+  }
+
+  @Override
   public void actionPerformed(@NotNull AnActionEvent e) {
     final Project project = e.getProject();
     if (project == null) {

@@ -1,1 +1,1 @@
-val foo: kotlin.String in final class B : A, Z implements val foo: kotlin.String in interface Z.
+property B.foo implements property Z.foo.

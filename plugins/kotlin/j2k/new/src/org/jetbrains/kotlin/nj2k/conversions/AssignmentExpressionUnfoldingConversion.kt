@@ -1,9 +1,11 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.nj2k.conversions
 
 import org.jetbrains.kotlin.nj2k.NewJ2kConverterContext
-import org.jetbrains.kotlin.nj2k.parenthesizeIfBinaryExpression
+import org.jetbrains.kotlin.nj2k.RecursiveApplicableConversionBase
+import org.jetbrains.kotlin.nj2k.blockStatement
+import org.jetbrains.kotlin.nj2k.parenthesizeIfCompoundExpression
 import org.jetbrains.kotlin.nj2k.tree.*
 import org.jetbrains.kotlin.utils.addToStdlib.safeAs
 
@@ -53,7 +55,7 @@ class AssignmentExpressionUnfoldingConversion(context: NewJ2kConverterContext) :
         val assignment = expression as? JKJavaAssignmentExpression ?: return null
         return when {
             canBeConvertedToBlock() && assignment.expression is JKJavaAssignmentExpression ->
-                JKBlockStatement(JKBlockImpl(assignment.unfoldToStatementsList(assignmentTarget = null)))
+                blockStatement(assignment.unfoldToStatementsList(assignmentTarget = null))
             else -> createKtAssignmentStatement(
                 assignment::field.detached(),
                 assignment::expression.detached(),
@@ -138,7 +140,7 @@ class AssignmentExpressionUnfoldingConversion(context: NewJ2kConverterContext) :
                 field,
                 JKBinaryExpression(
                     field.copyTreeAndDetach(),
-                    expression.parenthesizeIfBinaryExpression(),
+                    expression.parenthesizeIfCompoundExpression(),
                     JKKtOperatorImpl(
                         onlyJavaAssignTokensToKotlinOnes[operator.token]!!,
                         operator.returnType

@@ -30,7 +30,7 @@ public abstract class AbstractSelectFilesDialog extends DialogWrapper {
     super(project, canBeParent);
     myPrompt = prompt;
 
-    if (confirmationOption != null) {
+    if (confirmationOption != null && confirmationOption.isPersistent()) {
       setDoNotAskOption(new MyDoNotAskOption(confirmationOption));
     }
   }

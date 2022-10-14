@@ -62,7 +62,7 @@ public final class PsiPrimitiveType extends PsiType.Stub implements JvmPrimitive
    * @deprecated please don't use {@link PsiPrimitiveType} to represent fake types
    */
   @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @ApiStatus.ScheduledForRemoval
   public PsiPrimitiveType(@NotNull String name, PsiAnnotation @NotNull [] annotations) {
     super(annotations);
     myKind = null;
@@ -261,15 +261,6 @@ public final class PsiPrimitiveType extends PsiType.Stub implements JvmPrimitive
     if (aClass == null) return null;
 
     return JavaPsiFacade.getElementFactory(manager.getProject()).createType(aClass);
-  }
-
-  /**
-   * @deprecated please use {@link JvmPrimitiveTypeKind#getBoxedFqns}
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
-  public static Collection<String> getAllBoxedTypeNames() {
-    return JvmPrimitiveTypeKind.getBoxedFqns();
   }
 
   @Override

@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.intentions.loopToCallChain
 
@@ -7,8 +7,8 @@ import com.intellij.openapi.util.Ref
 import org.jetbrains.kotlin.builtins.KotlinBuiltIns
 import org.jetbrains.kotlin.cfg.pseudocode.Pseudocode
 import org.jetbrains.kotlin.cfg.pseudocode.PseudocodeUtil
-import org.jetbrains.kotlin.cfg.pseudocode.containingDeclarationForPseudocode
-import org.jetbrains.kotlin.idea.analysis.analyzeAsReplacement
+import org.jetbrains.kotlin.cfg.containingDeclarationForPseudocode
+import org.jetbrains.kotlin.idea.caches.resolve.analyzeAsReplacement
 import org.jetbrains.kotlin.idea.caches.resolve.analyze
 import org.jetbrains.kotlin.idea.intentions.loopToCallChain.result.*
 import org.jetbrains.kotlin.idea.intentions.loopToCallChain.sequence.*
@@ -82,7 +82,7 @@ fun match(loop: KtForExpression, useLazySequence: Boolean, reformat: Boolean): M
 
                         if (matcher.shouldUseInputVariables
                             && !state.inputVariable.hasDifferentSetsOfUsages(state.statements, newState.statements)
-                            && !(state.indexVariable?.hasDifferentSetsOfUsages(state.statements, newState.statements) ?: false)
+                            && state.indexVariable?.hasDifferentSetsOfUsages(state.statements, newState.statements) != true
                         ) {
                             // matched part of the loop uses neither input variable nor index variable
                             continue@MatchersLoop
@@ -95,9 +95,9 @@ fun match(loop: KtForExpression, useLazySequence: Boolean, reformat: Boolean): M
                         }
 
                         if (restContainsEmbeddedBreakOrContinue && !matcher.embeddedBreakOrContinuePossible) {
-                            val countBefore = state.statements.sumBy { it.countEmbeddedBreaksAndContinues() }
-                            val countAfter = newState.statements.sumBy { it.countEmbeddedBreaksAndContinues() }
-                            if (countAfter != countBefore) continue@MatchersLoop // some embedded break or continue in the matched part
+                          val countBefore = state.statements.sumOf { it.countEmbeddedBreaksAndContinues() }
+                          val countAfter = newState.statements.sumOf { it.countEmbeddedBreaksAndContinues() }
+                          if (countAfter != countBefore) continue@MatchersLoop // some embedded break or continue in the matched part
                         }
 
                         state.previousTransformations += match.sequenceTransformations
@@ -312,7 +312,7 @@ private fun MatchResult.generateCallChain(loop: KtForExpression, reformat: Boole
         sequenceTransformations = sequenceTransformations.dropLast(1)
     }
 
-    val chainCallCount = sequenceTransformations.sumBy { it.chainCallCount } + resultTransformation.chainCallCount
+    val chainCallCount = sequenceTransformations.sumOf { it.chainCallCount } + resultTransformation.chainCallCount
     val lineBreak = if (chainCallCount > 1) "\n" else ""
 
     var callChain = sequenceExpression

@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.wm.impl.status;
 
 import com.intellij.codeInspection.InspectionsBundle;
@@ -6,12 +6,12 @@ import com.intellij.icons.AllIcons;
 import com.intellij.ide.PowerSaveMode;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.wm.StatusBar;
 import com.intellij.openapi.wm.StatusBarWidget;
 import com.intellij.openapi.wm.StatusBarWidgetFactory;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.util.Consumer;
-import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -24,12 +24,22 @@ import java.awt.event.MouseEvent;
 public class PowerSaveStatusWidgetFactory implements StatusBarWidgetFactory {
   private static final String ID = "PowerSaveMode";
 
+  public PowerSaveStatusWidgetFactory() {
+    ApplicationManager.getApplication().getMessageBus().connect().subscribe(PowerSaveMode.TOPIC, () -> {
+      for (Project project : ProjectManager.getInstance().getOpenProjects()) {
+        StatusBar statusBar = WindowManager.getInstance().getStatusBar(project);
+        if (statusBar != null) {
+          statusBar.updateWidget(getId());
+        }
+      }
+    });
+  }
+
   @Override
   public @NotNull String getId() {
     return ID;
   }
 
-  @Nls
   @Override
   public @NotNull String getDisplayName() {
     return InspectionsBundle.message("power.save.mode.widget.display.name");
@@ -42,16 +52,11 @@ public class PowerSaveStatusWidgetFactory implements StatusBarWidgetFactory {
 
   @Override
   public @NotNull StatusBarWidget createWidget(@NotNull Project project) {
-    StatusBar statusBar = WindowManager.getInstance().getStatusBar(project);
-    if (statusBar != null) {
-      ApplicationManager.getApplication().getMessageBus().connect().subscribe(PowerSaveMode.TOPIC, () -> statusBar.updateWidget(getId()));
-    }
     return new PowerWidget();
   }
 
   @Override
-  public void disposeWidget(@NotNull StatusBarWidget widget) {
-  }
+  public void disposeWidget(@NotNull StatusBarWidget widget) { }
 
   @Override
   public boolean canBeEnabledOn(@NotNull StatusBar statusBar) {
@@ -70,8 +75,7 @@ public class PowerSaveStatusWidgetFactory implements StatusBarWidgetFactory {
     }
 
     @Override
-    public void install(@NotNull StatusBar statusBar) {
-    }
+    public void install(@NotNull StatusBar statusBar) { }
 
     @Override
     public @Nullable WidgetPresentation getPresentation() {
@@ -96,7 +100,6 @@ public class PowerSaveStatusWidgetFactory implements StatusBarWidgetFactory {
     }
 
     @Override
-    public void dispose() {
-    }
+    public void dispose() { }
   }
 }

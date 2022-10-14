@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.kotlin.idea.refactoring.suggested
 
 import com.intellij.psi.PsiCodeFragment
@@ -8,6 +8,7 @@ import com.intellij.refactoring.suggested.SuggestedRefactoringExecution.NewParam
 import com.intellij.refactoring.suggested.SuggestedRefactoringSupport.Parameter
 import com.intellij.refactoring.suggested.SuggestedRefactoringSupport.Signature
 import com.intellij.refactoring.suggested.SuggestedRefactoringUI
+import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.psi.KtExpressionCodeFragment
 import org.jetbrains.kotlin.psi.KtPsiFactory
 
@@ -29,7 +30,7 @@ object KotlinSuggestedRefactoringUI : SuggestedRefactoringUI() {
         fun createCodeFragment() = factory.createExpressionCodeFragment("", declaration)
 
         if (data.newSignature.receiverType != null && data.oldSignature.receiverType == null) {
-            result.add(NewParameterData("<receiver>", createCodeFragment(), false/*TODO*/))
+            result.add(NewParameterData(KotlinBundle.message("extract.new.parameter.name.receiver"), createCodeFragment(), false/*TODO*/))
         }
 
         fun isNewParameter(parameter: Parameter) = data.oldSignature.parameterById(parameter.id) == null

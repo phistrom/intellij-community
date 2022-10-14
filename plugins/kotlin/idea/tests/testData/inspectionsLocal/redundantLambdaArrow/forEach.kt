@@ -1,5 +1,5 @@
+// WITH_STDLIB
 // PROBLEM: none
-// WITH_RUNTIME
 
 fun test() {
     // We do not report "redundant arrow" here,

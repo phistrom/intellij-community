@@ -9,13 +9,14 @@ public class Outer {
 
         }
 
-        public void foo() {
+        public void foo () {
 
         }
 
-        public static void foos() {
+        public static void foos () {
 
         }
     }
 }
 
+// FIR_COMPARISON

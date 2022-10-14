@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInspection.dataFlow.lang.ir;
 
 import com.intellij.codeInspection.dataFlow.value.DfaVariableValue;
@@ -9,9 +9,6 @@ import org.jetbrains.annotations.Nullable;
 import java.util.*;
 import java.util.function.Consumer;
 
-/**
- * @author peter
- */
 final class LiveVariablesAnalyzer extends BaseVariableAnalyzer {
   LiveVariablesAnalyzer(ControlFlow flow) {
     super(flow);

@@ -9,13 +9,13 @@ apply plugin: 'maven-publish'
 
 
 dependencies {
-    compile project(":bottom-mpp")
+    api project(":bottom-mpp")
 }
 
 [compileKotlin, compileTestKotlin]*.configure {
     kotlinOptions {
         kotlinOptions.jvmTarget = "1.8"
-        freeCompilerArgs += ["-Xprogressive", "-XXLanguage:+NewInference", "-XXLanguage:+SamConversionForKotlinFunctions"]
+        freeCompilerArgs += ["-Xprogressive"]
     }
 }
 

@@ -1245,9 +1245,6 @@ skip_ipr:
   WriteRegDWORD SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_WITH_VER}" \
               "NoRepair" 1
 
-  SetOutPath $INSTDIR\bin
-  ; set the current time for installation files under $INSTDIR\bin
-  ExecDos::exec 'copy "$INSTDIR\bin\*.*s" +,,'
   call winVersion
   ${If} $0 == "1"
     AccessControl::GrantOnFile \
@@ -1425,7 +1422,7 @@ Function un.onInit
   Call un.UninstallFeedback
 
 ; Uninstallation was run from installation dir?
-  IfFileExists "$INSTDIR\IdeaWin64.dll" 0 end_of_uninstall
+  IfFileExists "$INSTDIR\fsnotifier.exe" 0 end_of_uninstall
   IfFileExists "$INSTDIR\${PRODUCT_EXE_FILE}" 0 end_of_uninstall
 
 get_reg_key:

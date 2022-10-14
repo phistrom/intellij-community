@@ -4,10 +4,9 @@ package com.intellij.coverage;
 import com.intellij.codeEditor.printing.ExportToHTMLSettings;
 import com.intellij.execution.JavaExecutionUtil;
 import com.intellij.execution.configurations.SimpleJavaParameters;
-import com.intellij.openapi.application.PathManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.psi.JavaPsiFacade;
 import com.intellij.psi.PsiClass;
@@ -17,7 +16,6 @@ import com.intellij.psi.search.GlobalSearchScopesCore;
 import com.intellij.psi.util.ClassUtil;
 import com.intellij.rt.coverage.data.ProjectData;
 import com.intellij.rt.coverage.instrumentation.SaveHook;
-import com.intellij.rt.coverage.util.ReportFormat;
 import jetbrains.coverage.report.ClassInfo;
 import jetbrains.coverage.report.ReportBuilderFactory;
 import jetbrains.coverage.report.SourceCodeProvider;
@@ -70,11 +68,13 @@ public abstract class JavaCoverageRunner extends CoverageRunner {
   public void generateReport(CoverageSuitesBundle suite, Project project) throws IOException {
     final long startNs = System.nanoTime();
     final ProjectData projectData = suite.getCoverageData();
-    final ExportToHTMLSettings settings = ExportToHTMLSettings.getInstance(project);
-    final File tempFile = FileUtil.createTempFile("temp", "");
-    tempFile.deleteOnExit();
-    new SaveHook(tempFile, true, new IdeaClassFinder(project, suite), ReportFormat.BINARY).save(projectData);
+    if (projectData == null) return;
+    final JavaCoverageOptionsProvider optionsProvider = JavaCoverageOptionsProvider.getInstance(project);
+    IDEACoverageRunner.setExcludeAnnotations(project, projectData);
+    SaveHook.appendUnloadedFullAnalysis(projectData, new IdeaClassFinder(project, suite), false, !suite.isTracingEnabled(), optionsProvider.ignoreEmptyPrivateConstructors());
+
     final long generationStartNs = System.nanoTime();
+    final ExportToHTMLSettings settings = ExportToHTMLSettings.getInstance(project);
     final HTMLReportBuilder builder = ReportBuilderFactory.createHTMLReportBuilder();
     builder.setReportDir(new File(settings.OUTPUT_DIRECTORY));
     final SourceCodeProvider sourceCodeProvider = classname -> DumbService.getInstance(project).runReadActionInSmartMode(() -> {
@@ -100,7 +100,7 @@ public abstract class JavaCoverageRunner extends CoverageRunner {
               if (project.isDisposed()) return null;
               return psiFacade.findClass(aClass.getFQName(), productionScope);
             });
-            if (psiClass == null || !suite.getCoverageEngine().acceptedByFilters(psiClass.getContainingFile(), suite)) {
+            if (psiClass == null || !suite.getCoverageEngine().acceptedByFilters(ReadAction.compute(() -> psiClass.getContainingFile()), suite)) {
               iterator.remove();
             }
           }
@@ -132,5 +132,9 @@ public abstract class JavaCoverageRunner extends CoverageRunner {
       tempFile = new File(path);
     }
     return tempFile;
+  }
+
+  public boolean shouldProcessUnloadedClasses() {
+    return true;
   }
 }

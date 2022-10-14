@@ -1,11 +1,11 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.perf.util
 
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
-import org.jetbrains.kotlin.idea.perf.Stats
-import org.jetbrains.kotlin.idea.perf.calcMean
+import org.jetbrains.kotlin.idea.testFramework.Stats
+import org.jetbrains.kotlin.idea.testFramework.calcMean
 import java.util.ArrayList
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -49,16 +49,16 @@ data class Benchmark(
 
     fun id(): String =
         listOfNotNull(
-            benchmark?.escapeName(),
+            benchmark.escapeName(),
             name?.escapeName(),
             buildId?.toString(),
-            warmUp?.let { "warmUp" } ?: null,
+            warmUp?.let { "warmUp" },
             index?.toString()
         ).joinToString(separator = "_")
 
     fun cleanUp() {
-        metrics?.forEach { it.cleanUp() }
-        metrics = metrics?.filter { it.metricValue != null || (it.metrics?.isNotEmpty() == true) }
+        metrics.forEach { it.cleanUp() }
+        metrics = metrics.filter { it.metricValue != null || (it.metrics?.isNotEmpty() == true) }
     }
 
     fun merge(extraBenchmark: Benchmark) {

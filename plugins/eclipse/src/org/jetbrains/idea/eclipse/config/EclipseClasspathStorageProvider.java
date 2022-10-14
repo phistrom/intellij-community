@@ -16,11 +16,12 @@ import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.workspaceModel.ide.JpsFileEntitySource;
 import com.intellij.workspaceModel.ide.VirtualFileUrlManagerUtil;
+import com.intellij.workspaceModel.ide.impl.legacyBridge.module.ModuleBridgeUtils;
 import com.intellij.workspaceModel.ide.impl.legacyBridge.module.ModuleManagerBridgeImpl;
 import com.intellij.workspaceModel.ide.legacyBridge.ModuleBridge;
 import com.intellij.workspaceModel.storage.EntitySource;
-import com.intellij.workspaceModel.storage.WorkspaceEntityStorage;
-import com.intellij.workspaceModel.storage.bridgeEntities.ModuleEntity;
+import com.intellij.workspaceModel.storage.EntityStorage;
+import com.intellij.workspaceModel.storage.bridgeEntities.api.ModuleEntity;
 import com.intellij.workspaceModel.storage.url.VirtualFileUrlManager;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
@@ -90,8 +91,8 @@ public final class EclipseClasspathStorageProvider implements ClasspathStoragePr
 
   private static void updateEntitySource(Module module, Function<? super EntitySource, ? extends EntitySource> updateSource) {
     ModuleBridge moduleBridge = (ModuleBridge)module;
-    WorkspaceEntityStorage moduleEntityStorage = moduleBridge.getEntityStorage().getCurrent();
-    ModuleEntity moduleEntity = ModuleManagerBridgeImpl.Companion.findModuleEntity(moduleEntityStorage, moduleBridge);
+    EntityStorage moduleEntityStorage = moduleBridge.getEntityStorage().getCurrent();
+    ModuleEntity moduleEntity = ModuleBridgeUtils.findModuleEntity(moduleBridge, moduleEntityStorage);
     if (moduleEntity != null) {
       EntitySource entitySource = moduleEntity.getEntitySource();
       ModuleManagerBridgeImpl

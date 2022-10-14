@@ -2,13 +2,14 @@
 package com.jetbrains.python.psi;
 
 import com.google.common.collect.Maps;
-import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.completion.PrioritizedLookupElement;
 import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.codeInsight.lookup.LookupElementBuilder;
+import com.intellij.codeInspection.SuppressionUtil;
 import com.intellij.lang.ASTFactory;
 import com.intellij.lang.ASTNode;
 import com.intellij.model.ModelBranch;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
@@ -16,18 +17,20 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.ModuleRootManager;
-import com.intellij.openapi.roots.ProjectFileIndex;
+import com.intellij.openapi.roots.*;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.FileUtilRt;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.stubs.StubElement;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.*;
+import com.intellij.ui.IconManager;
 import com.intellij.util.*;
+import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.python.PyElementTypes;
 import com.jetbrains.python.PyNames;
@@ -54,6 +57,7 @@ import org.jetbrains.annotations.*;
 import javax.swing.*;
 import java.io.File;
 import java.util.*;
+import java.util.regex.Pattern;
 
 import static com.jetbrains.python.psi.PyFunction.Modifier.CLASSMETHOD;
 import static com.jetbrains.python.psi.PyFunction.Modifier.STATICMETHOD;
@@ -197,9 +201,6 @@ public final class PyUtil {
    */
   public static void addListNode(PsiElement parent, PsiElement newItem, ASTNode beforeThis,
                                  boolean isFirst, boolean isLast, boolean addWhitespace) {
-    if (!FileModificationService.getInstance().preparePsiElementForWrite(parent)) {
-      return;
-    }
     ASTNode node = parent.getNode();
     assert node != null;
     ASTNode itemNode = newItem.getNode();
@@ -382,7 +383,7 @@ public final class PyUtil {
 
   public static boolean isTopLevel(@NotNull PsiElement element) {
     if (element instanceof StubBasedPsiElement) {
-      final StubElement stub = ((StubBasedPsiElement)element).getStub();
+      final StubElement stub = ((StubBasedPsiElement<?>)element).getStub();
       if (stub != null) {
         final StubElement parentStub = stub.getParentStub();
         if (parentStub != null) {
@@ -763,7 +764,8 @@ public final class PyUtil {
   @Nullable
   public static <T> T updateDocumentUnblockedAndCommitted(@NotNull PsiElement anchor, @NotNull Function<? super Document, ? extends T> func) {
     final PsiDocumentManager manager = PsiDocumentManager.getInstance(anchor.getProject());
-    final Document document = manager.getDocument(anchor.getContainingFile());
+    // manager.getDocument(anchor.getContainingFile()) doesn't work with intention preview
+    final Document document = anchor.getContainingFile().getViewProvider().getDocument();
     if (document != null) {
       manager.doPostponedOperationsAndUnblockDocument(document);
       try {
@@ -825,7 +827,7 @@ public final class PyUtil {
   }
 
   public static boolean isRoot(@NotNull VirtualFile directory, @NotNull Project project) {
-    ProjectFileIndex fileIndex = ProjectFileIndex.SERVICE.getInstance(project);
+    ProjectFileIndex fileIndex = ProjectFileIndex.getInstance(project);
     return Comparing.equal(fileIndex.getClassRootForFile(directory), directory) ||
            Comparing.equal(fileIndex.getContentRootForFile(directory), directory) ||
            Comparing.equal(fileIndex.getSourceRootForFile(directory), directory);
@@ -1033,7 +1035,6 @@ public final class PyUtil {
   }
 
   /**
-   * @param name
    * @return true iff the name looks like a class-private one, starting with two underscores but not ending with two underscores.
    */
   public static boolean isClassPrivateName(@NotNull String name) {
@@ -1064,7 +1065,8 @@ public final class PyUtil {
     } else {
       suffix = "";
     }
-    LookupElementBuilder lookupElementBuilder = LookupElementBuilder.create(name + suffix).withIcon(PlatformIcons.PARAMETER_ICON);
+    LookupElementBuilder lookupElementBuilder = LookupElementBuilder.create(name + suffix).withIcon(
+      IconManager.getInstance().getPlatformIcon(com.intellij.ui.PlatformIcons.Parameter));
     lookupElementBuilder = lookupElementBuilder.withInsertHandler(OverwriteEqualsInsertHandler.INSTANCE);
     lookupElementBuilder.putUserData(PyCompletionMlElementInfo.Companion.getKey(), PyCompletionMlElementKind.NAMED_ARG.asInfo());
     return PrioritizedLookupElement.withGrouping(lookupElementBuilder, 1);
@@ -1100,6 +1102,59 @@ public final class PyUtil {
       }
     }
     return selfName;
+  }
+
+  @RequiresEdt
+  public static void addSourceRoots(@NotNull Module module, @NotNull Collection<VirtualFile> roots) {
+    if (roots.isEmpty()) {
+      return;
+    }
+
+    ApplicationManager.getApplication().runWriteAction(
+      () -> {
+        final ModifiableRootModel model = ModuleRootManager.getInstance(module).getModifiableModel();
+        for (VirtualFile root : roots) {
+          boolean added = false;
+          for (ContentEntry entry : model.getContentEntries()) {
+            final VirtualFile file = entry.getFile();
+            if (file != null && VfsUtilCore.isAncestor(file, root, true)) {
+              entry.addSourceFolder(root, false);
+              added = true;
+            }
+          }
+
+          if (!added) {
+            model.addContentEntry(root).addSourceFolder(root, false);
+          }
+        }
+        model.commit();
+      }
+    );
+  }
+
+  @RequiresEdt
+  public static void removeSourceRoots(@NotNull Module module, @NotNull Collection<VirtualFile> roots) {
+    if (roots.isEmpty()) {
+      return;
+    }
+
+    ApplicationManager.getApplication().runWriteAction(
+      () -> {
+        final ModifiableRootModel model = ModuleRootManager.getInstance(module).getModifiableModel();
+        for (ContentEntry entry : model.getContentEntries()) {
+          for (SourceFolder folder : entry.getSourceFolders()) {
+            if (roots.contains(folder.getFile())) {
+              entry.removeSourceFolder(folder);
+            }
+          }
+
+          if (roots.contains(entry.getFile()) && entry.getSourceFolders().length == 0) {
+            model.removeContentEntry(entry);
+          }
+        }
+        model.commit();
+      }
+    );
   }
 
   /**
@@ -1664,6 +1719,11 @@ public final class PyUtil {
 
   public static boolean isOrdinaryPackage(@NotNull PsiDirectory directory) {
     return directory.findFile(PyNames.INIT_DOT_PY) != null;
+  }
+
+  public static boolean isNoinspectionComment(@NotNull PsiComment comment) {
+    Pattern suppressPattern = Pattern.compile(SuppressionUtil.COMMON_SUPPRESS_REGEXP);
+    return suppressPattern.matcher(comment.getText()).find();
   }
 
   /**

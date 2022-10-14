@@ -35,13 +35,11 @@ import com.intellij.psi.search.scope.packageSet.NamedScopesHolder;
 import com.intellij.psi.search.scope.packageSet.PackageSet;
 import com.intellij.ui.ComponentUtil;
 import com.intellij.util.EventDispatcher;
-import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.CollectionFactory;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashingStrategy;
 import org.jdom.Attribute;
 import org.jdom.Element;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -57,7 +55,7 @@ import java.util.stream.Collectors;
 
 import static com.intellij.ide.actions.QuickChangeColorSchemeAction.changeLafIfNecessary;
 import static com.intellij.openapi.actionSystem.CommonDataKeys.PROJECT;
-import static com.intellij.openapi.actionSystem.PlatformDataKeys.CONTEXT_COMPONENT;
+import static com.intellij.openapi.actionSystem.PlatformCoreDataKeys.CONTEXT_COMPONENT;
 
 public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
   implements EditorOptionsProvider, SchemesModel<EditorColorsScheme>, Configurable.WithEpDependencies {
@@ -67,13 +65,6 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
 
   private Map<String, MyColorScheme> mySchemes;
   private MyColorScheme mySelectedScheme;
-
-  /**
-   * @deprecated Use {@link #getScopesGroup()} instead
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
-  public static final String SCOPES_GROUP = "By Scope";
 
   private boolean mySomeSchemesDeleted = false;
   private Map<ColorAndFontPanelFactory, InnerSearchableConfigurable> mySubPanelFactories;
@@ -488,7 +479,7 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
     @Override
     @NotNull
     public NewColorAndFontPanel createPanel(@NotNull ColorAndFontOptions options) {
-      FontEditorPreview previewPanel = new FontEditorPreview(()->options.getSelectedScheme(), false) {
+      FontEditorPreview previewPanel = new FontEditorPreview(()->options.getSelectedScheme(), true) {
         @Override
         protected EditorColorsScheme updateOptionsScheme(EditorColorsScheme selectedScheme) {
           return ConsoleViewUtil.updateConsoleColorScheme(selectedScheme);
@@ -545,10 +536,20 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
                                               @NotNull MyColorScheme scheme) {
     ColorSettingsPage[] pages = ColorSettingsPages.getInstance().getRegisteredPages();
     for (ColorSettingsPage page : pages) {
-      initDescriptions(page, descriptions, scheme);
+      try {
+        initDescriptions(page, descriptions, scheme);
+      }
+      catch (Exception e) {
+        LOG.error(e);
+      }
     }
     for (ColorAndFontDescriptorsProvider provider : ColorAndFontDescriptorsProvider.EP_NAME.getExtensionList()) {
-      initDescriptions(provider, descriptions, scheme);
+      try {
+        initDescriptions(provider, descriptions, scheme);
+      }
+      catch (Exception e) {
+        LOG.error(e);
+      }
     }
   }
 
@@ -826,20 +827,19 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
       myColorKey = colorKey;
       myKind = kind;
       ColorKey fallbackKey = myColorKey.getFallbackColorKey();
-      Color fallbackColor = null;
       if (fallbackKey != null) {
-        fallbackColor = scheme.getColor(fallbackKey);
         myBaseAttributeDescriptor = ColorSettingsPages.getInstance().getColorDescriptor(fallbackKey);
         if (myBaseAttributeDescriptor == null) {
           @NlsSafe String fallbackKeyExternalName = fallbackKey.getExternalName();
           myBaseAttributeDescriptor = Pair.create(null, new ColorDescriptor(fallbackKeyExternalName, fallbackKey, myKind));
         }
+        Color fallbackColor = scheme.getColor(fallbackKey);
         myFallbackAttributes = new TextAttributes(myKind == ColorDescriptor.Kind.FOREGROUND ? fallbackColor : null,
                                                   myKind == ColorDescriptor.Kind.BACKGROUND ? fallbackColor : null,
                                                   null, null, Font.PLAIN);
       }
       myColor = scheme.getColor(myColorKey);
-      myInitialColor = ObjectUtils.chooseNotNull(fallbackColor, myColor);
+      myInitialColor = myColor;
 
       myIsInheritedInitial = scheme.isInherited(myColorKey);
       setInherited(myIsInheritedInitial);

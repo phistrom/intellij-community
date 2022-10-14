@@ -38,11 +38,11 @@ public class ClassInheritorsTest extends JavaCodeInsightFixtureTestCase {
     PsiClass n2 = (PsiClass)numberClass.getNavigationElement();
     assertTrue(String.valueOf(n2), n2 instanceof PsiClassImpl);
     Collection<PsiClass> subClasses = DirectClassInheritorsSearch.search(n2, GlobalSearchScope.allScope(getProject())).findAll();
-    List<String> fqn = subClasses.stream().map(PsiClass::getQualifiedName).sorted().collect(Collectors.toList());
+    List<String> fqn = subClasses.stream().map(PsiClass::getQualifiedName).sorted().toList();
     assertEquals(fqn.toString(), fqn.size(), new HashSet<>(fqn).size()); // no dups mean no Cls/Psi mixed
 
     Collection<PsiClass> allSubClasses = ClassInheritorsSearch.search(n2, GlobalSearchScope.allScope(getProject()), true).findAll();
-    List<String> allFqn = allSubClasses.stream().map(PsiClass::getQualifiedName).sorted().collect(Collectors.toList());
+    List<String> allFqn = allSubClasses.stream().map(PsiClass::getQualifiedName).sorted().toList();
     assertEquals(allFqn.toString(), allFqn.size(), new HashSet<>(allFqn).size());
   }
 
@@ -83,31 +83,35 @@ public class ClassInheritorsTest extends JavaCodeInsightFixtureTestCase {
   }
 
   public void testPrivateClassCanHaveInheritorsInAnotherFile() {
-    myFixture.addClass("public class Test {\n" +
-                "  public static class A { }\n" +
-                "  private static class B extends A { }\n" +
-                "  public static class C1 extends B { }\n" +
-                "  public static class C2 extends B { }\n" +
-                "}");
-    myFixture.addClass("public class Test2 {\n" +
-                "  private static class D1 extends Test.C1 { }\n" +
-                "  private static class D2 extends Test.C2 { }\n" +
-                "}");
+    myFixture.addClass("""
+                         public class Test {
+                           public static class A { }
+                           private static class B extends A { }
+                           public static class C1 extends B { }
+                           public static class C2 extends B { }
+                         }""");
+    myFixture.addClass("""
+                         public class Test2 {
+                           private static class D1 extends Test.C1 { }
+                           private static class D2 extends Test.C2 { }
+                         }""");
     assertSize(5, ClassInheritorsSearch.search(myFixture.findClass("Test.A")).findAll());
     assertSize(4, ClassInheritorsSearch.search(myFixture.findClass("Test.B")).findAll());
   }
 
   public void testPackageLocalClassCanHaveInheritorsInAnotherPackage() {
-    myFixture.addClass("package one; public class Test {\n" +
-                "  public static class A { }\n" +
-                "  static class B extends A { }\n" +
-                "  public static class C1 extends B { }\n" +
-                "  public static class C2 extends B { }\n" +
-                "}");
-    myFixture.addClass("package another; public class Test2 {\n" +
-                "  private static class D1 extends one.Test.C1 { }\n" +
-                "  private static class D2 extends one.Test.C2 { }\n" +
-                "}");
+    myFixture.addClass("""
+                         package one; public class Test {
+                           public static class A { }
+                           static class B extends A { }
+                           public static class C1 extends B { }
+                           public static class C2 extends B { }
+                         }""");
+    myFixture.addClass("""
+                         package another; public class Test2 {
+                           private static class D1 extends one.Test.C1 { }
+                           private static class D2 extends one.Test.C2 { }
+                         }""");
     assertSize(5, ClassInheritorsSearch.search(myFixture.findClass("one.Test.A")).findAll());
     assertSize(4, ClassInheritorsSearch.search(myFixture.findClass("one.Test.B")).findAll());
   }

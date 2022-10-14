@@ -3,6 +3,7 @@ package com.intellij.ui.layout
 
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.openapi.util.NlsContexts
+import com.intellij.openapi.util.registry.Registry
 import com.intellij.ui.components.DialogPanel
 
 /**
@@ -17,11 +18,16 @@ import com.intellij.ui.components.DialogPanel
  *
  * `ToolbarDecorator` and `JBScrollPane` (use [Row.scrollPane]) components automatically have [Row.grow] and [Row.push].
  */
+@Deprecated("Use com.intellij.ui.dsl.builder.panel from Kotlin UI DSL Version 2 and kotlin documentations for related classes")
 inline fun panel(vararg constraints: LCFlags, @NlsContexts.DialogTitle title: String? = null, init: LayoutBuilder.() -> Unit): DialogPanel {
   val builder = createLayoutBuilder()
   builder.init()
 
   val panel = DialogPanel(title, layout = null)
+  val bgcolor = Registry.getColor("ui.kotlin.ui.dsl.deprecated.panel.color", null)
+  bgcolor?.let {
+    panel.background = it
+  }
   builder.builder.build(panel, constraints)
   initPanel(builder, panel)
   return panel

@@ -10,15 +10,13 @@ import java.util.List;
 
 /**
  * Copies PsiType structure with an ability to replace some inner components.
- *
- * @author peter
  */
 public abstract class PsiTypeMapper extends PsiTypeVisitorEx<PsiType> {
   protected static final Logger LOG = Logger.getInstance(PsiTypeMapper.class);
 
+  @SuppressWarnings("unchecked")
   @Nullable
   public <T extends PsiType> T mapType(@NotNull T type) {
-    //noinspection unchecked
     return (T)type.accept(this);
   }
 

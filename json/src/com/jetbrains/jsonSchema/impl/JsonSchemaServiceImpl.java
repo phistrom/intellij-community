@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.jetbrains.jsonSchema.impl;
 
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
@@ -49,6 +49,7 @@ public class JsonSchemaServiceImpl implements JsonSchemaService, ModificationTra
   private final AtomicLong myAnyChangeCount = new AtomicLong(0);
 
   @NotNull private final JsonSchemaCatalogManager myCatalogManager;
+  @NotNull private final JsonSchemaVfsListener.JsonSchemaUpdater mySchemaUpdater;
   private final JsonSchemaProviderFactories myFactories;
 
   public JsonSchemaServiceImpl(@NotNull Project project) {
@@ -74,7 +75,7 @@ public class JsonSchemaServiceImpl implements JsonSchemaService, ModificationTra
       myRefs.clear();
       myAnyChangeCount.incrementAndGet();
     });
-    JsonSchemaVfsListener.startListening(project, this, connection);
+    mySchemaUpdater = JsonSchemaVfsListener.startListening(project, this, connection);
     myCatalogManager.startUpdates();
   }
 
@@ -152,6 +153,15 @@ public class JsonSchemaServiceImpl implements JsonSchemaService, ModificationTra
   @NotNull
   public Collection<VirtualFile> getSchemaFilesForFile(@NotNull final VirtualFile file) {
     return getSchemasForFile(file, false, false);
+  }
+
+  @Nullable
+  public VirtualFile getDynamicSchemaForFile(@NotNull PsiFile psiFile) {
+    return ContentAwareJsonSchemaFileProvider.EP_NAME.getExtensionList().stream()
+      .map(provider -> provider.getSchemaFile(psiFile))
+      .filter(schemaFile -> schemaFile != null)
+      .findFirst()
+      .orElse(null);
   }
 
   @NotNull
@@ -426,12 +436,12 @@ public class JsonSchemaServiceImpl implements JsonSchemaService, ModificationTra
   }
 
   @Override
-  public void registerRemoteUpdateCallback(Runnable callback) {
+  public void registerRemoteUpdateCallback(@NotNull Runnable callback) {
     myCatalogManager.registerCatalogUpdateCallback(callback);
   }
 
   @Override
-  public void unregisterRemoteUpdateCallback(Runnable callback) {
+  public void unregisterRemoteUpdateCallback(@NotNull Runnable callback) {
     myCatalogManager.unregisterCatalogUpdateCallback(callback);
   }
 

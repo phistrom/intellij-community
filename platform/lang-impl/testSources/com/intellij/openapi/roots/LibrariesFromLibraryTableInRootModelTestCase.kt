@@ -100,7 +100,7 @@ abstract class LibrariesFromLibraryTableInRootModelTestCase {
     val committed = commitModifiableRootModel(model)
     val committedEntry = getSingleLibraryOrderEntry(committed)
     assertThat(committedEntry.library).isEqualTo(library)
-    assertThat(committedEntry.getFiles(OrderRootType.CLASSES).single()).isEqualTo(libRoot)
+    assertThat(committedEntry.getRootFiles(OrderRootType.CLASSES).single()).isEqualTo(libRoot)
   }
 
   @Test
@@ -115,13 +115,13 @@ abstract class LibrariesFromLibraryTableInRootModelTestCase {
 
     val committed = commitModifiableRootModel(model)
     val committedEntry1 = getSingleLibraryOrderEntry(committed)
-    assertThat(committedEntry1.getFiles(OrderRootType.CLASSES)).isEmpty()
+    assertThat(committedEntry1.getRootFiles(OrderRootType.CLASSES)).isEmpty()
     assertThat(committedEntry1.library).isEqualTo(library)
 
     runWriteActionAndWait { libraryModel.commit() }
     val committedEntry2 = getSingleLibraryOrderEntry(committed)
     assertThat(committedEntry2.library).isEqualTo(library)
-    assertThat(committedEntry2.getFiles(OrderRootType.CLASSES).single()).isEqualTo(libRoot)
+    assertThat(committedEntry2.getRootFiles(OrderRootType.CLASSES).single()).isEqualTo(libRoot)
   }
 
   @Test
@@ -150,6 +150,30 @@ abstract class LibrariesFromLibraryTableInRootModelTestCase {
       assertThat(committedEntry.library).isEqualTo(library)
     }
   }
+
+  @Test
+  fun `add multiple dependencies at once`() {
+    val lib1 = createLibrary("lib1")
+    val lib2 = createLibrary("lib2")
+    val model = createModifiableModel(module)
+    model.addLibraryEntries(listOf(lib1, lib2), DependencyScope.RUNTIME, true)
+    fun checkEntry(entry: LibraryOrderEntry) {
+      assertThat(entry.isExported).isTrue
+      assertThat(entry.scope).isEqualTo(DependencyScope.RUNTIME)
+    }
+
+    val (entry1, entry2) = dropModuleSourceEntry(model, 2)
+    assertThat((entry1 as LibraryOrderEntry).library).isEqualTo(lib1)
+    checkEntry(entry1)
+    assertThat((entry2 as LibraryOrderEntry).library).isEqualTo(lib2)
+    checkEntry(entry2)
+    val (committedEntry1, committedEntry2) = dropModuleSourceEntry(commitModifiableRootModel(model), 2)
+    assertThat((committedEntry1 as LibraryOrderEntry).library).isEqualTo(lib1)
+    checkEntry(committedEntry1)
+    assertThat((committedEntry2 as LibraryOrderEntry).library).isEqualTo(lib2)
+    checkEntry(committedEntry2)
+  }
+
 
   @Test
   fun `remove referenced library`() {

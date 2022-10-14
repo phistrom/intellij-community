@@ -3,9 +3,11 @@ package com.intellij.codeInspection.dataFlow;
 
 import com.intellij.codeInspection.dataFlow.interpreter.RunnerResult;
 import com.intellij.codeInspection.dataFlow.java.JavaDfaListener;
+import com.intellij.codeInspection.dataFlow.java.anchor.*;
 import com.intellij.codeInspection.dataFlow.jvm.SpecialField;
 import com.intellij.codeInspection.dataFlow.jvm.descriptors.AssertionDisabledDescriptor;
 import com.intellij.codeInspection.dataFlow.jvm.problems.ContractFailureProblem;
+import com.intellij.codeInspection.dataFlow.lang.DfaAnchor;
 import com.intellij.codeInspection.dataFlow.lang.UnsatisfiedConditionProblem;
 import com.intellij.codeInspection.dataFlow.memory.DfaMemoryState;
 import com.intellij.codeInspection.dataFlow.rangeSet.LongRangeSet;
@@ -18,8 +20,8 @@ import com.intellij.psi.*;
 import com.intellij.psi.util.*;
 import com.intellij.util.JavaPsiConstructorUtil;
 import com.intellij.util.ThreeState;
+import com.intellij.util.containers.ContainerUtil;
 import com.siyeh.ig.psiutils.ExpressionUtils;
-import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -89,8 +91,8 @@ public final class CommonDataflow {
    * Represents the result of dataflow applied to some code fragment (usually a method)
    */
   public static final class DataflowResult {
-    private final @NotNull Map<PsiExpression, DataflowPoint> myData = new HashMap<>();
-    private @NotNull Map<PsiExpression, DataflowPoint> myDataAssertionsDisabled = myData;
+    private final @NotNull Map<JavaDfaAnchor, DataflowPoint> myData = new HashMap<>();
+    private @NotNull Map<JavaDfaAnchor, DataflowPoint> myDataAssertionsDisabled = myData;
     private final RunnerResult myResult;
 
     public DataflowResult(RunnerResult result) {
@@ -100,45 +102,46 @@ public final class CommonDataflow {
     @NotNull
     DataflowResult copy() {
       DataflowResult copy = new DataflowResult(myResult);
-      myData.forEach((expression, point) -> copy.myData.put(expression, new DataflowPoint(point)));
+      myData.forEach((anchor, point) -> copy.myData.put(anchor, new DataflowPoint(point)));
       return copy;
     }
 
-    void add(PsiExpression expression, DfaMemoryState memState, DfaValue value) {
+    void add(JavaDfaAnchor anchor, DfaMemoryState memState, DfaValue value) {
       DfaVariableValue assertionDisabled = AssertionDisabledDescriptor.getAssertionsDisabledVar(value.getFactory());
       if (assertionDisabled == null) {
         assert myData == myDataAssertionsDisabled;
-        updateDataPoint(myData, expression, memState, value);
+        updateDataPoint(myData, anchor, memState, value);
       } else {
         DfType type = memState.getDfType(assertionDisabled);
         if (type == DfTypes.TRUE || type == DfTypes.FALSE) {
           if (myData == myDataAssertionsDisabled) {
             myDataAssertionsDisabled = new HashMap<>(myData);
           }
-          updateDataPoint(type == DfTypes.TRUE ? myDataAssertionsDisabled : myData, expression, memState, value);
+          updateDataPoint(type == DfTypes.TRUE ? myDataAssertionsDisabled : myData, anchor, memState, value);
         } else {
-          updateDataPoint(myData, expression, memState, value);
+          updateDataPoint(myData, anchor, memState, value);
           if (myData != myDataAssertionsDisabled) {
-            updateDataPoint(myDataAssertionsDisabled, expression, memState, value);
+            updateDataPoint(myDataAssertionsDisabled, anchor, memState, value);
           }
         }
       }
     }
 
-    private void updateDataPoint(Map<PsiExpression, DataflowPoint> data,
-                                 PsiExpression expression,
+    private void updateDataPoint(Map<JavaDfaAnchor, DataflowPoint> data,
+                                 JavaDfaAnchor anchor,
                                  DfaMemoryState memState,
                                  DfaValue value) {
-      DataflowPoint point = data.computeIfAbsent(expression, e -> new DataflowPoint());
+      DataflowPoint point = data.computeIfAbsent(anchor, e -> new DataflowPoint());
       if (DfaTypeValue.isContractFail(value)) {
         point.myMayFailByContract = true;
         return;
       }
-      if (point.myDfType != DfType.TOP) {
+      if (point.myDfType != DfType.TOP && anchor instanceof JavaExpressionAnchor) {
+        PsiExpression expression = ((JavaExpressionAnchor)anchor).getExpression();
         PsiElement parent = PsiUtil.skipParenthesizedExprUp(expression.getParent());
         if (parent instanceof PsiConditionalExpression &&
             !PsiTreeUtil.isAncestor(((PsiConditionalExpression)parent).getCondition(), expression, false)) {
-          add((PsiExpression)parent, memState, value);
+          add(new JavaExpressionAnchor((PsiExpression)parent), memState, value);
         }
       }
       point.addFacts(memState, value);
@@ -154,11 +157,17 @@ public final class CommonDataflow {
      * If false is returned, it's possible that the expression exists in unreachable branch or this expression is not tracked due to
      * the dataflow implementation details.
      */
-    public boolean expressionWasAnalyzed(PsiExpression expression) {
+    @Contract("null -> false")
+    public boolean expressionWasAnalyzed(@Nullable PsiExpression expression) {
+      if (expression == null) return false;
       if (expression instanceof PsiParenthesizedExpression) {
         throw new IllegalArgumentException("Should not pass parenthesized expression");
       }
-      return myData.containsKey(expression);
+      return myData.containsKey(new JavaExpressionAnchor(expression));
+    }
+
+    public boolean anchorWasAnalyzed(@NotNull JavaDfaAnchor anchor) {
+      return myData.containsKey(anchor);
     }
 
     /**
@@ -168,8 +177,10 @@ public final class CommonDataflow {
      * @param call call to check
      * @return true if it cannot fail by contract; false if unknown or can fail
      */
-    public boolean cannotFailByContract(PsiCallExpression call) {
-      DataflowPoint point = myData.get(call);
+    @Contract("null -> false")
+    public boolean cannotFailByContract(@Nullable PsiCallExpression call) {
+      if (call == null) return false;
+      DataflowPoint point = myData.get(new JavaExpressionAnchor(call));
       return point != null && !point.myMayFailByContract;
     }
 
@@ -182,7 +193,8 @@ public final class CommonDataflow {
      */
     @NotNull
     public Set<Object> getExpressionValues(@Nullable PsiExpression expression) {
-      DataflowPoint point = myData.get(expression);
+      if (expression == null) return Collections.emptySet();
+      DataflowPoint point = myData.get(new JavaExpressionAnchor(expression));
       if (point == null) return Collections.emptySet();
       Set<Object> values = point.myPossibleValues;
       return values == null ? Collections.emptySet() : Collections.unmodifiableSet(values);
@@ -196,7 +208,20 @@ public final class CommonDataflow {
      */
     @NotNull
     public DfType getDfType(PsiExpression expression) {
-      DataflowPoint point = myData.get(expression);
+      if (expression == null) return DfType.TOP;
+      DataflowPoint point = myData.get(new JavaExpressionAnchor(expression));
+      return point == null ? DfType.TOP : point.myDfType;
+    }
+
+    @NotNull
+    public DfType getDfType(@NotNull JavaDfaAnchor anchor) {
+      DataflowPoint point = myData.get(anchor);
+      return point == null ? DfType.TOP : point.myDfType;
+    }
+
+    @NotNull
+    public DfType getDfTypeNoAssertions(@NotNull JavaDfaAnchor anchor) {
+      DataflowPoint point = myDataAssertionsDisabled.get(anchor);
       return point == null ? DfType.TOP : point.myDfType;
     }
 
@@ -208,7 +233,8 @@ public final class CommonDataflow {
      */
     @NotNull
     public DfType getDfTypeNoAssertions(PsiExpression expression) {
-      DataflowPoint point = myDataAssertionsDisabled.get(expression);
+      if (expression == null) return DfType.TOP;
+      DataflowPoint point = myDataAssertionsDisabled.get(new JavaExpressionAnchor(expression));
       return point == null ? DfType.TOP : point.myDfType;
     }
   }
@@ -231,7 +257,7 @@ public final class CommonDataflow {
       if (JavaPsiConstructorUtil.isChainedConstructorCall(call) || (call == null && hasImplicitImpureSuperCall((PsiClass)block, method))) {
         initialStates = Collections.singletonList(runner.createMemoryState());
       } else {
-        initialStates = StreamEx.of(states).map(DfaMemoryState::createCopy).toList();
+        initialStates = ContainerUtil.map(states, DfaMemoryState::createCopy);
       }
       if(runner.analyzeBlockRecursively(body, initialStates, interceptor) == RunnerResult.OK) {
         dfr = interceptor.myResult.copy();
@@ -294,9 +320,20 @@ public final class CommonDataflow {
    */
   @NotNull
   public static DfType getDfType(PsiExpression expression) {
+    return getDfType(expression, false);
+  }
+
+  /**
+   * @param expression an expression to infer the DfType
+   * @param ignoreAssertions whether to ignore assertion statement during the analysis
+   * @return DfType for that expression. May return {@link DfType#TOP} if no information from dataflow is known about this expression
+   */
+  @NotNull
+  public static DfType getDfType(PsiExpression expression, boolean ignoreAssertions) {
     DataflowResult result = getDataflowResult(expression);
     if (result == null) return DfType.TOP;
-    return result.getDfType(PsiUtil.skipParenthesizedExprDown(expression));
+    expression = PsiUtil.skipParenthesizedExprDown(expression);
+    return ignoreAssertions ? result.getDfTypeNoAssertions(expression) : result.getDfType(expression);
   }
 
   /**
@@ -346,7 +383,19 @@ public final class CommonDataflow {
     public void beforeExpressionPush(@NotNull DfaValue value,
                                      @NotNull PsiExpression expression,
                                      @NotNull DfaMemoryState state) {
-      myResult.add(expression, state, value);
+      myResult.add(new JavaExpressionAnchor(expression), state, value);
+    }
+
+    @Override
+    public void beforePush(@NotNull DfaValue @NotNull [] args,
+                           @NotNull DfaValue value,
+                           @NotNull DfaAnchor anchor,
+                           @NotNull DfaMemoryState state) {
+      JavaDfaListener.super.beforePush(args, value, anchor, state);
+      if (anchor instanceof JavaMethodReferenceArgumentAnchor || anchor instanceof JavaPolyadicPartAnchor ||
+          anchor instanceof JavaMethodReferenceReturnAnchor) {
+        myResult.add((JavaDfaAnchor)anchor, state, value);
+      }
     }
 
     @Override
@@ -355,7 +404,8 @@ public final class CommonDataflow {
                             @NotNull ThreeState failed,
                             @NotNull DfaMemoryState state) {
       if (problem instanceof ContractFailureProblem && failed != ThreeState.NO) {
-        myResult.add(((ContractFailureProblem)problem).getAnchor(), state, value.getFactory().fromDfType(DfType.FAIL));
+        myResult.add(new JavaExpressionAnchor(((ContractFailureProblem)problem).getAnchor()), state,
+                     value.getFactory().fromDfType(DfType.FAIL));
       }
     }
   }

@@ -17,7 +17,7 @@ package org.jetbrains.idea.maven.importing;
 
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.VirtualFile;
-import org.jetbrains.idea.maven.MavenMultiVersionImportingTestCase;
+import com.intellij.maven.testFramework.MavenMultiVersionImportingTestCase;
 import org.junit.Test;
 
 import java.io.File;
@@ -287,10 +287,11 @@ public class SnapshotDependenciesImportingTest extends MavenMultiVersionImportin
     String moduleName = "___" + artifactId;
 
     createProjectSubFile(moduleName + "/src/main/java/Foo.java",
-                         "/**\n" +
-                         " * some doc\n" +
-                         " */\n" +
-                         "public class Foo { }");
+                         """
+                           /**
+                            * some doc
+                            */
+                           public class Foo { }""");
 
     VirtualFile m = createModulePom(moduleName,
                                     "<groupId>" + groupId + "</groupId>" +

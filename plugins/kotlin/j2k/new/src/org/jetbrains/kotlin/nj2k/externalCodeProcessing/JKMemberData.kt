@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.nj2k.externalCodeProcessing
 
@@ -6,15 +6,13 @@ import com.intellij.psi.PsiField
 import com.intellij.psi.PsiMember
 import com.intellij.psi.PsiMethod
 import com.intellij.psi.SmartPsiElementPointer
-import org.jetbrains.kotlin.idea.refactoring.fqName.getKotlinFqName
+import org.jetbrains.kotlin.idea.base.psi.kotlinFqName
 import org.jetbrains.kotlin.name.FqName
-import org.jetbrains.kotlin.psi.KtDeclaration
-import org.jetbrains.kotlin.psi.KtNamedFunction
-import org.jetbrains.kotlin.psi.KtProperty
+import org.jetbrains.kotlin.psi.KtNamedDeclaration
 import org.jetbrains.kotlin.psi.psiUtil.isPrivate
 
-interface JKMemberData<K : KtDeclaration> {
-    var kotlinElementPointer: SmartPsiElementPointer<K>?
+interface JKMemberData {
+    var kotlinElementPointer: SmartPsiElementPointer<KtNamedDeclaration>?
     var isStatic: Boolean
     val fqName: FqName?
     var name: String
@@ -31,19 +29,18 @@ interface JKMemberData<K : KtDeclaration> {
         get() = kotlinElement?.isPrivate() != true && (searchInJavaFiles || searchInKotlinFiles)
 }
 
-interface JKMemberDataCameFromJava<J : PsiMember, K : KtDeclaration> : JKMemberData<K> {
+interface JKMemberDataCameFromJava<J : PsiMember> : JKMemberData {
     val javaElement: J
 
     override val fqName
-        get() = javaElement.getKotlinFqName()
+        get() = javaElement.kotlinFqName
 }
 
-
-interface JKFieldData : JKMemberData<KtProperty>
+interface JKFieldData : JKMemberData
 
 data class JKFakeFieldData(
     override var isStatic: Boolean,
-    override var kotlinElementPointer: SmartPsiElementPointer<KtProperty>? = null,
+    override var kotlinElementPointer: SmartPsiElementPointer<KtNamedDeclaration>? = null,
     override val fqName: FqName?,
     override var name: String
 ) : JKFieldData {
@@ -56,9 +53,9 @@ data class JKFakeFieldData(
 data class JKFieldDataFromJava(
     override val javaElement: PsiField,
     override var isStatic: Boolean = false,
-    override var kotlinElementPointer: SmartPsiElementPointer<KtProperty>? = null,
+    override var kotlinElementPointer: SmartPsiElementPointer<KtNamedDeclaration>? = null,
     override var name: String = javaElement.name
-) : JKMemberDataCameFromJava<PsiField, KtProperty>, JKFieldData {
+) : JKMemberDataCameFromJava<PsiField>, JKFieldData {
     override val searchInKotlinFiles: Boolean
         get() = wasRenamed
 
@@ -69,8 +66,8 @@ data class JKFieldDataFromJava(
 data class JKMethodData(
     override val javaElement: PsiMethod,
     override var isStatic: Boolean = false,
-    override var kotlinElementPointer: SmartPsiElementPointer<KtNamedFunction>? = null,
+    override var kotlinElementPointer: SmartPsiElementPointer<KtNamedDeclaration>? = null,
     var usedAsAccessorOfProperty: JKFieldData? = null
-) : JKMemberDataCameFromJava<PsiMethod, KtNamedFunction> {
+) : JKMemberDataCameFromJava<PsiMethod> {
     override var name: String = javaElement.name
 }

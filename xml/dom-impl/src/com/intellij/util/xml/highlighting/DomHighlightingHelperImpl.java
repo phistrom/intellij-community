@@ -26,16 +26,13 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * @author peter
- */
 public class DomHighlightingHelperImpl extends DomHighlightingHelper {
   public static final DomHighlightingHelperImpl INSTANCE = new DomHighlightingHelperImpl();
   private final GenericValueReferenceProvider myProvider = new GenericValueReferenceProvider();
   private final DomApplicationComponent myDomApplicationComponent = DomApplicationComponent.getInstance();
 
   @Override
-  public void runAnnotators(DomElement element, DomElementAnnotationHolder holder, Class<? extends DomElement> rootClass) {
+  public void runAnnotators(DomElement element, DomElementAnnotationHolder holder, @NotNull Class<? extends DomElement> rootClass) {
     final DomElementsAnnotator annotator = myDomApplicationComponent.getAnnotator(rootClass);
     if (annotator != null) {
       annotator.annotate(element, holder);
@@ -138,7 +135,7 @@ public class DomHighlightingHelperImpl extends DomHighlightingHelper {
 
   private static boolean isDomResolveOK(GenericDomValue element, GenericDomValueReference domReference, Converter converter) {
     return !hasBadResolve(domReference) ||
-           converter instanceof ResolvingConverter && ((ResolvingConverter)converter).getAdditionalVariants(domReference.getConvertContext()).contains(element.getStringValue());
+           converter instanceof ResolvingConverter && ((ResolvingConverter<?>)converter).getAdditionalVariants(domReference.getConvertContext()).contains(element.getStringValue());
   }
 
   @Override
@@ -210,7 +207,7 @@ public class DomHighlightingHelperImpl extends DomHighlightingHelper {
       return false;
     }
     if (child instanceof GenericAttributeValue) {
-      final XmlAttributeValue value = ((GenericAttributeValue)child).getXmlAttributeValue();
+      final XmlAttributeValue value = ((GenericAttributeValue<?>)child).getXmlAttributeValue();
       if (value != null && value.getTextRange().isEmpty()) {
         return false;
       }

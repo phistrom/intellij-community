@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.util;
 
 import com.intellij.diagnostic.LoadingState;
@@ -6,6 +6,7 @@ import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.progress.Cancellation;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.util.objectTree.ThrowableInterner;
@@ -23,7 +24,14 @@ public final class SlowOperations {
   public static final String ACTION_PERFORM = "action.perform";
   public static final String RENDERING = "rendering";
   public static final String GENERIC = "generic";
+  public static final String FORCE_ASSERT = "  force assert  ";
   public static final String FAST_TRACK = "  fast track  ";
+  public static final String RESET = "  reset  ";
+
+  /**
+   * VM property, set to {@code true} if running in plugin development sandbox.
+   */
+  public static final String IDEA_PLUGIN_SANDBOX_MODE = "idea.plugin.in.sandbox.mode";
 
   private static int ourAlwaysAllow = -1;
   private static @NotNull FList<@NotNull String> ourStack = FList.emptyList();
@@ -46,12 +54,13 @@ public final class SlowOperations {
    *   <li>
    *     If the slow part is in {@link com.intellij.openapi.actionSystem.DataProvider#getData(String)} call
    *     the provider shall be split in two parts - the fast UI part invoked on EDT and the slow part invoked in background -
-   *     using {@link com.intellij.openapi.actionSystem.PlatformDataKeys#SLOW_DATA_PROVIDERS} data key.
+   *     using {@link com.intellij.openapi.actionSystem.PlatformDataKeys#BGT_DATA_PROVIDER} data key.
    *     Slow data providers are run along with other {@code GetDataRules} in background when actions are updated.
    *   </li>
    *   <li>
    *     {@code AnAction#update}, {@code ActionGroup#getChildren}, and {@code ActionGroup#canBePerformed} should be either fast
-   *     or moved to background thread using {@link com.intellij.openapi.actionSystem.UpdateInBackground} marker interface.
+   *     or moved to background thread by returning {@link com.intellij.openapi.actionSystem.ActionUpdateThread#BGT} in
+   *     {@code AnAction#getActionUpdateThread}.
    *   </li>
    *   <li>
    *     {@code AnAction#actionPerformed} shall be explicitly coded not to block the UI thread.
@@ -70,12 +79,18 @@ public final class SlowOperations {
       return;
     }
     if (isInsideActivity(FAST_TRACK)) {
-      throw new ProcessCanceledException();
+      if (Cancellation.isInNonCancelableSection()) {
+        reportNonCancellableSectionInFastTrack();
+      }
+      else {
+        throw new ProcessCanceledException();
+      }
     }
     if (isAlwaysAllowed()) {
       return;
     }
-    if (!Registry.is("ide.slow.operations.assertion", true)) {
+    boolean forceAssert = isInsideActivity(FORCE_ASSERT);
+    if (!forceAssert && !Registry.is("ide.slow.operations.assertion", true)) {
       return;
     }
     Application application = ApplicationManager.getApplication();
@@ -86,6 +101,9 @@ public final class SlowOperations {
       return;
     }
     for (String activity : ourStack) {
+      if (RESET.equals(activity)) {
+        break;
+      }
       if (!Registry.is("ide.slow.operations.assertion." + activity, true)) {
         return;
       }
@@ -98,18 +116,26 @@ public final class SlowOperations {
     LOG.error("Slow operations are prohibited on EDT. See SlowOperations.assertSlowOperationsAreAllowed javadoc.");
   }
 
+  private static void reportNonCancellableSectionInFastTrack() {
+    LOG.error("Non-cancellable section in FAST_TRACK");
+  }
+
   @ApiStatus.Internal
   public static boolean isInsideActivity(@NotNull String activityName) {
     EDT.assertIsEdt();
     for (String activity : ourStack) {
-      if (activityName == activity) {
+      if (RESET.equals(activity)) {
+        break;
+      }
+      if (activityName.equals(activity)) {
         return true;
       }
     }
     return false;
   }
 
-  private static boolean isAlwaysAllowed() {
+  @ApiStatus.Internal
+  public static boolean isAlwaysAllowed() {
     if (ourAlwaysAllow == 1) {
       return true;
     }
@@ -124,7 +150,8 @@ public final class SlowOperations {
     boolean result = System.getenv("TEAMCITY_VERSION") != null ||
                      application.isUnitTestMode() ||
                      application.isCommandLine() ||
-                     !application.isEAP() && !application.isInternal();
+                     !application.isEAP() && !application.isInternal() && !SystemProperties
+                       .getBooleanProperty(IDEA_PLUGIN_SANDBOX_MODE, false);
     ourAlwaysAllow = result ? 1 : 0;
     return result;
   }

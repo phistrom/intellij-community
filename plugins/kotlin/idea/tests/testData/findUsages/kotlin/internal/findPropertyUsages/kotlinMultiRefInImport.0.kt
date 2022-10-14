@@ -8,6 +8,6 @@ fun foo() {
 
 internal val <caret>foo: Int = 1
 
-val Int.foo: Int = 2
+val Int.foo: Int get() = 2
 
-// ERROR: Extension property cannot be initialized because it has no backing field
+// FIR_COMPARISON

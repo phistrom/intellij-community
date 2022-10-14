@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package com.intellij.ide.todo;
 
@@ -10,8 +10,6 @@ import com.intellij.ide.util.treeView.AbstractTreeNode;
 import com.intellij.ide.util.treeView.NodeDescriptor;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ModalityState;
-import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.highlighter.EditorHighlighter;
@@ -22,6 +20,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.ProjectRootManager;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vcs.FileStatusListener;
 import com.intellij.openapi.vcs.FileStatusManager;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -30,85 +29,106 @@ import com.intellij.psi.search.PsiTodoSearchHelper;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.testFramework.LightVirtualFile;
+import com.intellij.ui.components.JBLoadingPanel;
 import com.intellij.ui.tree.StructureTreeModel;
 import com.intellij.usageView.UsageTreeColorsScheme;
-import com.intellij.util.Processor;
 import com.intellij.util.SmartList;
-import com.intellij.util.concurrency.NonUrgentExecutor;
+import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
+import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.tree.TreeUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.VisibleForTesting;
 import org.jetbrains.concurrency.Promise;
 import org.jetbrains.concurrency.Promises;
 
 import javax.swing.*;
-import javax.swing.tree.DefaultMutableTreeNode;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
-/**
- * @author Vladimir Kondratyev
- */
 public abstract class TodoTreeBuilder implements Disposable {
+
   private static final Logger LOG = Logger.getInstance(TodoTreeBuilder.class);
   public static final Comparator<NodeDescriptor<?>> NODE_DESCRIPTOR_COMPARATOR =
-      Comparator.<NodeDescriptor<?>>comparingInt(NodeDescriptor::getWeight).thenComparingInt(NodeDescriptor::getIndex);
-  protected final Project myProject;
+    Comparator.<NodeDescriptor<?>>comparingInt(NodeDescriptor::getWeight).thenComparingInt(NodeDescriptor::getIndex);
+
+  protected final @NotNull Project myProject;
 
   /**
    * All files that have T.O.D.O items are presented as tree. This tree help a lot
    * to separate these files by directories.
    */
-  protected final FileTree myFileTree;
+  protected final @NotNull FileTree myFileTree = new FileTree();
   /**
    * This set contains "dirty" files. File is "dirty" if it's currently unknown
    * whether the file contains T.O.D.O item or not. To determine this it's necessary
    * to perform some (perhaps, CPU expensive) operation. These "dirty" files are
    * validated in {@code validateCache()} method.
    */
-  protected final HashSet<VirtualFile> myDirtyFileSet;
+  protected final HashSet<VirtualFile> myDirtyFileSet = new HashSet<>();
 
-  protected final Map<VirtualFile, EditorHighlighter> myFile2Highlighter;
+  //used from EDT and from StructureTreeModel invoker thread
+  protected final Map<VirtualFile, EditorHighlighter> myFile2Highlighter = ContainerUtil.createConcurrentSoftValueMap();
 
-  protected final PsiTodoSearchHelper mySearchHelper;
-  private final JTree myTree;
+  private final @NotNull JTree myTree;
   /**
    * If this flag is false then the refresh() method does nothing. But when
    * the flag becomes true and myDirtyFileSet isn't empty the update is invoked.
    * This is done for optimization reasons: if TodoPane is not visible then
    * updates isn't invoked.
    */
-  private boolean myUpdatable;
+  private volatile boolean myUpdatable;
 
-  /** Updates tree if containing files change VCS status. */
-  private final MyFileStatusListener myFileStatusListener;
+  /**
+   * Updates tree if containing files change VCS status.
+   */
+  private final MyFileStatusListener myFileStatusListener = new MyFileStatusListener();
   private TodoTreeStructure myTreeStructure;
-  private StructureTreeModel<TodoTreeStructure> myModel;
+  private StructureTreeModel<? extends TodoTreeStructure> myModel;
   private boolean myDisposed;
 
-  private final Object LOCK = new Object();
-  private final List<TreeUpdater> myPendingUpdates = new SmartList<>(); // guarded by LOCK
-  
-  TodoTreeBuilder(JTree tree, Project project) {
+  private final TodoTreeBuilderCoroutineHelper myCoroutineHelper = new TodoTreeBuilderCoroutineHelper(this);
+
+  /**
+   * To be used in {@link #rebuildCache()} only!
+   */
+  private final List<CompletableFuture<?>> myFutures = new SmartList<>();
+
+  TodoTreeBuilder(@NotNull JTree tree,
+                  @NotNull Project project) {
     myTree = tree;
     myProject = project;
 
-    myFileTree = new FileTree();
-    myDirtyFileSet = new HashSet<>();
-
-    myFile2Highlighter = ContainerUtil.createConcurrentSoftValueMap(); //used from EDT and from StructureTreeModel invoker thread
-
-    PsiManager psiManager = PsiManager.getInstance(myProject);
-    mySearchHelper = PsiTodoSearchHelper.SERVICE.getInstance(myProject);
-    psiManager.addPsiTreeChangeListener(new MyPsiTreeChangeListener(), this);
-
-    myFileStatusListener = new MyFileStatusListener();
+    Disposer.register(myProject, this);
+    PsiManager.getInstance(myProject).addPsiTreeChangeListener(new MyPsiTreeChangeListener(), this);
 
     //setCanYieldUpdate(true);
   }
 
-  public void setModel(StructureTreeModel<TodoTreeStructure> model) {
+  protected @NotNull PsiTodoSearchHelper getSearchHelper() {
+    return PsiTodoSearchHelper.getInstance(myProject);
+  }
+
+  protected final @NotNull Project getProject() {
+    return myProject;
+  }
+
+  protected final @NotNull JTree getTree() {
+    return myTree;
+  }
+
+  protected final @NotNull TodoTreeBuilderCoroutineHelper getCoroutineHelper() {
+    return myCoroutineHelper;
+  }
+
+  protected final @NotNull StructureTreeModel<? extends TodoTreeStructure> getModel() {
+    return myModel;
+  }
+
+  protected final void setModel(@NotNull StructureTreeModel<? extends TodoTreeStructure> model) {
     myModel = model;
   }
 
@@ -135,19 +155,16 @@ public abstract class TodoTreeBuilder implements Disposable {
   @Override
   public final void dispose() {
     myDisposed = true;
-    synchronized (LOCK) {
-      clearPendingUpdates();
-    }
   }
 
-  final boolean isUpdatable() {
+  protected final boolean isUpdatable() {
     return myUpdatable;
   }
 
   /**
    * Sets whether the builder updates the tree when data change.
    */
-  final void setUpdatable(boolean updatable) {
+  protected final void setUpdatable(boolean updatable) {
     if (myUpdatable != updatable) {
       myUpdatable = updatable;
       if (updatable) {
@@ -156,8 +173,7 @@ public abstract class TodoTreeBuilder implements Disposable {
     }
   }
 
-  @NotNull
-  protected abstract TodoTreeStructure createTreeStructure();
+  protected abstract @NotNull TodoTreeStructure createTreeStructure();
 
   public final TodoTreeStructure getTodoTreeStructure() {
     return myTreeStructure;
@@ -180,8 +196,7 @@ public abstract class TodoTreeBuilder implements Disposable {
       }
 
       @Override
-      @Nullable
-      public PsiFile next() {
+      public @Nullable PsiFile next() {
         VirtualFile vFile = iterator.next();
         if (vFile == null || !vFile.isValid()) {
           return null;
@@ -319,75 +334,47 @@ public abstract class TodoTreeBuilder implements Disposable {
     }
   }
 
-  protected void rebuildCache() {
-    TreeUpdater uiUpdater = new TreeUpdater();
-    synchronized (LOCK) {
-      clearPendingUpdates();
-      myPendingUpdates.add(uiUpdater);
+  protected final synchronized @NotNull CompletableFuture<?> rebuildCache() {
+    for (CompletableFuture<?> future : myFutures) {
+      future.cancel(true);
     }
-    ReadAction.nonBlocking(() -> {
-      Set<VirtualFile> files = new HashSet<>();
-      collectFiles(virtualFile -> {
-        files.add(virtualFile);
-        return true;
-      });
-      return files;
-    }).finishOnUiThread(ModalityState.NON_MODAL, uiUpdater)
-      .inSmartMode(myProject)
-      .expireWith(this)
-      .submit(NonUrgentExecutor.getInstance());
+    myFutures.clear();
+
+    CompletableFuture<?> future = myCoroutineHelper.scheduleCacheAndTreeUpdate();
+    myFutures.add(future);
+    return future;
   }
 
-  private void clearPendingUpdates() {
-    for (TreeUpdater request : myPendingUpdates) {
-      request.cancel();
-    }
-    myPendingUpdates.clear();
-  }
-
-  private class TreeUpdater implements Consumer<Set<VirtualFile>> {
-    private volatile boolean myCanceled = false;
-
-    private void cancel() {
-      myCanceled = true;
-    }
-
-    @Override
-    public void accept(Set<VirtualFile> files) {
-      if (myCanceled) return;
-      rebuildCache(files);
-      updateTree();
-    }
-  }
-  
-  void collectFiles(Processor<? super VirtualFile> collector) {
-    TodoTreeStructure treeStructure=getTodoTreeStructure();
-    PsiFile[] psiFiles= mySearchHelper.findFilesWithTodoItems();
-    for (PsiFile psiFile : psiFiles) {
-      if (mySearchHelper.getTodoItemsCount(psiFile) > 0 && treeStructure.accept(psiFile)) {
-        collector.process(psiFile.getVirtualFile());
+  @RequiresBackgroundThread
+  protected void collectFiles(@NotNull Consumer<? super PsiFile> consumer) {
+    TodoTreeStructure treeStructure = getTodoTreeStructure();
+    PsiTodoSearchHelper searchHelper = getSearchHelper();
+    searchHelper.processFilesWithTodoItems(psiFile -> {
+      if (searchHelper.getTodoItemsCount(psiFile) > 0 && treeStructure.accept(psiFile)) {
+        consumer.accept(psiFile);
       }
-    }
+      return true;
+    });
   }
 
-  protected void rebuildCache(@NotNull Set<? extends VirtualFile> files) {
-    ApplicationManager.getApplication().assertIsWriteThread();
+  protected final void clearCache() {
     myFileTree.clear();
     myDirtyFileSet.clear();
     myFile2Highlighter.clear();
-
-    for (VirtualFile virtualFile : files) {
-      myFileTree.add(virtualFile);
-    }
-
-    getTodoTreeStructure().validateCache();
   }
 
-  private void validateCache() {
-    ApplicationManager.getApplication().assertIsDispatchThread();
+  @RequiresEdt
+  private void withLoadingPanel(@NotNull Consumer<? super JBLoadingPanel> consumer) {
+    JBLoadingPanel loadingPanel = UIUtil.getParentOfType(JBLoadingPanel.class, myTree);
+    if (loadingPanel != null) {
+      consumer.accept(loadingPanel);
+    }
+  }
+
+  protected final void validateCache() {
     TodoTreeStructure treeStructure = getTodoTreeStructure();
-    // First of all we need to update "dirty" file set.
-    for (Iterator<VirtualFile> i = myDirtyFileSet.iterator(); i.hasNext();) {
+    // First we need to update "dirty" file set.
+    for (Iterator<VirtualFile> i = myDirtyFileSet.iterator(); i.hasNext(); ) {
       VirtualFile file = i.next();
       PsiFile psiFile = file.isValid() ? PsiManager.getInstance(myProject).findFile(file) : null;
       if (psiFile == null || !treeStructure.accept(psiFile)) {
@@ -463,17 +450,22 @@ public abstract class TodoTreeBuilder implements Disposable {
     }
   }
 
-  public final Promise<?> updateTree() {
-    if (myUpdatable) {
-      return myModel.getInvoker().invoke(() -> ApplicationManager.getApplication().invokeLater(() -> {
-        if (!myDirtyFileSet.isEmpty()) { // suppress redundant cache validations
-          validateCache();
-          getTodoTreeStructure().validateCache();
-        }
-        myModel.invalidate();
-      }, myProject.getDisposed()));
-    }
-    return Promises.resolvedPromise();
+  public final @NotNull Promise<?> updateTree() {
+    return myUpdatable ?
+           Promises.asPromise(myCoroutineHelper.scheduleUpdateTree()) :
+           Promises.resolvedPromise();
+  }
+
+  @VisibleForTesting
+  @RequiresEdt
+  protected void onUpdateStarted() {
+    withLoadingPanel(JBLoadingPanel::startLoading);
+  }
+
+  @VisibleForTesting
+  @RequiresEdt
+  protected void onUpdateFinished() {
+    withLoadingPanel(JBLoadingPanel::stopLoading);
   }
 
   public void select(Object obj) {
@@ -490,24 +482,25 @@ public abstract class TodoTreeBuilder implements Disposable {
     }
   }
 
-  private static TodoNodeVisitor getVisitorFor(Object obj) {
+  protected static @Nullable TodoNodeVisitor getVisitorFor(@NotNull Object obj) {
     if (obj instanceof TodoItemNode) {
       SmartTodoItemPointer value = ((TodoItemNode)obj).getValue();
       if (value != null) {
         return new TodoNodeVisitor(value::getTodoItem,
                                    value.getTodoItem().getFile().getVirtualFile());
       }
+      else {
+        return null;
+      }
     }
     else {
-      Object o = obj instanceof AbstractTreeNode ? ((AbstractTreeNode)obj).getValue() : null;
-      return new TodoNodeVisitor(() -> obj instanceof AbstractTreeNode ? ((AbstractTreeNode)obj).getValue() : obj,
+      Object o = obj instanceof AbstractTreeNode ? ((AbstractTreeNode<?>)obj).getValue() : null;
+      return new TodoNodeVisitor(() -> obj instanceof AbstractTreeNode ? ((AbstractTreeNode<?>)obj).getValue() : obj,
                                  o instanceof PsiElement ? PsiUtilCore.getVirtualFile((PsiElement)o) : null);
     }
-    return null;
   }
 
-  static PsiFile getFileForNode(DefaultMutableTreeNode node) {
-    Object obj = node.getUserObject();
+  static @Nullable PsiFile getFileForNodeDescriptor(@NotNull NodeDescriptor<?> obj) {
     if (obj instanceof TodoFileNode) {
       return ((TodoFileNode)obj).getValue();
     }
@@ -540,10 +533,7 @@ public abstract class TodoTreeBuilder implements Disposable {
   }
 
   private void rebuildTreeOnSettingChange() {
-    List<Object> pathsToSelect = TreeUtil.collectSelectedUserObjects(myTree);
-    myTree.clearSelection();
-    getTodoTreeStructure().validateCache();
-    updateTree().onSuccess(o -> TreeUtil.promiseSelect(myTree, pathsToSelect.stream().map(TodoTreeBuilder::getVisitorFor)));
+    myCoroutineHelper.scheduleCacheValidationAndTreeUpdate();
   }
 
   /**
@@ -775,11 +765,7 @@ public abstract class TodoTreeBuilder implements Disposable {
     public void propertyChanged(@NotNull PsiTreeChangeEvent e) {
       String propertyName = e.getPropertyName();
       if (propertyName.equals(PsiTreeChangeEvent.PROP_ROOTS)) { // rebuild all tree when source roots were changed
-        myModel.getInvoker().invoke(
-          () -> ApplicationManager.getApplication().invokeLater(() -> {
-            rebuildCache();
-          })
-        );
+        rebuildCache();
       }
       else if (PsiTreeChangeEvent.PROP_WRITABLE.equals(propertyName) || PsiTreeChangeEvent.PROP_FILE_NAME.equals(propertyName)) {
         PsiFile psiFile = (PsiFile)e.getElement();

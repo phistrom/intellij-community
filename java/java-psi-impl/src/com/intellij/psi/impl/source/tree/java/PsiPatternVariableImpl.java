@@ -76,43 +76,7 @@ public class PsiPatternVariableImpl extends CompositePsiElement implements PsiPa
   @NotNull
   @Override
   public PsiElement getDeclarationScope() {
-    PsiElement parent = getPattern().getParent();
-    if (!(parent instanceof PsiInstanceOfExpression) && !(parent instanceof PsiCaseLabelElementList)) return parent;
-    boolean negated = false;
-    for (PsiElement nextParent = parent.getParent(); ; parent = nextParent, nextParent = parent.getParent()) {
-      if (nextParent instanceof PsiParenthesizedExpression) continue;
-      if (nextParent instanceof PsiConditionalExpression && parent == ((PsiConditionalExpression)nextParent).getCondition()) {
-        return nextParent;
-      }
-      if (nextParent instanceof PsiPrefixExpression && ((PsiPrefixExpression)nextParent).getOperationTokenType().equals(EXCL)) {
-        negated = !negated;
-        continue;
-      }
-      if (nextParent instanceof PsiPolyadicExpression) {
-        IElementType tokenType = ((PsiPolyadicExpression)nextParent).getOperationTokenType();
-        if (tokenType.equals(ANDAND) && !negated || tokenType.equals(OROR) && negated) continue;
-      }
-      if (nextParent instanceof PsiIfStatement) {
-        while (nextParent.getParent() instanceof PsiLabeledStatement) {
-          nextParent = nextParent.getParent();
-        }
-        return nextParent.getParent();
-      }
-      if (nextParent instanceof PsiConditionalLoopStatement) {
-        if (!negated) return nextParent;
-        while (nextParent.getParent() instanceof PsiLabeledStatement) {
-          nextParent = nextParent.getParent();
-        }
-        return nextParent.getParent();
-      }
-      if (nextParent instanceof PsiSwitchLabelStatementBase) {
-         while (nextParent.getParent() instanceof PsiLabeledStatement) {
-          nextParent = nextParent.getParent();
-        }
-        return nextParent.getParent();
-      }
-      return parent;
-    }
+    return JavaSharedImplUtil.getPatternVariableDeclarationScope(this);
   }
 
   @Override

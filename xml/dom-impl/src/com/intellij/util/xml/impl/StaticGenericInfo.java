@@ -18,9 +18,6 @@ import org.jetbrains.annotations.Nullable;
 import java.lang.reflect.Type;
 import java.util.*;
 
-/**
- * @author peter
- */
 public final class StaticGenericInfo extends DomGenericInfoEx {
   private final Class<? extends DomElement> myClass;
 
@@ -200,7 +197,7 @@ public final class StaticGenericInfo extends DomGenericInfoEx {
   public String getElementName(DomElement element) {
     buildMethodMaps();
     Object o = getNameObject(element);
-    return o == null || o instanceof String ? (String)o : ((GenericValue)o).getStringValue();
+    return o == null || o instanceof String ? (String)o : ((GenericValue<?>)o).getStringValue();
   }
 
   @Override

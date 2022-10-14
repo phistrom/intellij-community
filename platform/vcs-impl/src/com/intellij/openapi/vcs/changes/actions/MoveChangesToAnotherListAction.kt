@@ -76,7 +76,7 @@ class MoveChangesToAnotherListAction : AbstractChangeListAction() {
 
         changeListManager.moveChangesTo(targetList, *changes.toTypedArray())
         if (unversionedFiles.isNotEmpty()) {
-          changeListManager.addUnversionedFiles(targetList, unversionedFiles)
+          ScheduleForAdditionAction.addUnversionedFilesToVcsInBackground(project, targetList, unversionedFiles)
         }
         return true
       }
@@ -87,7 +87,7 @@ class MoveChangesToAnotherListAction : AbstractChangeListAction() {
       val comparator = compareBy<LocalChangeList> { if (it.isDefault) -1 else 0 }
         .thenBy { if (it.changes.isEmpty()) -1 else 0 }
         .then(ChangesUtil.CHANGELIST_COMPARATOR)
-      return lists.minWith(comparator)
+      return lists.minWithOrNull(comparator)
     }
 
     private fun askTargetList(project: Project, changes: Collection<Change>): LocalChangeList? {
@@ -109,7 +109,7 @@ class MoveChangesToAnotherListAction : AbstractChangeListAction() {
                             selectedRanges: List<LocalRange>,
                             tracker: PartialLocalLineStatusTracker): LocalChangeList? {
       val changeListManager = ChangeListManager.getInstance(project)
-      val allChangelists = changeListManager.changeListsCopy
+      val allChangelists = changeListManager.changeLists
 
       val affectedListIds = selectedRanges.map { range -> range.changelistId }.toSet()
       val affectedLists = allChangelists.filter { list -> affectedListIds.contains(list.id) }.toSet()
@@ -126,7 +126,7 @@ class MoveChangesToAnotherListAction : AbstractChangeListAction() {
                                     sameFileChangeLists: Set<LocalChangeList>,
                                     title: @Nls String): LocalChangeList? {
       val changeListManager = ChangeListManager.getInstance(project)
-      val allChangelists = changeListManager.changeListsCopy
+      val allChangelists = changeListManager.changeLists
 
       val nonAffectedLists = if (affectedLists.size == 1) allChangelists - affectedLists else allChangelists
 

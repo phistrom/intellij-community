@@ -34,17 +34,17 @@ public final class FileContentImpl extends IndexedFileImpl implements PsiDepende
   private CharSequence myContentAsText;
   private byte[] myIndexedFileHash;
   private boolean myLighterASTShouldBeThreadSafe;
-  private final boolean myPhysicalContent;
+  private final boolean myTransientContent;
 
   private FileContentImpl(@NotNull VirtualFile file,
                           @NotNull FileType fileType,
                           @Nullable CharSequence contentAsText,
                           @NotNull NotNullComputable<byte[]> contentComputable,
-                          boolean physicalContent) {
+                          boolean transientContent) {
     super(file, fileType, null);
     myContentAsText = contentAsText;
     myContentComputable = contentComputable;
-    myPhysicalContent = physicalContent;
+    myTransientContent = transientContent;
   }
 
   private static final Key<PsiFile> CACHED_PSI = Key.create("cached psi from content");
@@ -101,13 +101,13 @@ public final class FileContentImpl extends IndexedFileImpl implements PsiDepende
 
   public static @NotNull FileContent createByContent(@NotNull VirtualFile file, byte @NotNull [] content) {
     FileType fileType = FileTypeRegistry.getInstance().getFileTypeByFile(file, content);
-    return new FileContentImpl(file, fileType, null, () -> content, true);
+    return new FileContentImpl(file, fileType, null, () -> content, false);
   }
 
   public static @NotNull FileContentImpl createByContent(@NotNull VirtualFile file,
                                                          @NotNull NotNullComputable<byte[]> contentComputable) {
     FileType fileType = FileTypeRegistry.getInstance().getFileTypeByFile(file);
-    return new FileContentImpl(file, fileType, null, contentComputable, true);
+    return new FileContentImpl(file, fileType, null, contentComputable, false);
   }
 
   public static @NotNull FileContent createByContent(@NotNull VirtualFile file,
@@ -140,7 +140,7 @@ public final class FileContentImpl extends IndexedFileImpl implements PsiDepende
                                                   () -> {
                                                     throw new IllegalStateException("Content must be converted from 'contentAsText'");
                                                   },
-                                                  false);
+                                                  true);
     if (project != null) {
       content.setProject(project);
     }
@@ -156,8 +156,8 @@ public final class FileContentImpl extends IndexedFileImpl implements PsiDepende
     return charset;
   }
 
-  public boolean isPhysicalContent() {
-    return myPhysicalContent;
+  public boolean isTransientContent() {
+    return myTransientContent;
   }
 
   @Override
@@ -207,7 +207,7 @@ public final class FileContentImpl extends IndexedFileImpl implements PsiDepende
   }
 
   public byte @Nullable [] getIndexedFileHash() {
-    if (!myPhysicalContent) {
+    if (myTransientContent) {
       throw new IllegalStateException("Hashes are allowed only while physical changes indexing");
     }
     return myIndexedFileHash;
@@ -220,7 +220,7 @@ public final class FileContentImpl extends IndexedFileImpl implements PsiDepende
   @Override
   @NotNull
   public PsiFile getPsiFile() {
-    if (!myPhysicalContent) {
+    if (myTransientContent) {
       Document document = FileDocumentManager.getInstance().getCachedDocument(getFile());
 
       if (document != null) {

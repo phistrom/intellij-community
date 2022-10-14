@@ -14,6 +14,7 @@ import com.intellij.psi.xml.XmlChildRole;
 import com.intellij.psi.xml.XmlComment;
 import com.intellij.psi.xml.XmlTag;
 import com.intellij.util.ArrayUtil;
+import com.intellij.xml.XmlDeprecationOwnerDescriptor;
 import com.intellij.xml.analysis.XmlAnalysisBundle;
 import com.intellij.xml.util.XmlUtil;
 import org.intellij.lang.annotations.Language;
@@ -34,7 +35,7 @@ public class XmlDeprecatedElementInspection extends XmlSuppressableInspectionToo
     Pattern pattern = Pattern.compile(regexp);
     return new XmlElementVisitor() {
       @Override
-      public void visitXmlTag(XmlTag tag) {
+      public void visitXmlTag(@NotNull XmlTag tag) {
         if (checkDeprecated(tag.getDescriptor(), pattern)) {
           ASTNode nameNode = XmlChildRole.START_TAG_NAME_FINDER.findChild(tag.getNode());
           if (nameNode != null) {
@@ -44,7 +45,7 @@ public class XmlDeprecatedElementInspection extends XmlSuppressableInspectionToo
       }
 
       @Override
-      public void visitXmlAttribute(XmlAttribute attribute) {
+      public void visitXmlAttribute(@NotNull XmlAttribute attribute) {
         if (checkDeprecated(attribute.getDescriptor(), pattern)) {
           holder.registerProblem(attribute.getNameElement(), XmlAnalysisBundle.message(
             "xml.inspections.the.attribute.is.marked.as.deprecated"), ProblemHighlightType.LIKE_DEPRECATED);
@@ -61,6 +62,10 @@ public class XmlDeprecatedElementInspection extends XmlSuppressableInspectionToo
 
   private static boolean checkDeprecated(@Nullable PsiMetaData metaData, Pattern pattern) {
     if (metaData == null) return false;
+    if (metaData instanceof XmlDeprecationOwnerDescriptor) {
+      return ((XmlDeprecationOwnerDescriptor)metaData).isDeprecated();
+    }
+    
     PsiElement declaration = metaData.getDeclaration();
     if (!(declaration instanceof XmlTag)) return false;
     XmlComment comment = XmlUtil.findPreviousComment(declaration);

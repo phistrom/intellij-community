@@ -55,6 +55,9 @@ internal class ImageInfo(val id: String,
         path.contains("_dark.") -> {
           result = result or ImageDescriptor.HAS_DARK
         }
+        path.contains("_stroke.") -> {
+          result = result or ImageDescriptor.HAS_STROKE
+        }
       }
     }
     return result
@@ -77,16 +80,6 @@ internal class ImageInfo(val id: String,
 
   val scheduledForRemoval by lazy {
     flags.deprecation?.comment?.contains("to be removed") == true
-  }
-
-  val scheduledForRemovalRelease by lazy {
-    val comment = flags.deprecation?.comment ?: return@lazy "2020.1"
-    val result = Regex("to be removed in (?:IDEA )?([0-9.]+)").find(comment) ?: return@lazy "2020.1"
-    val release = result.groupValues[1]
-    if (release == "2020")
-      "2020.1"
-    else
-      release
   }
 }
 

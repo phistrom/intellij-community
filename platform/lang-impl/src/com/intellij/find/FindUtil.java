@@ -7,6 +7,7 @@ import com.intellij.codeInsight.hint.HintManagerImpl;
 import com.intellij.codeInsight.hint.HintUtil;
 import com.intellij.find.findUsages.PsiElement2UsageTargetAdapter;
 import com.intellij.find.impl.FindInProjectUtil;
+import com.intellij.find.impl.livePreview.SearchResults;
 import com.intellij.find.replaceInProject.ReplaceInProjectManager;
 import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.AnAction;
@@ -85,6 +86,10 @@ public final class FindUtil {
 
   public static void configureFindModel(boolean replace, @Nullable Editor editor, FindModel model, boolean firstSearch) {
     String selectedText = getSelectedText(editor);
+    configureFindModel(replace, model, firstSearch, selectedText);
+  }
+
+  public static void configureFindModel(boolean replace, FindModel model, boolean firstSearch, @Nullable String selectedText) {
     boolean multiline = selectedText != null && selectedText.contains("\n");
     String stringToFind = firstSearch || model.getStringToFind().contains("\n") ? "" : model.getStringToFind();
     boolean isSelectionUsed = false;
@@ -184,7 +189,7 @@ public final class FindUtil {
     return start < end? text.subSequence(start, end).toString() : null;
   }
 
-  public static void findWordAtCaret(Project project, @NotNull Editor editor) {
+  public static void findWordAtCaret(Project project, @NotNull Editor editor, @NotNull SearchResults.Direction direction) {
     String s = getWordAtCaret(editor, false);
     if (s == null) {
       return;
@@ -196,9 +201,10 @@ public final class FindUtil {
     findManager.setFindWasPerformed();
     findManager.clearFindingNextUsageInFile();
     FindModel model = new FindModel();
+    model.setForward(direction == SearchResults.Direction.DOWN);
     model.setStringToFind(s);
     model.setCaseSensitive(true);
-    model.setWholeWordsOnly(!editor.getSelectionModel().hasSelection());
+    model.setWholeWordsOnly(false);
 
     EditorSearchSession searchSession = EditorSearchSession.get(editor);
     if (searchSession != null) {

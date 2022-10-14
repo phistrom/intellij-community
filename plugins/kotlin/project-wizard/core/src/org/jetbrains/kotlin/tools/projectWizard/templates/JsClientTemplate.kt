@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.tools.projectWizard.templates
 
@@ -23,23 +23,19 @@ import org.jetbrains.kotlin.tools.projectWizard.transformers.interceptors.Templa
 import org.jetbrains.kotlin.tools.projectWizard.transformers.interceptors.interceptTemplate
 
 abstract class JsClientTemplate : Template() {
-    override fun isApplicableTo(module: Module, projectKind: ProjectKind): Boolean =
+    override fun isApplicableTo(module: Module, projectKind: ProjectKind, reader: Reader): Boolean =
         module.configurator.moduleType == ModuleType.js
-
-    override fun isApplicableTo(
-        reader: Reader,
-        module: Module
-    ): Boolean = when (module.configurator) {
-        JsBrowserTargetConfigurator, MppLibJsBrowserTargetConfigurator -> true
-        BrowserJsSinglePlatformModuleConfigurator -> {
-            with(reader) {
-                inContextOfModuleConfigurator(module, module.configurator) {
-                    JSConfigurator.kind.reference.notRequiredSettingValue == JsTargetKind.APPLICATION
+                && when (module.configurator) {
+                    JsBrowserTargetConfigurator, MppLibJsBrowserTargetConfigurator -> true
+                    BrowserJsSinglePlatformModuleConfigurator -> {
+                        with(reader) {
+                            inContextOfModuleConfigurator(module, module.configurator) {
+                                JSConfigurator.kind.reference.notRequiredSettingValue == JsTargetKind.APPLICATION
+                            }
+                        }
+                    }
+                    else -> false
                 }
-            }
-        }
-        else -> false
-    }
 
     override fun Reader.createRunConfigurations(module: ModuleIR): List<WizardRunConfiguration> = buildList {
         if (module.originalModule.kind == ModuleKind.singlePlatformJsBrowser) {
@@ -57,7 +53,7 @@ abstract class JsClientTemplate : Template() {
     }
 
     override fun Reader.createInterceptors(module: ModuleIR): List<TemplateInterceptor> = buildList {
-        +interceptTemplate(KtorServerTemplate()) {
+        +interceptTemplate(KtorServerTemplate) {
             applicableIf { buildFileIR ->
                 if (module !is MultiplatformModuleIR) return@applicableIf false
                 val tasks = buildFileIR.irsOfTypeOrNull<GradleConfigureTaskIR>() ?: return@applicableIf true
@@ -73,15 +69,6 @@ abstract class JsClientTemplate : Template() {
                         resources()
                     }
                     """.trimIndent()
-                }
-            }
-
-            interceptAtPoint(template.imports) { value ->
-                if (value.isNotEmpty()) return@interceptAtPoint value
-                buildList {
-                    +value
-                    +"io.ktor.http.content.resources"
-                    +"io.ktor.http.content.static"
                 }
             }
 

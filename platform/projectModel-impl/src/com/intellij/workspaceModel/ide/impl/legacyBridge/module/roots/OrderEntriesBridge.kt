@@ -2,12 +2,10 @@
 package com.intellij.workspaceModel.ide.impl.legacyBridge.module.roots
 
 import com.intellij.openapi.module.Module
-import com.intellij.openapi.projectRoots.ProjectJdkTable
 import com.intellij.openapi.projectRoots.Sdk
 import com.intellij.openapi.roots.*
 import com.intellij.openapi.roots.impl.ClonableOrderEntry
 import com.intellij.openapi.roots.impl.ProjectRootManagerImpl
-import com.intellij.openapi.roots.impl.SdkFinder
 import com.intellij.openapi.roots.libraries.Library
 import com.intellij.openapi.roots.libraries.LibraryTablesRegistrar
 import com.intellij.openapi.vfs.VirtualFile
@@ -17,10 +15,11 @@ import com.intellij.util.ArrayUtil
 import com.intellij.util.PathUtil
 import com.intellij.workspaceModel.ide.impl.legacyBridge.library.LibraryNameGenerator
 import com.intellij.workspaceModel.ide.impl.legacyBridge.library.ProjectLibraryTableBridgeImpl.Companion.libraryMap
-import com.intellij.workspaceModel.ide.impl.legacyBridge.module.ModuleManagerBridgeImpl.Companion.findModuleByEntity
+import com.intellij.workspaceModel.ide.impl.legacyBridge.module.findModule
+import com.intellij.workspaceModel.ide.legacyBridge.ModifiableRootModelBridge
 import com.intellij.workspaceModel.ide.legacyBridge.ModuleBridge
-import com.intellij.workspaceModel.storage.bridgeEntities.LibraryTableId
-import com.intellij.workspaceModel.storage.bridgeEntities.ModuleDependencyItem
+import com.intellij.workspaceModel.storage.bridgeEntities.api.LibraryTableId
+import com.intellij.workspaceModel.storage.bridgeEntities.api.ModuleDependencyItem
 import org.jetbrains.annotations.Nls
 import org.jetbrains.jps.model.serialization.library.JpsLibraryTableSerializer
 
@@ -110,9 +109,7 @@ internal class ModuleOrderEntryBridge(
   override fun getModule(): Module? {
     val storage = getRootModel().storage
     val moduleEntity = storage.resolve(moduleDependencyItem.module)
-    val module = moduleEntity?.let {
-      storage.findModuleByEntity(it)
-    }
+    val module = moduleEntity?.findModule(storage)
     return getRootModel().accessor.getModule(module, moduleName)
   }
 
@@ -187,10 +184,6 @@ internal abstract class SdkOrderEntryBaseBridge(
   override fun getRootFiles(type: OrderRootType): Array<VirtualFile> = rootProvider?.getFiles(type) ?: VirtualFile.EMPTY_ARRAY
 
   override fun getRootUrls(type: OrderRootType): Array<String> = rootProvider?.getUrls(type) ?: ArrayUtil.EMPTY_STRING_ARRAY
-
-  override fun getFiles(type: OrderRootType) = getRootFiles(type)
-
-  override fun getUrls(rootType: OrderRootType) = getRootUrls(rootType)
 }
 
 internal class LibraryOrderEntryBridge(
@@ -206,7 +199,7 @@ internal class LibraryOrderEntryBridge(
 
   @Nls
   private fun getPresentableNameForUnnamedLibrary(): String {
-    val url = getUrls(OrderRootType.CLASSES).firstOrNull()
+    val url = getRootUrls(OrderRootType.CLASSES).firstOrNull()
     return if (url != null) PathUtil.toPresentableUrl(url) else ProjectModelBundle.message("empty.library.title")
   }
 
@@ -246,10 +239,6 @@ internal class LibraryOrderEntryBridge(
 
   override fun getRootUrls(type: OrderRootType): Array<String> = rootProvider?.getUrls(type) ?: ArrayUtil.EMPTY_STRING_ARRAY
 
-  override fun getFiles(type: OrderRootType) = getRootFiles(type)
-
-  override fun getUrls(rootType: OrderRootType) = getRootUrls(rootType)
-
   override fun isValid(): Boolean = library != null
 
   override fun <R : Any?> accept(policy: RootPolicy<R>, initialValue: R?): R? = policy.visitLibraryOrderEntry(this, initialValue)
@@ -280,7 +269,7 @@ internal class SdkOrderEntryBridge(
   override fun getJdk(): Sdk? {
     val sdkType = sdkDependencyItem.sdkType
     val sdkName = sdkDependencyItem.sdkName
-    val sdk = findSdk(sdkName, sdkType)
+    val sdk = ModifiableRootModelBridge.findSdk(sdkName, sdkType)
     return getRootModel().accessor.getSdk(sdk, sdkName)
   }
 
@@ -296,18 +285,6 @@ internal class SdkOrderEntryBridge(
   ): OrderEntry = SdkOrderEntryBridge(rootModel as ModuleRootModelBridge, index, sdkDependencyItem.copy())
 
   override fun isSynthetic(): Boolean = true
-
-  companion object {
-    @JvmStatic
-    internal fun findSdk(sdkName: String, sdkType: String): Sdk? {
-      for (finder in SdkFinder.EP_NAME.extensionsIfPointIsRegistered) {
-        val sdk = finder.findSdk(sdkName, sdkType)
-        if (sdk != null) return sdk
-      }
-
-      return ProjectJdkTable.getInstance().findJdk(sdkName, sdkType)
-    }
-  }
 }
 
 internal class InheritedSdkOrderEntryBridge(rootModel: ModuleRootModelBridge, index: Int, item: ModuleDependencyItem.InheritedSdkDependency)

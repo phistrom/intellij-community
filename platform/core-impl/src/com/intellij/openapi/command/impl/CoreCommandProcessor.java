@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.command.impl;
 
 import com.intellij.openapi.application.Application;
@@ -13,6 +13,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.Stack;
 import com.intellij.util.messages.MessageBus;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -60,6 +61,7 @@ public class CoreCommandProcessor extends CommandProcessorEx {
   private final Stack<CommandDescriptor> myInterruptedCommands = new Stack<>();
   private final List<CommandListener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
   private int myUndoTransparentCount;
+  private boolean myAllowMergeGlobalCommands;
 
   private final CommandListener eventPublisher;
 
@@ -364,14 +366,39 @@ public class CoreCommandProcessor extends CommandProcessorEx {
       CommandLog.LOG.debug("runUndoTransparentAction: " + action + ", in command = " + (myCurrentCommand != null) +
                            ", in transparent action = " + isUndoTransparentActionInProgress());
     }
-    if (myUndoTransparentCount++ == 0) eventPublisher.undoTransparentActionStarted();
+    if (myUndoTransparentCount++ == 0) {
+      eventPublisher.undoTransparentActionStarted();
+    }
     try {
       action.run();
     }
     finally {
-      if (myUndoTransparentCount == 1) eventPublisher.beforeUndoTransparentActionFinished();
-      if (--myUndoTransparentCount == 0) eventPublisher.undoTransparentActionFinished();
+      if (myUndoTransparentCount == 1) {
+        eventPublisher.beforeUndoTransparentActionFinished();
+      }
+      if (--myUndoTransparentCount == 0) {
+        eventPublisher.undoTransparentActionFinished();
+      }
     }
+  }
+
+  @Override
+  public final AutoCloseable withUndoTransparentAction() {
+    if (CommandLog.LOG.isDebugEnabled()) {
+      CommandLog.LOG.debug("withUndoTransparentAction in command = " + (myCurrentCommand != null) +
+                           ", in transparent action = " + isUndoTransparentActionInProgress());
+    }
+    if (myUndoTransparentCount++ == 0) {
+      eventPublisher.undoTransparentActionStarted();
+    }
+    return () -> {
+      if (myUndoTransparentCount == 1) {
+        eventPublisher.beforeUndoTransparentActionFinished();
+      }
+      if (--myUndoTransparentCount == 0) {
+        eventPublisher.undoTransparentActionFinished();
+      }
+    };
   }
 
   @Override
@@ -389,6 +416,27 @@ public class CoreCommandProcessor extends CommandProcessorEx {
 
   @Override
   public void addAffectedFiles(@Nullable Project project, VirtualFile @NotNull ... files) {
+  }
+
+  @ApiStatus.Internal
+  @ApiStatus.Experimental
+  public Boolean isMergeGlobalCommandsAllowed() {
+    return myAllowMergeGlobalCommands;
+  }
+
+  @Override
+  public void allowMergeGlobalCommands(@NotNull Runnable action) {
+    ApplicationManager.getApplication().assertIsWriteThread();
+    if (myAllowMergeGlobalCommands) {
+      action.run();
+    }
+
+    myAllowMergeGlobalCommands = true;
+    try {
+      action.run();
+    } finally {
+      myAllowMergeGlobalCommands = false;
+    }
   }
 
   private void fireCommandStarted() {

@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.vcs.log.util;
 
 import com.google.common.util.concurrent.FutureCallback;
@@ -7,7 +7,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.intellij.ide.IdeTooltip;
 import com.intellij.ide.IdeTooltipManager;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.progress.util.ProgressWindow;
+import com.intellij.openapi.progress.util.ProgressIndicatorWithDelayedPresentation;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.Balloon;
 import com.intellij.openapi.util.ActionCallback;
@@ -26,6 +26,7 @@ import com.intellij.vcs.log.CommitId;
 import com.intellij.vcs.log.VcsLogBundle;
 import com.intellij.vcs.log.data.VcsLogData;
 import com.intellij.vcs.log.data.VcsLogProgress;
+import com.intellij.vcs.log.impl.VcsLogNavigationUtil;
 import com.intellij.vcs.log.ui.AbstractVcsLogUi;
 import com.intellij.vcs.log.ui.filter.VcsLogFilterUiEx;
 import com.intellij.vcs.log.ui.frame.ProgressStripe;
@@ -48,7 +49,8 @@ public final class VcsLogUiUtil {
                                            @NotNull String logId,
                                            @NotNull Disposable disposableParent) {
     ProgressStripe progressStripe =
-      new ProgressStripe(component, disposableParent, ProgressWindow.DEFAULT_PROGRESS_DIALOG_POSTPONE_TIME_MILLIS) {
+      new ProgressStripe(component, disposableParent,
+                         ProgressIndicatorWithDelayedPresentation.DEFAULT_PROGRESS_DIALOG_POSTPONE_TIME_MILLIS) {
         @Override
         public void updateUI() {
           super.updateUI();
@@ -93,7 +95,7 @@ public final class VcsLogUiUtil {
   @NotNull
   public static JScrollPane setupScrolledGraph(@NotNull VcsLogGraphTable graphTable, int border) {
     JScrollPane scrollPane = ScrollPaneFactory.createScrollPane(graphTable, border);
-    ComponentUtil.putClientProperty(scrollPane, UIUtil.KEEP_BORDER_SIDES, SideBorder.TOP);
+    ClientProperty.put(scrollPane, UIUtil.KEEP_BORDER_SIDES, SideBorder.TOP);
     graphTable.viewportSet(scrollPane.getViewport());
     return scrollPane;
   }
@@ -169,7 +171,7 @@ public final class VcsLogUiUtil {
 
     @Override
     public void queryPlace(@NotNull Place place) {
-      List<CommitId> commits = myUi.getVcsLog().getSelectedCommits();
+      List<CommitId> commits = myUi.getTable().getSelection().getCommits();
       if (commits.size() > 0) {
         place.putPath(PLACE_KEY, commits.get(0));
       }
@@ -185,12 +187,13 @@ public final class VcsLogUiUtil {
       CommitId commitId = (CommitId)value;
       ActionCallback callback = new ActionCallback();
 
-      ListenableFuture<Boolean> future = (ListenableFuture<Boolean>)myUi.getVcsLog().jumpToCommit(commitId.getHash(), commitId.getRoot());
+      ListenableFuture<Boolean> future = VcsLogNavigationUtil.jumpToCommit(myUi, commitId.getHash(), commitId.getRoot(),
+                                                                           false, true);
 
       Futures.addCallback(future, new FutureCallback<>() {
         @Override
-        public void onSuccess(Boolean success) {
-          if (success) {
+        public void onSuccess(Boolean result) {
+          if (result) {
             if (requestFocus) myUi.getTable().requestFocusInWindow();
             callback.setDone();
           }

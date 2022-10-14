@@ -13,8 +13,8 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.testFramework.LightVirtualFile
 import com.intellij.vcs.log.VcsLogBundle
-import com.intellij.vcs.log.impl.VcsLogContentUtil
-import com.intellij.vcs.log.impl.disposeLogUis
+import com.intellij.vcs.log.impl.VcsLogEditorUtil.disposeLogUis
+import com.intellij.vcs.log.ui.VcsLogPanel
 import java.awt.BorderLayout
 import javax.swing.Icon
 import javax.swing.JComponent
@@ -24,7 +24,7 @@ class VcsLogFileType private constructor() : FileType {
   override fun getName(): String = "VcsLog"
   override fun getDescription(): String = VcsLogBundle.message("filetype.vcs.log.description")
   override fun getDefaultExtension(): String = ""
-  override fun getIcon(): Icon? = AllIcons.Vcs.Branch
+  override fun getIcon(): Icon = AllIcons.Vcs.Branch
   override fun isBinary(): Boolean = true
   override fun isReadOnly(): Boolean = true
 
@@ -46,12 +46,12 @@ class VcsLogIconProvider : FileIconProvider {
 }
 
 class VcsLogEditor(private val project: Project, private val vcsLogFile: VcsLogFile) : FileEditorBase() {
-  internal val rootComponent: JComponent = JPanel(BorderLayout()).also {
+  private val rootComponent: JComponent = JPanel(BorderLayout()).also {
     it.add(vcsLogFile.createMainComponent(project), BorderLayout.CENTER)
   }
 
   override fun getComponent(): JComponent = rootComponent
-  override fun getPreferredFocusedComponent(): JComponent? = VcsLogContentUtil.getLogUis(component).firstOrNull()?.mainComponent
+  override fun getPreferredFocusedComponent(): JComponent? = VcsLogPanel.getLogUis(component).firstOrNull()?.mainComponent
   override fun getName(): String = VcsLogBundle.message("vcs.log.editor.name")
   override fun getFile() = vcsLogFile
 }

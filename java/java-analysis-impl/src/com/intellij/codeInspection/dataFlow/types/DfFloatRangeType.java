@@ -121,8 +121,8 @@ class DfFloatRangeType implements DfFloatType {
     if (Float.compare(from, to) > 0) return this;
     if (myInvert) {
       if (Float.compare(to, myFrom) < 0 || Float.compare(from, myTo) > 0) return this;
-      float fromCmp = Float.compare(myFrom, from);
-      float toCmp = Float.compare(to, myTo);
+      int fromCmp = Float.compare(myFrom, from);
+      int toCmp = Float.compare(to, myTo);
       if (fromCmp >= 0 && toCmp >= 0 || fromCmp < 0 && toCmp < 0) {
         return exact ? null : (DfFloatRangeType)create(Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, false, myNaN);
       }
@@ -154,8 +154,8 @@ class DfFloatRangeType implements DfFloatType {
         float to = Math.min(myTo, range.myTo);
         return create(from, to, false, nan);
       } else {
-        float fromCmp = Float.compare(myFrom, range.myFrom);
-        float toCmp = Float.compare(range.myTo, myTo);
+        int fromCmp = Float.compare(myFrom, range.myFrom);
+        int toCmp = Float.compare(range.myTo, myTo);
         if (fromCmp >= 0) {
           return create(Math.max(myFrom, nextUp(range.myTo)), myTo, false, nan);
         }
@@ -172,20 +172,29 @@ class DfFloatRangeType implements DfFloatType {
       if (!range.myInvert) {
         return range.meet(this);
       } else {
-        float from = Math.min(myFrom, range.myFrom);
-        float to = Math.max(myTo, range.myTo);
-        return create(from, to, true, nan);
+        // both inverted
+        if (myTo >= Math.nextDown(range.myFrom) && range.myTo >= Math.nextDown(myFrom)) {
+          // excluded ranges intersect or touch each other: we can exclude their union
+          float from = Math.min(myFrom, range.myFrom);
+          float to = Math.max(myTo, range.myTo);
+          return create(from, to, true, nan);
+        }
+        // excluded ranges don't intersect: we cannot encode this case
+        // just keep one of the ranges (with lesser from, for stability)
+        if (myFrom < range.myFrom) {
+          return create(myFrom, myTo, true, nan);
+        }
+        return create(range.myFrom, range.myTo, true, nan);
       }
     }
   }
 
   @Override
   public @NotNull DfType fromRelation(@NotNull RelationType relationType) {
-    if (myInvert && relationType == RelationType.EQ) {
-      float from = myFrom, to = myTo;
-      if (from == 0.0f) from = -0.0f;
-      if (to == 0.0f) to = 0.0f;
-      return create(from, to, true, true);
+    if (relationType == RelationType.EQ) {
+      DfType result = myNaN ? this : create(myFrom, myTo, myInvert, true);
+      DfType zero = DfTypes.floatRange(-0.0f, 0.0f);
+      return meet(zero) != BOTTOM ? result.join(zero) : result;
     }
     if (myInvert) {
       float max = myTo == Float.POSITIVE_INFINITY ? nextDown(myFrom) : Float.POSITIVE_INFINITY;
@@ -198,32 +207,29 @@ class DfFloatRangeType implements DfFloatType {
   static @NotNull DfType fromRelation(@NotNull RelationType relationType, float min, float max) {
     assert !Float.isNaN(min);
     assert !Float.isNaN(max);
-    switch (relationType) {
-      case LE:
-        return create(Float.NEGATIVE_INFINITY, max == 0.0f ? 0.0f : max, false, true);
-      case LT:
-        return max == Float.NEGATIVE_INFINITY ? DfTypes.FLOAT_NAN :
+    return switch (relationType) {
+      case LE -> create(Float.NEGATIVE_INFINITY, max == 0.0f ? 0.0f : max, false, true);
+      case LT -> max == Float.NEGATIVE_INFINITY ? DfTypes.FLOAT_NAN :
                create(Float.NEGATIVE_INFINITY, Math.nextDown(max), false, true);
-      case GE:
-        return create(min == 0.0f ? -0.0f : min, Float.POSITIVE_INFINITY, false, true);
-      case GT:
-        return min == Float.POSITIVE_INFINITY ? DfTypes.FLOAT_NAN :
+      case GE -> create(min == 0.0f ? -0.0f : min, Float.POSITIVE_INFINITY, false, true);
+      case GT -> min == Float.POSITIVE_INFINITY ? DfTypes.FLOAT_NAN :
                create(Math.nextUp(min), Float.POSITIVE_INFINITY, false, true);
-      case EQ:
+      case EQ -> {
         if (min == 0.0f) min = -0.0f;
         if (max == 0.0f) max = 0.0f;
-        return create(min, max, false, true);
-      case NE:
+        yield create(min, max, false, true);
+      }
+      case NE -> {
         if (min == max) {
           if (min == 0.0f) {
-            return create(-0.0f, 0.0f, true, true);
+            yield create(-0.0f, 0.0f, true, true);
           }
-          return create(min, min, true, true);
+          yield create(min, min, true, true);
         }
-        return DfTypes.FLOAT;
-      default:
-        return DfTypes.FLOAT;
-    }
+        yield DfTypes.FLOAT;
+      }
+      default -> DfTypes.FLOAT;
+    };
   }
 
   @Override

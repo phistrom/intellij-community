@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.refactoring.introduce.introduceParameter
 
@@ -10,9 +10,10 @@ import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.refactoring.ui.NameSuggestionsField
 import com.intellij.refactoring.ui.RefactoringDialog
 import com.intellij.ui.NonFocusableCheckBox
-import org.jetbrains.kotlin.idea.KotlinBundle
+import org.jetbrains.annotations.Nls
+import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.KotlinFileType
-import org.jetbrains.kotlin.idea.core.util.isMultiLine
+import org.jetbrains.kotlin.idea.base.psi.isMultiLine
 import org.jetbrains.kotlin.idea.refactoring.introduce.extractFunction.ui.ExtractFunctionParameterTablePanel
 import org.jetbrains.kotlin.idea.refactoring.introduce.extractFunction.ui.KotlinExtractFunctionDialog
 import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.*
@@ -34,13 +35,13 @@ import javax.swing.JLabel
 import javax.swing.JPanel
 
 class KotlinIntroduceParameterDialog private constructor(
-    project: Project,
-    val editor: Editor,
-    val descriptor: IntroduceParameterDescriptor,
-    val lambdaExtractionDescriptor: ExtractableCodeDescriptor?,
-    nameSuggestions: Array<String>,
-    typeSuggestions: List<KotlinType>,
-    val helper: KotlinIntroduceParameterHelper
+  project: Project,
+  val editor: Editor,
+  val descriptor: IntroduceParameterDescriptor,
+  private val lambdaExtractionDescriptor: ExtractableCodeDescriptor?,
+  nameSuggestions: Array<String>,
+  typeSuggestions: List<KotlinType>,
+  val helper: KotlinIntroduceParameterHelper
 ) : RefactoringDialog(project, true) {
     constructor(
         project: Project,
@@ -76,6 +77,7 @@ class KotlinIntroduceParameterDialog private constructor(
     private var defaultValueCheckBox: JCheckBox? = null
     private val removeParamsCheckBoxes = LinkedHashMap<JCheckBox, KtElement>(descriptor.parametersToRemove.size)
     private var parameterTablePanel: ExtractFunctionParameterTablePanel? = null
+    @Nls
     private val commandName = if (lambdaExtractionDescriptor != null) INTRODUCE_LAMBDA_PARAMETER else INTRODUCE_PARAMETER
 
     init {
@@ -96,7 +98,7 @@ class KotlinIntroduceParameterDialog private constructor(
         }
     }
 
-    override fun createNorthPanel(): JComponent? {
+    override fun createNorthPanel(): JComponent {
         val gbConstraints = GridBagConstraints()
 
         val panel = JPanel(GridBagLayout())

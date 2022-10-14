@@ -23,9 +23,6 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 
-/**
-* @author peter
-*/
 class RecursionWeigher extends LookupElementWeigher {
   private final ElementFilter myFilter;
   private final PsiElement myPosition;
@@ -112,7 +109,7 @@ class RecursionWeigher extends LookupElementWeigher {
       return Result.recursive;
     }
 
-    if (isPassingObjectToItself(object) && myCompletionType == CompletionType.SMART) {
+    if (isPassingObjectToItself(((PsiElement)object)) && myCompletionType == CompletionType.SMART) {
       return Result.passingObjectToItself;
     }
 
@@ -186,12 +183,12 @@ class RecursionWeigher extends LookupElementWeigher {
     return false;
   }
 
-  private boolean isPassingObjectToItself(Object object) {
-    if (object instanceof PsiThisExpression) {
+  private boolean isPassingObjectToItself(PsiElement element) {
+    if (element instanceof PsiThisExpression) {
       return myCallQualifier != null && !myDelegate || myCallQualifier instanceof PsiSuperExpression;
     }
     return myCallQualifier instanceof PsiReferenceExpression &&
-           object.equals(((PsiReferenceExpression)myCallQualifier).advancedResolve(true).getElement());
+           ((PsiReferenceExpression)myCallQualifier).isReferenceTo(element);
   }
 
   @NotNull

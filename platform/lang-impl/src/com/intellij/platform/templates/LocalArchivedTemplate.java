@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.templates;
 
 import com.intellij.facet.ui.ValidationResult;
@@ -71,7 +71,7 @@ public final class LocalArchivedTemplate extends ArchivedProjectTemplate {
         Element templateElement = JDOMUtil.load(meta);
         String unencoded = templateElement.getAttributeValue(UNENCODED_ATTRIBUTE);
         if (unencoded != null) {
-          myEscaped = !Boolean.valueOf(unencoded);
+          myEscaped = !Boolean.parseBoolean(unencoded);
         }
 
         myModuleDescriptions = RootDescription.readRoots(templateElement);
@@ -190,6 +190,7 @@ public final class LocalArchivedTemplate extends ArchivedProjectTemplate {
 
     for (RootDescription description : myModuleDescriptions) {
       File root = new File(dir, ROOT_FILE_NAME + description.myIndex);
+      if (root.listFiles() == null) continue;
       File target = new File(dir.getAbsolutePath() + "/" + description.myRelativePath);
       //noinspection ResultOfMethodCallIgnored
       target.mkdirs();

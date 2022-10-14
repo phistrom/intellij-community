@@ -1,6 +1,7 @@
 // Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.plugins.gradle.execution.test.runner.events;
 
+import com.intellij.openapi.util.text.Strings;
 import org.jetbrains.annotations.NotNull;
 import org.w3c.dom.Document;
 import org.xml.sax.InputSource;
@@ -25,7 +26,6 @@ public class TestEventXmlXPathView implements TestEventXmlView {
    * validate, and is namespace aware.
    *
    * @param xml            the XML content to be parsed (must be well formed)
-   * @throws XmlParserException
    */
   public TestEventXmlXPathView(String xml) throws XmlParserException {
     xpath = XPathFactory.newInstance().newXPath();
@@ -51,6 +51,13 @@ public class TestEventXmlXPathView implements TestEventXmlView {
   @Override
   public String getTestName() throws XmlParserException {
     return queryXml("/ijLog/event/test/descriptor/@name");
+  }
+
+  @NotNull
+  @Override
+  public String getTestDisplayName() throws XmlParserException {
+    String displayName = queryXml("/ijLog/event/test/descriptor/@displayName");
+    return Strings.isEmpty(displayName)? getTestName(): displayName;
   }
 
   @NotNull

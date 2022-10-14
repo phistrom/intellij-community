@@ -64,13 +64,15 @@ sealed class GithubApiRequestExecutor {
 
     @Throws(IOException::class, ProcessCanceledException::class)
     override fun <T> execute(indicator: ProgressIndicator, request: GithubApiRequest<T>): T {
-      if (service<GHRequestExecutorBreaker>().isRequestsShouldFail) error(
-        "Request failure was triggered by user action. This a pretty long description of this failure that should resemble some long error which can go out of bounds.")
+      check(!service<GHRequestExecutorBreaker>().isRequestsShouldFail) {
+        "Request failure was triggered by user action. This a pretty long description of this failure that should resemble some long error which can go out of bounds."
+      }
+
       indicator.checkCanceled()
       return createRequestBuilder(request)
         .tuner { connection ->
           request.additionalHeaders.forEach(connection::addRequestProperty)
-          connection.addRequestProperty(HttpSecurityUtil.AUTHORIZATION_HEADER_NAME, "${request.tokenHeaderType} $token")
+          connection.addRequestProperty(HttpSecurityUtil.AUTHORIZATION_HEADER_NAME, "Bearer $token")
         }
         .useProxy(useProxy)
         .execute(request, indicator)
@@ -104,6 +106,7 @@ sealed class GithubApiRequestExecutor {
             LOG.debug("Request: ${connection.requestMethod} ${connection.url} : Connected")
           }
           checkResponseCode(connection)
+          checkServerVersion(connection)
           indicator.checkCanceled()
           val result = request.extractResult(createResponse(it, indicator))
           LOG.debug("Request: ${connection.requestMethod} ${connection.url} : Result extracted")
@@ -127,13 +130,14 @@ sealed class GithubApiRequestExecutor {
     protected fun createRequestBuilder(request: GithubApiRequest<*>): RequestBuilder {
       return when (request) {
         is GithubApiRequest.Get -> HttpRequests.request(request.url)
+        is GithubApiRequest.Patch -> HttpRequests.patch(request.url, request.bodyMimeType)
         is GithubApiRequest.Post -> HttpRequests.post(request.url, request.bodyMimeType)
         is GithubApiRequest.Put -> HttpRequests.put(request.url, request.bodyMimeType)
-        is GithubApiRequest.Patch -> HttpRequests.patch(request.url, request.bodyMimeType)
         is GithubApiRequest.Head -> HttpRequests.head(request.url)
         is GithubApiRequest.Delete -> {
           if (request.body == null) HttpRequests.delete(request.url) else HttpRequests.delete(request.url, request.bodyMimeType)
         }
+
         else -> throw UnsupportedOperationException("${request.javaClass} is not supported")
       }
         .connectTimeout(githubSettings.connectionTimeout)
@@ -162,6 +166,7 @@ sealed class GithubApiRequestExecutor {
           }
           else GithubAuthenticationException("Request response: " + (jsonError?.presentableError ?: errorText ?: statusLine))
         }
+
         else -> {
           if (jsonError != null) {
             GithubStatusCodeException("$statusLine - ${jsonError.presentableError}", jsonError, connection.responseCode)
@@ -171,6 +176,12 @@ sealed class GithubApiRequestExecutor {
           }
         }
       }
+    }
+
+    private fun checkServerVersion(connection: HttpURLConnection) {
+      // let's assume it's not ghe if header is missing
+      val versionHeader = connection.getHeaderField(GHEServerVersionChecker.ENTERPRISE_VERSION_HEADER) ?: return
+      GHEServerVersionChecker.checkVersionSupported(versionHeader)
     }
 
     private fun getErrorText(connection: HttpURLConnection): String? {
@@ -230,9 +241,5 @@ sealed class GithubApiRequestExecutor {
 
   interface AuthDataChangeListener : EventListener {
     fun authDataChanged()
-  }
-
-  enum class TokenHeaderType {
-    TOKEN, BEARER
   }
 }

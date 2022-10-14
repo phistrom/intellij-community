@@ -25,10 +25,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 
-/**
- * @author peter
- */
-abstract class WeighingActionGroup extends ActionGroup implements UpdateInBackground {
+abstract class WeighingActionGroup extends ActionGroup {
 
   @Override
   public void update(@NotNull AnActionEvent e) {
@@ -36,8 +33,8 @@ abstract class WeighingActionGroup extends ActionGroup implements UpdateInBackgr
   }
 
   @Override
-  public boolean isUpdateInBackground() {
-    return UpdateInBackground.isUpdateInBackground(getDelegate());
+  public @NotNull ActionUpdateThread getActionUpdateThread() {
+    return getDelegate().getActionUpdateThread();
   }
 
   protected abstract ActionGroup getDelegate();

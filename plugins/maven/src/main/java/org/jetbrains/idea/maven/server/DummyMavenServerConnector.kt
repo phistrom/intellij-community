@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.idea.maven.server
 
 import com.intellij.build.events.MessageEvent
@@ -8,7 +8,6 @@ import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.projectRoots.Sdk
-import org.apache.lucene.search.Query
 import org.jetbrains.annotations.NotNull
 import org.jetbrains.idea.maven.execution.SyncBundle
 import org.jetbrains.idea.maven.model.*
@@ -36,31 +35,28 @@ class DummyMavenServerConnector(project: @NotNull Project,
   }
 
   override fun getServer(): MavenServer {
-    return DummyMavenServer(myProject);
+    return DummyMavenServer(myProject)
   }
 
-  override fun addDownloadListener(listener: MavenServerDownloadListener?) {
-  }
-
-  override fun removeDownloadListener(listener: MavenServerDownloadListener?) {
+  override fun stop(wait: Boolean) {
   }
 
   override fun getSupportType() = MavenConfigurableBundle.message("connector.ui.dummy")
 
   override fun getState() = State.RUNNING
 
-  override fun checkConnected() = true;
+  override fun checkConnected() = true
 }
 
 class DummyMavenServer(val project: Project) : MavenServer {
-  override fun set(logger: MavenServerLogger?, downloadListener: MavenServerDownloadListener?, token: MavenToken?) {}
+
 
   override fun createEmbedder(settings: MavenEmbedderSettings?, token: MavenToken?): MavenServerEmbedder {
     return DummyEmbedder(project)
   }
 
   override fun createIndexer(token: MavenToken?): MavenServerIndexer {
-    return DummyIndexer();
+    return DummyIndexer()
   }
 
   override fun interpolateAndAlignModel(model: MavenModel, basedir: File?, token: MavenToken?): MavenModel {
@@ -79,6 +75,13 @@ class DummyMavenServer(val project: Project) : MavenServer {
     return ProfileApplicationResult(model, MavenExplicitProfiles.NONE)
   }
 
+  override fun createPullLogger(token: MavenToken?): MavenPullServerLogger? {
+    return null
+  }
+
+  override fun createPullDownloadListener(token: MavenToken?): MavenPullDownloadListener? {
+    return null
+  }
 }
 
 class TrustProjectQuickFix : BuildIssueQuickFix {
@@ -88,9 +91,9 @@ class TrustProjectQuickFix : BuildIssueQuickFix {
     val future = CompletableFuture<Void>()
     ApplicationManager.getApplication().invokeLater {
       try {
-        val result = MavenUtil.isProjectTrustedEnoughToImport(project, true)
+        val result = MavenUtil.isProjectTrustedEnoughToImport(project)
         if (result) {
-          MavenProjectsManager.getInstance(project).forceUpdateAllProjectsOrFindAllAvailablePomFiles();
+          MavenProjectsManager.getInstance(project).forceUpdateAllProjectsOrFindAllAvailablePomFiles()
         }
         future.complete(null)
       }
@@ -109,32 +112,28 @@ class TrustProjectQuickFix : BuildIssueQuickFix {
 }
 
 class DummyIndexer : MavenServerIndexer {
-  override fun createIndex(indexId: String, repositoryId: String, file: File?, url: String?, indexDir: File, token: MavenToken?): Int {
-    return 0
-  }
 
-  override fun releaseIndex(id: Int, token: MavenToken?) {
+  override fun releaseIndex(id: MavenIndexId, token: MavenToken?) {
   }
 
   override fun getIndexCount(token: MavenToken?): Int {
-    return 0;
+    return 0
   }
 
-  override fun updateIndex(id: Int, settings: MavenServerSettings?, indicator: MavenServerProgressIndicator?, token: MavenToken?) {
+  override fun updateIndex(id: MavenIndexId, indicator: MavenServerProgressIndicator?, token: MavenToken?) {
   }
 
-  override fun processArtifacts(indexId: Int, processor: MavenServerIndicesProcessor?, token: MavenToken?) {
-  }
+  override fun processArtifacts(indexId: MavenIndexId, startFrom: Int, token: MavenToken?): List<IndexedMavenId>? = null
 
-  override fun addArtifact(indexId: Int, artifactFile: File?, token: MavenToken?): IndexedMavenId {
+  override fun addArtifact(indexId: MavenIndexId, artifactFile: File?, token: MavenToken?): IndexedMavenId {
     return IndexedMavenId(null, null, null, null, null)
   }
 
-  override fun search(indexId: Int, query: Query?, maxResult: Int, token: MavenToken?): Set<MavenArtifactInfo> {
+  override fun search(indexId: MavenIndexId, query: String, maxResult: Int, token: MavenToken?): Set<MavenArtifactInfo> {
     return emptySet()
   }
 
-  override fun getArchetypes(token: MavenToken?): Collection<MavenArchetype> {
+  override fun getInternalArchetypes(token: MavenToken?): Collection<MavenArchetype> {
     return emptySet()
   }
 
@@ -144,17 +143,27 @@ class DummyIndexer : MavenServerIndexer {
   override fun indexExists(dir: File?, token: MavenToken?): Boolean {
     return false
   }
-
 }
 
 class DummyEmbedder(val myProject: Project) : MavenServerEmbedder {
-  override fun customize(workspaceMap: MavenWorkspaceMap?,
-                         failOnUnresolvedDependency: Boolean,
-                         console: MavenServerConsole,
-                         indicator: MavenServerProgressIndicator,
-                         alwaysUpdateSnapshots: Boolean,
-                         userProperties: Properties?,
-                         token: MavenToken?) {
+  override fun customizeAndGetProgressIndicator(workspaceMap: MavenWorkspaceMap?,
+                                                failOnUnresolvedDependency: Boolean,
+                                                alwaysUpdateSnapshots: Boolean,
+                                                userProperties: Properties?,
+                                                token: MavenToken?): MavenServerPullProgressIndicator {
+    return object : MavenServerPullProgressIndicator {
+      override fun pullDownloadEvents(): MutableList<MavenArtifactDownloadServerProgressEvent>? {
+        return null
+      }
+
+      override fun pullConsoleEvents(): MutableList<MavenServerConsoleEvent>? {
+        return null
+      }
+
+      override fun cancel() {
+      }
+
+    }
   }
 
   override fun customizeComponents(token: MavenToken?) {
@@ -164,7 +173,7 @@ class DummyEmbedder(val myProject: Project) : MavenServerEmbedder {
                                          artifactId: String,
                                          remoteRepositories: List<MavenRemoteRepository>,
                                          token: MavenToken?): List<String> {
-    return emptyList();
+    return emptyList()
   }
 
   override fun resolveProject(files: Collection<File>,
@@ -175,7 +184,7 @@ class DummyEmbedder(val myProject: Project) : MavenServerEmbedder {
       object : BuildIssue {
         override val title = SyncBundle.message("maven.sync.not.trusted.title")
         override val description = SyncBundle.message("maven.sync.not.trusted.description") +
-         "\n<a href=\"${TrustProjectQuickFix.ID}\">${SyncBundle.message("maven.sync.trust.project")}</a>"
+                                   "\n<a href=\"${TrustProjectQuickFix.ID}\">${SyncBundle.message("maven.sync.trust.project")}</a>"
         override val quickFixes: List<BuildIssueQuickFix> = listOf(TrustProjectQuickFix())
 
         override fun getNavigatable(project: Project) = null
@@ -183,7 +192,7 @@ class DummyEmbedder(val myProject: Project) : MavenServerEmbedder {
       },
       MessageEvent.Kind.WARNING
     )
-    return emptyList();
+    return emptyList()
   }
 
   override fun evaluateEffectivePom(file: File,
@@ -195,13 +204,19 @@ class DummyEmbedder(val myProject: Project) : MavenServerEmbedder {
 
   override fun resolve(info: MavenArtifactInfo, remoteRepositories: List<MavenRemoteRepository>, token: MavenToken?): MavenArtifact {
     return MavenArtifact(info.groupId, info.artifactId, info.version, info.version, null, info.classifier, null, false, info.packaging,
-                         null, null, false, true);
+                         null, null, false, true)
   }
 
   override fun resolveTransitively(artifacts: List<MavenArtifactInfo>,
                                    remoteRepositories: List<MavenRemoteRepository>,
                                    token: MavenToken?): List<MavenArtifact> {
     return emptyList()
+  }
+
+  override fun resolveArtifactTransitively(artifacts: MutableList<MavenArtifactInfo>,
+                                           remoteRepositories: MutableList<MavenRemoteRepository>,
+                                           token: MavenToken?): MavenArtifactResolveResult {
+    return MavenArtifactResolveResult(emptyList(), null)
   }
 
   override fun resolvePlugin(plugin: MavenPlugin,
@@ -220,7 +235,7 @@ class DummyEmbedder(val myProject: Project) : MavenServerEmbedder {
                        alsoMake: Boolean,
                        alsoMakeDependents: Boolean,
                        token: MavenToken?): MavenServerExecutionResult {
-    return MavenServerExecutionResult(null, emptySet(), emptySet());
+    return MavenServerExecutionResult(null, emptySet(), emptySet())
   }
 
   override fun reset(token: MavenToken?) {
@@ -239,4 +254,26 @@ class DummyEmbedder(val myProject: Project) : MavenServerEmbedder {
     return null
   }
 
+  override fun resolveRepositories(repositories: MutableCollection<MavenRemoteRepository>,
+                                   token: MavenToken?): MutableSet<MavenRemoteRepository> {
+    return mutableSetOf()
+  }
+
+  override fun getArchetypes(token: MavenToken?): MutableCollection<MavenArchetype> {
+    return mutableSetOf()
+  }
+
+  override fun getLocalArchetypes(token: MavenToken?, path: String): MutableCollection<MavenArchetype> {
+    return mutableSetOf()
+  }
+
+  override fun getRemoteArchetypes(token: MavenToken?, url: String): MutableCollection<MavenArchetype> {
+    return mutableSetOf()
+  }
+
+  override fun resolveAndGetArchetypeDescriptor(groupId: String, artifactId: String, version: String,
+                                                repositories: MutableList<MavenRemoteRepository>, url: String?,
+                                                token: MavenToken?): MutableMap<String, String> {
+    return mutableMapOf()
+  }
 }

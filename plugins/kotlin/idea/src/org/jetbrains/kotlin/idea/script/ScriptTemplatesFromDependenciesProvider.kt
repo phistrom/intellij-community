@@ -1,17 +1,22 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.script
 
-import com.intellij.ProjectTopics
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
+import com.intellij.openapi.progress.impl.BackgroundableProcessIndicator
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.*
+import com.intellij.openapi.util.ThrowableComputable
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.search.FileTypeIndex
-import com.intellij.psi.search.GlobalSearchScope
-import com.intellij.util.concurrency.AppExecutorUtil
+import com.intellij.util.indexing.DumbModeAccessType
+import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
+import org.jetbrains.kotlin.idea.base.util.allScope
 import org.jetbrains.kotlin.idea.core.KotlinPluginDisposable
 import org.jetbrains.kotlin.idea.core.script.ScriptDefinitionSourceAsContributor
 import org.jetbrains.kotlin.idea.core.script.ScriptDefinitionsManager
@@ -21,12 +26,12 @@ import org.jetbrains.kotlin.scripting.definitions.ScriptDefinition
 import org.jetbrains.kotlin.scripting.definitions.getEnvironment
 import java.io.File
 import java.nio.file.Path
+import java.util.concurrent.Callable
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import kotlin.script.experimental.host.ScriptingHostConfiguration
 import kotlin.script.experimental.jvm.defaultJvmScriptingHostConfiguration
-
 
 class ScriptTemplatesFromDependenciesProvider(private val project: Project) : ScriptDefinitionSourceAsContributor {
     private val logger = Logger.getInstance(ScriptTemplatesFromDependenciesProvider::class.java)
@@ -47,18 +52,14 @@ class ScriptTemplatesFromDependenciesProvider(private val project: Project) : Sc
         }
 
     init {
-        val connection = project.messageBus.connect()
-        connection.subscribe(
-            ProjectTopics.PROJECT_ROOTS,
-            object : ModuleRootListener {
-                override fun rootsChanged(event: ModuleRootEvent) {
-                    if (project.isInitialized) {
-                        forceStartUpdate = true
-                        asyncRunUpdateScriptTemplates()
-                    }
-                }
-            },
-        )
+        val disposable = KotlinPluginDisposable.getInstance(project)
+        val connection = project.messageBus.connect(disposable)
+        connection.subscribe(FileTypeIndex.INDEX_CHANGE_TOPIC, FileTypeIndex.IndexChangeListener { fileType ->
+            if (fileType == ScriptDefinitionMarkerFileType && project.isInitialized) {
+                forceStartUpdate = true
+                asyncRunUpdateScriptTemplates()
+            }
+        })
     }
 
     private fun asyncRunUpdateScriptTemplates() {
@@ -96,26 +97,26 @@ class ScriptTemplatesFromDependenciesProvider(private val project: Project) : Sc
             logger.debug("async script definitions update started")
         }
 
-        ReadAction
-            .nonBlocking<TemplatesWithCp?> {
-                val files = FileTypeIndex.getFiles(ScriptDefinitionMarkerFileType, GlobalSearchScope.allScope(project))
-
-                val (templates, classpath) = getTemplateClassPath(files)
-
-                if (!inProgress.get() || templates.isEmpty()) return@nonBlocking null
-
-                val newTemplates = TemplatesWithCp(templates.toList(), classpath.toList())
-                if (newTemplates == oldTemplates) {
-                    return@nonBlocking null
-                }
-                newTemplates
-            }
-            .inSmartMode(project)
-            .expireWith(KotlinPluginDisposable.getInstance(project))
-            .submit(AppExecutorUtil.getAppExecutorService())
-            .onSuccess { newTemplates ->
+        val task = object : Task.Backgroundable(
+            project, KotlinBundle.message("kotlin.script.lookup.definitions"), false
+        ) {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = true
+                val pluginDisposable = KotlinPluginDisposable.getInstance(project)
+                val (templates, classpath) =
+                    ReadAction.nonBlocking(Callable {
+                        val files = FileTypeIndex.getFiles(ScriptDefinitionMarkerFileType, project.allScope())
+                        getTemplateClassPath(files, indicator)
+                    })
+                        .expireWith(pluginDisposable)
+                        .wrapProgress(indicator)
+                        .executeSynchronously() ?: return onEarlyEnd()
                 try {
-                    if (!inProgress.get() || newTemplates == null) return@onSuccess onEarlyEnd()
+                    indicator.checkCanceled()
+                    if (pluginDisposable.disposed || !inProgress.get() || templates.isEmpty()) return onEarlyEnd()
+
+                    val newTemplates = TemplatesWithCp(templates.toList(), classpath.toList())
+                    if (!inProgress.get() || newTemplates == oldTemplates) return onEarlyEnd()
 
                     if (logger.isDebugEnabled) {
                         logger.debug("script templates found: $newTemplates")
@@ -136,7 +137,7 @@ class ScriptTemplatesFromDependenciesProvider(private val project: Project) : Sc
                         templateClasspath = newTemplates.classpath,
                         baseHostConfiguration = hostConfiguration,
                     )
-
+                    indicator.checkCanceled()
                     if (logger.isDebugEnabled) {
                         logger.debug("script definitions found: ${newDefinitions.joinToString()}")
                     }
@@ -155,7 +156,14 @@ class ScriptTemplatesFromDependenciesProvider(private val project: Project) : Sc
                 } finally {
                     inProgress.set(false)
                 }
+
             }
+        }
+
+        ProgressManager.getInstance().runProcessWithProgressAsynchronously(
+            task,
+            BackgroundableProcessIndicator(task)
+        )
     }
 
     private fun onEarlyEnd() {
@@ -166,9 +174,10 @@ class ScriptTemplatesFromDependenciesProvider(private val project: Project) : Sc
     }
 
     // public for tests
-    fun getTemplateClassPath(files: Collection<VirtualFile>): Pair<Collection<String>, Collection<Path>> {
+    fun getTemplateClassPath(files: Collection<VirtualFile>, indicator: ProgressIndicator): Pair<Collection<String>, Collection<Path>> {
         val rootDirToTemplates: MutableMap<VirtualFile, MutableList<VirtualFile>> = hashMapOf()
         for (file in files) {
+            // parent of SCRIPT_DEFINITION_MARKERS_PATH, i.e. of `META-INF/kotlin/script/templates/`
             val dir = file.parent?.parent?.parent?.parent?.parent ?: continue
             rootDirToTemplates.getOrPut(dir) { arrayListOf() }.add(file)
         }
@@ -183,6 +192,7 @@ class ScriptTemplatesFromDependenciesProvider(private val project: Project) : Sc
 
             val orderEntriesForFile = ProjectFileIndex.getInstance(project).getOrderEntriesForFile(root)
                 .filter {
+                    indicator.checkCanceled()
                     if (it is ModuleSourceOrderEntry) {
                         if (ModuleRootManager.getInstance(it.ownerModule).fileIndex.isInTestSourceContent(root)) {
                             return@filter false
@@ -190,7 +200,7 @@ class ScriptTemplatesFromDependenciesProvider(private val project: Project) : Sc
 
                         it.getFiles(OrderRootType.SOURCES).contains(root)
                     } else {
-                        it is LibraryOrSdkOrderEntry && it.getFiles(OrderRootType.CLASSES).contains(root)
+                        it is LibraryOrSdkOrderEntry && it.getRootFiles(OrderRootType.CLASSES).contains(root)
                     }
                 }
                 .takeIf { it.isNotEmpty() } ?: return@forEach
@@ -206,6 +216,7 @@ class ScriptTemplatesFromDependenciesProvider(private val project: Project) : Sc
             // the other has properly configured classpath, so assuming that the dependencies are set correctly everywhere
             for (orderEntry in orderEntriesForFile) {
                 for (virtualFile in OrderEnumerator.orderEntries(orderEntry.ownerModule).withoutSdk().classesRoots) {
+                    indicator.checkCanceled()
                     val localVirtualFile = VfsUtil.getLocalFile(virtualFile)
                     localVirtualFile.fileSystem.getNioPath(localVirtualFile)?.let(classpath::add)
                 }

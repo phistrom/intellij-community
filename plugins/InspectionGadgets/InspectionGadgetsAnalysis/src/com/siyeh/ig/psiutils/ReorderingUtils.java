@@ -7,6 +7,7 @@ import com.intellij.codeInspection.dataFlow.ContractReturnValue.BooleanReturnVal
 import com.intellij.codeInspection.dataFlow.java.JavaDfaValueFactory;
 import com.intellij.codeInspection.dataFlow.value.*;
 import com.intellij.psi.*;
+import com.intellij.psi.templateLanguages.OuterLanguageElement;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiLiteralUtil;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -35,6 +36,14 @@ public final class ReorderingUtils {
   public static ThreeState canExtract(@NotNull PsiExpression ancestor, @NotNull PsiExpression expression) {
     if (expression == ancestor) return ThreeState.YES;
     if (PsiUtil.isConstantExpression(expression)) return ThreeState.YES;
+    for (PsiVariable variable : VariableAccessUtils.collectUsedVariables(expression)) {
+      if (variable instanceof PsiPatternVariable &&
+          PsiTreeUtil.isAncestor(ancestor, variable, true) &&
+          !PsiTreeUtil.isAncestor(expression, variable, true)) {
+        // Pattern variable is used which is declared inside ancestor; cannot reorder
+        return ThreeState.NO;
+      }
+    }
     PsiElement parent = expression.getParent();
     if (parent instanceof PsiExpressionList) {
       PsiExpression gParent = ObjectUtils.tryCast(parent.getParent(), PsiCallExpression.class);
@@ -416,6 +425,7 @@ public final class ReorderingUtils {
 
   private static boolean isErroneous(PsiElement element) {
     return element instanceof PsiErrorElement ||
+           element instanceof OuterLanguageElement ||
            element instanceof PsiLiteralExpression &&
            PsiLiteralUtil.isUnsafeLiteral((PsiLiteralExpression)element);
   }

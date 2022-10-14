@@ -4,10 +4,10 @@ package com.intellij.diff.util;
 import com.intellij.diff.DiffEditorTitleCustomizer;
 import com.intellij.diff.DiffTool;
 import com.intellij.diff.comparison.ComparisonPolicy;
-import com.intellij.diff.editor.DiffEditorTabFilesManager;
 import com.intellij.diff.fragments.LineFragment;
 import com.intellij.diff.merge.MergeResult;
 import com.intellij.diff.merge.MergeTool;
+import com.intellij.openapi.actionSystem.ActionToolbar;
 import com.intellij.openapi.diff.DiffNavigationContext;
 import com.intellij.openapi.editor.LogicalPosition;
 import com.intellij.openapi.progress.ProgressIndicator;
@@ -17,7 +17,6 @@ import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.NlsActions;
 import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -55,6 +54,7 @@ public interface DiffUserDataKeysEx extends DiffUserDataKeys {
   Key<LogicalPosition[]> EDITORS_CARET_POSITION = Key.create("Diff.EditorsCaretPosition");
 
   Key<List<DiffEditorTitleCustomizer>> EDITORS_TITLE_CUSTOMIZER = Key.create("Diff.EditorsTitleCustomizer");
+  Key<Boolean> EDITORS_HIDE_TITLE = Key.create("Diff.EditorsHideTitle");
 
   Key<DiffNavigationContext> NAVIGATION_CONTEXT = Key.create("Diff.NavigationContext");
 
@@ -74,6 +74,8 @@ public interface DiffUserDataKeysEx extends DiffUserDataKeys {
   //
   // DiffContext
   //
+
+  Key<ActionToolbar> LEFT_TOOLBAR = Key.create("Diff.LeftToolbar");
 
   /**
    * Add panel to the bottom of diff window.
@@ -96,26 +98,18 @@ public interface DiffUserDataKeysEx extends DiffUserDataKeys {
   Key<Float> TWO_SIDE_SPLITTER_PROPORTION = Key.create("Diff.TwoSideSplitterProportion");
 
   /**
-   * Marker flag for viewers embedded into FileEditor tab.
-   * Ex: such viewers might encounter conflicting shortcuts.
-   *
-   * @deprecated use {@link DiffEditorTabFilesManager#isEditorDiffAvailable} instead
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
-  Key<Boolean> DIFF_IN_EDITOR = Key.create("Diff.DiffInEditor");
-
-  /**
    * Marker flag for viewers embedded into FileEditor tab, that should not be disposed on tab close.
    */
   Key<Boolean> DIFF_IN_EDITOR_WITH_EXPLICIT_DISPOSABLE = Key.create("Diff.DiffInEditor.ExplicitDisposable");
+
+  Key<Boolean> DIFF_NEW_TOOLBAR = Key.create("Diff.NewToolbar");
 
   //
   // MergeContext / MergeRequest
   //
 
   /**
-   * @return false if merge window should be prevented from closing and canceling resolve.
+   * False if merge window should be prevented from closing and canceling resolve.
    */
   Key<Condition<MergeTool.MergeViewer>> MERGE_CANCEL_HANDLER = Key.create("Diff.MergeCancelHandler");
   /**

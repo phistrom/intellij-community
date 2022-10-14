@@ -2,21 +2,23 @@
 package com.intellij.workspaceModel.storage
 
 import com.intellij.testFramework.UsefulTestCase.assertOneElement
-import com.intellij.workspaceModel.storage.entities.*
+import com.intellij.workspaceModel.storage.entities.test.api.*
+import com.intellij.workspaceModel.storage.impl.assertConsistency
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
-import org.junit.Ignore
 import org.junit.Test
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 
 class AbstractEntitiesTest {
   @Test
   fun `simple adding`() {
-    val builder = WorkspaceEntityStorageBuilder.create()
+    val builder = MutableEntityStorage.create()
 
     val middleEntity = builder.addMiddleEntity()
     builder.addLeftEntity(sequenceOf(middleEntity))
 
-    val storage = builder.toStorage()
+    val storage = builder.toSnapshot()
 
     val leftEntity = assertOneElement(storage.entities(LeftEntity::class.java).toList())
     assertOneElement(leftEntity.children.toList())
@@ -24,17 +26,20 @@ class AbstractEntitiesTest {
 
   @Test
   fun `modifying left entity`() {
-    val builder = WorkspaceEntityStorageBuilder.create()
+    val builder = MutableEntityStorage.create()
 
     val middleEntity = builder.addMiddleEntity("first")
     val leftEntity = builder.addLeftEntity(sequenceOf(middleEntity))
 
     val anotherMiddleEntity = builder.addMiddleEntity("second")
-    builder.modifyEntity(ModifiableLeftEntity::class.java, leftEntity) {
-      this.children = sequenceOf(anotherMiddleEntity)
+    builder.modifyEntity(leftEntity) {
+      
+    }
+    builder.modifyEntity(leftEntity) {
+      this.children = listOf(anotherMiddleEntity)
     }
 
-    val storage = builder.toStorage()
+    val storage = builder.toSnapshot()
 
     val actualLeftEntity = assertOneElement(storage.entities(LeftEntity::class.java).toList())
     val actualChild = assertOneElement(actualLeftEntity.children.toList())
@@ -44,17 +49,17 @@ class AbstractEntitiesTest {
 
   @Test
   fun `modifying abstract entity`() {
-    val builder = WorkspaceEntityStorageBuilder.create()
+    val builder = MutableEntityStorage.create()
 
     val middleEntity = builder.addMiddleEntity()
-    val leftEntity: CompositeBaseEntity = builder.addLeftEntity(sequenceOf(middleEntity))
+    val leftEntity = builder.addLeftEntity(sequenceOf(middleEntity))
 
     val anotherMiddleEntity = builder.addMiddleEntity()
-    builder.modifyEntity(ModifiableCompositeBaseEntity::class.java, leftEntity) {
-      this.children = sequenceOf(anotherMiddleEntity)
+    builder.modifyEntity(leftEntity) {
+      this.children = listOf(anotherMiddleEntity)
     }
 
-    val storage = builder.toStorage()
+    val storage = builder.toSnapshot()
 
     val actualLeftEntity = assertOneElement(storage.entities(LeftEntity::class.java).toList())
     val actualChild = assertOneElement(actualLeftEntity.children.toList())
@@ -64,19 +69,19 @@ class AbstractEntitiesTest {
 
   @Test
   fun `children replace in addDiff`() {
-    val builder = WorkspaceEntityStorageBuilder.create()
+    val builder = MutableEntityStorage.create()
     val middleEntity = builder.addMiddleEntity()
-    val leftEntity: CompositeBaseEntity = builder.addLeftEntity(sequenceOf(middleEntity))
+    val leftEntity = builder.addLeftEntity(sequenceOf(middleEntity))
 
-    val anotherBuilder = WorkspaceEntityStorageBuilder.from(builder)
+    val anotherBuilder = MutableEntityStorage.from(builder)
     val anotherMiddleEntity = anotherBuilder.addMiddleEntity("Another")
-    anotherBuilder.modifyEntity(ModifiableLeftEntity::class.java, leftEntity) {
-      this.children = sequenceOf(middleEntity, anotherMiddleEntity)
+    anotherBuilder.modifyEntity(leftEntity.from(anotherBuilder)) {
+      this.children = listOf(middleEntity, anotherMiddleEntity)
     }
 
     val initialMiddleEntity = builder.addMiddleEntity("Initial")
-    builder.modifyEntity(ModifiableLeftEntity::class.java, leftEntity) {
-      this.children = sequenceOf(middleEntity, initialMiddleEntity)
+    builder.modifyEntity(leftEntity) {
+      this.children = listOf(middleEntity, initialMiddleEntity)
     }
 
     builder.addDiff(anotherBuilder)
@@ -90,12 +95,12 @@ class AbstractEntitiesTest {
 
   @Test
   fun `keep children ordering when making storage`() {
-    val builder = WorkspaceEntityStorageBuilder.create()
+    val builder = MutableEntityStorage.create()
     val middleEntity1 = builder.addMiddleEntity("One")
     val middleEntity2 = builder.addMiddleEntity("Two")
     builder.addLeftEntity(sequenceOf(middleEntity1, middleEntity2))
 
-    val storage = builder.toStorage()
+    val storage = builder.toSnapshot()
     val children = storage.entities(LeftEntity::class.java).single().children.toList()
     assertEquals(middleEntity1, children[0])
     assertEquals(middleEntity2, children[1])
@@ -103,7 +108,7 @@ class AbstractEntitiesTest {
 
   @Test
   fun `keep children ordering when making storage 2`() {
-    val builder = WorkspaceEntityStorageBuilder.create()
+    val builder = MutableEntityStorage.create()
     val middleEntity1 = builder.addMiddleEntity("Two")
     val middleEntity2 = builder.addMiddleEntity("One")
     builder.addLeftEntity(sequenceOf(middleEntity1, middleEntity2))
@@ -115,7 +120,7 @@ class AbstractEntitiesTest {
 
     builder.addDiff(anotherBuilder)
 
-    val storage = builder.toStorage()
+    val storage = builder.toSnapshot()
     val children = storage.entities(LeftEntity::class.java).last().children.toList()
     assertEquals(middleEntity2, children[0])
     assertEquals(middleEntity1, children[1])
@@ -123,33 +128,72 @@ class AbstractEntitiesTest {
 
   @Test
   fun `keep children ordering after rbs 1`() {
-    val builder = WorkspaceEntityStorageBuilder.create()
+    val builder = MutableEntityStorage.create()
     val middleEntity1 = builder.addMiddleEntity("One")
     val middleEntity2 = builder.addMiddleEntity("Two")
     builder.addLeftEntity(sequenceOf(middleEntity1, middleEntity2))
 
-    val target = WorkspaceEntityStorageBuilder.create()
+    val target = MutableEntityStorage.create()
 
     target.replaceBySource({ true }, builder)
 
-    val children = target.toStorage().entities(LeftEntity::class.java).last().children.toList()
+    val children = target.toSnapshot().entities(LeftEntity::class.java).last().children.toList()
     assertEquals(middleEntity1.property, (children[0] as MiddleEntity).property)
     assertEquals(middleEntity2.property, (children[1] as MiddleEntity).property)
   }
 
   @Test
   fun `keep children ordering after rbs 2`() {
-    val builder = WorkspaceEntityStorageBuilder.create()
+    val builder = MutableEntityStorage.create()
     val middleEntity1 = builder.addMiddleEntity("One")
     val middleEntity2 = builder.addMiddleEntity("Two")
     builder.addLeftEntity(sequenceOf(middleEntity2, middleEntity1))
 
-    val target = WorkspaceEntityStorageBuilder.create()
+    val target = MutableEntityStorage.create()
 
     target.replaceBySource({ true }, builder)
 
-    val children = target.toStorage().entities(LeftEntity::class.java).last().children.toList()
+    val children = target.toSnapshot().entities(LeftEntity::class.java).last().children.toList()
     assertEquals(middleEntity2.property, (children[0] as MiddleEntity).property)
     assertEquals(middleEntity1.property, (children[1] as MiddleEntity).property)
+  }
+
+
+  @Test
+  fun `modifying one to one child switch`() {
+    val builder = MutableEntityStorage.create()
+
+    val headAbstractionEntity = HeadAbstractionEntity("info", MySource)
+    builder.addEntity(headAbstractionEntity)
+
+    builder.addEntity(LeftEntity(AnotherSource) {
+      this.parent = headAbstractionEntity
+    })
+
+    builder.addEntity(LeftEntity(MySource) {
+      this.parent = headAbstractionEntity
+    })
+
+    builder.assertConsistency()
+    assertNull(builder.entities(LeftEntity::class.java).single { it.entitySource == AnotherSource }.parent)
+    assertNotNull(builder.entities(LeftEntity::class.java).single { it.entitySource == MySource }.parent)
+  }
+
+  @Test
+  fun `modifying one to one parent switch`() {
+    val builder = MutableEntityStorage.create()
+
+    val child = builder addEntity LeftEntity(AnotherSource)
+
+    builder addEntity HeadAbstractionEntity("Info", MySource) {
+      this.child = child
+    }
+    builder addEntity HeadAbstractionEntity("Info2", MySource) {
+      this.child = child
+    }
+
+    builder.assertConsistency()
+    assertNull(builder.entities(HeadAbstractionEntity::class.java).single { it.data == "Info" }.child)
+    assertNotNull(builder.entities(HeadAbstractionEntity::class.java).single { it.data == "Info2" }.child)
   }
 }

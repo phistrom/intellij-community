@@ -6,12 +6,13 @@ import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.codeInsight.lookup.LookupElementBuilder;
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.util.PlatformIcons;
+import com.intellij.ui.IconManager;
 import com.intellij.util.ProcessingContext;
 import com.jetbrains.python.PyTokenTypes;
 import com.jetbrains.python.psi.*;
@@ -30,7 +31,7 @@ import static com.intellij.patterns.PlatformPatterns.psiElement;
  * <p/>
  * Complete known keys for dictionaries
  */
-public class PyDictKeyNamesCompletionContributor extends CompletionContributor {
+public class PyDictKeyNamesCompletionContributor extends CompletionContributor implements DumbAware {
   public PyDictKeyNamesCompletionContributor() {
     extend(
       CompletionType.BASIC,
@@ -90,8 +91,6 @@ public class PyDictKeyNamesCompletionContributor extends CompletionContributor {
    *
    * @param original is original element
    * @param result   is initial completion result
-   * @param offset
-   * @return
    */
   private static CompletionResultSet createResult(@NotNull final PsiElement original,
                                                   @NotNull final CompletionResultSet result,
@@ -202,7 +201,7 @@ public class PyDictKeyNamesCompletionContributor extends CompletionContributor {
     item = LookupElementBuilder
       .create(key)
       .withTypeText("dict key")
-      .withIcon(PlatformIcons.PARAMETER_ICON);
+      .withIcon(IconManager.getInstance().getPlatformIcon(com.intellij.ui.PlatformIcons.Parameter));
 
     if (addHandler) {
       item = item.withInsertHandler(new InsertHandler<>() {

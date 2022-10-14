@@ -5,6 +5,7 @@ import com.google.common.util.concurrent.SettableFuture;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.util.NamedRunnable;
+import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.changes.ui.ChangesBrowserBase;
 import com.intellij.openapi.vcs.ui.VcsBalloonProblemNotifier;
 import com.intellij.ui.navigation.History;
@@ -14,6 +15,7 @@ import com.intellij.vcs.log.VcsLogBundle;
 import com.intellij.vcs.log.VcsLogFilterCollection;
 import com.intellij.vcs.log.VcsLogHighlighter;
 import com.intellij.vcs.log.data.VcsLogData;
+import com.intellij.vcs.log.graph.actions.ActionController;
 import com.intellij.vcs.log.impl.CommonUiProperties;
 import com.intellij.vcs.log.impl.MainVcsLogUiProperties;
 import com.intellij.vcs.log.impl.MainVcsLogUiProperties.VcsLogHighlighterProperty;
@@ -24,7 +26,6 @@ import com.intellij.vcs.log.ui.filter.VcsLogFilterUiEx;
 import com.intellij.vcs.log.ui.frame.MainFrame;
 import com.intellij.vcs.log.ui.highlighters.VcsLogHighlighterFactory;
 import com.intellij.vcs.log.ui.table.VcsLogGraphTable;
-import com.intellij.vcs.log.ui.table.column.Date;
 import com.intellij.vcs.log.ui.table.column.TableColumnWidthProperty;
 import com.intellij.vcs.log.util.VcsLogUiUtil;
 import com.intellij.vcs.log.util.VcsLogUtil;
@@ -208,6 +209,11 @@ public class VcsLogUiImpl extends AbstractVcsLogUi implements MainVcsLogUi {
     super.dispose();
   }
 
+  @Override
+  public void selectFilePath(@NotNull FilePath filePath, boolean requestFocus) {
+    getMainFrame().selectFilePath(filePath, requestFocus);
+  }
+
   private void updateHighlighters() {
     myHighlighters.forEach((s, highlighter) -> getTable().removeHighlighter(highlighter));
     myHighlighters.clear();
@@ -255,8 +261,13 @@ public class VcsLogUiImpl extends AbstractVcsLogUi implements MainVcsLogUi {
     }
 
     private void onShowLongEdgesChanged() {
-      myVisiblePack.getVisibleGraph().getActionController()
-        .setLongEdgesHidden(!myUiProperties.get(MainVcsLogUiProperties.SHOW_LONG_EDGES));
+      ActionController<Integer> actionController = myVisiblePack.getVisibleGraph().getActionController();
+      boolean oldLongEdgesHiddenValue = actionController.areLongEdgesHidden();
+      boolean newLongEdgesHiddenValue = !myUiProperties.get(MainVcsLogUiProperties.SHOW_LONG_EDGES);
+      if (newLongEdgesHiddenValue != oldLongEdgesHiddenValue) {
+        actionController.setLongEdgesHidden(newLongEdgesHiddenValue);
+        getTable().repaint();
+      }
     }
   }
 }

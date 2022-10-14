@@ -3,45 +3,50 @@ package com.intellij.openapi.externalSystem.service.ui.command.line
 
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.CustomShortcutSet
-import com.intellij.openapi.externalSystem.service.ui.completion.JTextCompletionContributor
-import com.intellij.openapi.externalSystem.service.ui.completion.TextCompletionPopup
+import com.intellij.openapi.externalSystem.service.ui.completion.TextCompletionField
+import com.intellij.openapi.externalSystem.service.ui.completion.TextCompletionInfo
+import com.intellij.openapi.externalSystem.service.ui.completion.TextCompletionInfoRenderer
 import com.intellij.openapi.keymap.KeymapUtil
-import com.intellij.openapi.observable.properties.GraphPropertyImpl.Companion.graphProperty
-import com.intellij.openapi.observable.properties.PropertyGraph
-import com.intellij.openapi.observable.properties.comap
+import com.intellij.openapi.observable.properties.AtomicProperty
+import com.intellij.openapi.observable.util.bind
+import com.intellij.openapi.observable.util.trim
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.setEmptyState
 import com.intellij.ui.components.fields.ExtendableTextComponent
-import com.intellij.ui.components.fields.ExtendableTextField
-import com.intellij.ui.layout.*
 import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import javax.swing.KeyStroke
 
 class CommandLineField(
   project: Project,
-  commandLineInfo: CommandLineInfo
-) : ExtendableTextField() {
+  private val commandLineInfo: CommandLineInfo
+) : TextCompletionField<TextCompletionInfo>(project) {
 
-  private val propertyGraph = PropertyGraph()
-  private val commandLineProperty = propertyGraph.graphProperty { "" }
+  private val commandLineProperty = AtomicProperty("")
 
   var commandLine by commandLineProperty
 
-  init {
-    bind(commandLineProperty.comap { it.trim() })
+  override fun getCompletionVariants(): List<TextCompletionInfo> {
+    return commandLineInfo.tablesInfo.flatMap { it.completionInfo }
   }
 
   init {
-    getAccessibleContext().accessibleName = commandLineInfo.fieldEmptyState
-    emptyText.text = commandLineInfo.fieldEmptyState
+    bind(commandLineProperty.trim())
+  }
+
+  init {
+    renderer = TextCompletionInfoRenderer()
+    completionType = CompletionType.REPLACE_WORD
+    setEmptyState(commandLineInfo.fieldEmptyState)
   }
 
   init {
     val action = Runnable {
+      updatePopup(UpdatePopupType.HIDE)
       val dialog = CommandLineDialog(project, commandLineInfo)
       dialog.whenVariantChosen {
-        val separator = if (text.endsWith(" ")) "" else " "
+        val separator = if (text.endsWith(" ") || text.isEmpty()) "" else " "
         document.insertString(document.length, separator + it.text, null)
       }
       dialog.show()
@@ -54,12 +59,5 @@ class CommandLineField(
     val browseExtension = ExtendableTextComponent.Extension.create(
       AllIcons.General.InlineVariables, AllIcons.General.InlineVariablesHover, tooltip, action)
     addExtension(browseExtension)
-  }
-
-  init {
-    val textCompletionContributor = JTextCompletionContributor.create {
-      commandLineInfo.tablesInfo.flatMap { it.completionInfo }
-    }
-    TextCompletionPopup(project, this, textCompletionContributor)
   }
 }

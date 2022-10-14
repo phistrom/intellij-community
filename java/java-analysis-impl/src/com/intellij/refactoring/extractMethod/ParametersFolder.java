@@ -21,7 +21,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
-class ParametersFolder {
+public class ParametersFolder {
   private final Map<PsiVariable, PsiExpression> myExpressions = new HashMap<>();
   private final Map<PsiVariable, String> myArgs = new HashMap<>();
   private final Map<PsiVariable, List<PsiExpression>> myMentionedInExpressions = new HashMap<>();
@@ -156,7 +156,7 @@ class ParametersFolder {
     final Set<PsiVariable> found = new HashSet<>();
     expression.accept(new JavaRecursiveElementVisitor() {
       @Override
-      public void visitReferenceExpression(PsiReferenceExpression referenceExpression) {
+      public void visitReferenceExpression(@NotNull PsiReferenceExpression referenceExpression) {
         super.visitReferenceExpression(referenceExpression);
         PsiElement resolved = referenceExpression.resolve();
         if (resolved instanceof PsiVariable && inputVariables.contains(resolved)) {
@@ -232,7 +232,7 @@ class ParametersFolder {
     return expressions;
   }
 
-  private static boolean isSafeToFoldArrayAccess(@NotNull LocalSearchScope scope,
+  public static boolean isSafeToFoldArrayAccess(@NotNull LocalSearchScope scope,
                                                  PsiElement expression) {
     while (true) {
       final PsiElement parent = expression.getParent();
@@ -260,7 +260,7 @@ class ParametersFolder {
       }
 
       @Override
-      public void visitExpression(PsiExpression expression) {
+      public void visitExpression(@NotNull PsiExpression expression) {
         if (PsiUtil.isAccessedForWriting(expression)) {
           exprWithWriteAccessInside[0] = expression;
         }
@@ -315,7 +315,7 @@ class ParametersFolder {
     final boolean[] localVarsUsed = {false};
     expression.accept(new JavaRecursiveElementWalkingVisitor(){
       @Override
-      public void visitReferenceExpression(PsiReferenceExpression expression) {
+      public void visitReferenceExpression(@NotNull PsiReferenceExpression expression) {
         final PsiElement resolved = expression.resolve();
         if (resolved instanceof PsiVariable) {
           final PsiVariable variable = (PsiVariable)resolved;

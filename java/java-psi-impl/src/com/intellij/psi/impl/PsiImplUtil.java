@@ -31,6 +31,7 @@ import com.intellij.psi.search.PackageScope;
 import com.intellij.psi.search.SearchScope;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.tree.TokenSet;
+import com.intellij.psi.util.JavaPsiPatternUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.PsiUtilCore;
@@ -133,10 +134,10 @@ public final class PsiImplUtil {
                      " parameterList' parent: " + parameterList.getParent() + ";" +
                      " parameter.isValid()=" + parameter.isValid() + ";" +
                      " parameterList.isValid()= " + parameterList.isValid() + ";" +
-                     " parameterList stub: " + (parameterList instanceof StubBasedPsiElement ? ((StubBasedPsiElement)parameterList).getStub() : "---") + "; " +
-                     " parameter stub: "+(parameter instanceof StubBasedPsiElement ? ((StubBasedPsiElement)parameter).getStub() : "---") + ";" +
-                     " suspect: " + suspect +" (index="+i+"); " + (suspect==null?null:suspect.getClass()) +
-                     " suspect stub: "+(suspect instanceof StubBasedPsiElement ? ((StubBasedPsiElement)suspect).getStub() : suspect == null ? "-null-" : "---"+suspect.getClass()) + ";" +
+                     " parameterList stub: " + (parameterList instanceof StubBasedPsiElement ? ((StubBasedPsiElement<?>)parameterList).getStub() : "---") + "; " +
+                     " parameter stub: " + (parameter instanceof StubBasedPsiElement ? ((StubBasedPsiElement<?>)parameter).getStub() : "---") + ";" +
+                     " suspect: " + suspect + " (index=" + i + "); " + (suspect==null?null:suspect.getClass()) +
+                     " suspect stub: " + (suspect instanceof StubBasedPsiElement ? ((StubBasedPsiElement<?>)suspect).getStub() : suspect == null ? "-null-" : "---" + suspect.getClass()) + ";" +
                      " parameter.equals(suspect) = " + parameter.equals(suspect) + "; " +
                      " parameter.getNode() == suspect.getNode():  " + (parameter.getNode() == (suspect==null ? null : suspect.getNode())) + "; " +
                      "."
@@ -315,7 +316,7 @@ public final class PsiImplUtil {
    * @deprecated types should be proceed by the callers themselves
    */
   @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @ApiStatus.ScheduledForRemoval
   public static PsiType normalizeWildcardTypeByPosition(@NotNull PsiType type, @NotNull PsiExpression expression) {
     PsiUtil.ensureValidType(type);
 
@@ -394,14 +395,8 @@ public final class PsiImplUtil {
     PsiModifierList modifierList = member.getModifierList();
     int accessLevel = modifierList == null ? PsiUtil.ACCESS_LEVEL_PUBLIC : PsiUtil.getAccessLevel(modifierList);
     if (accessLevel == PsiUtil.ACCESS_LEVEL_PUBLIC || accessLevel == PsiUtil.ACCESS_LEVEL_PROTECTED) {
-      if (member instanceof PsiMethod && ((PsiMethod)member).isConstructor()) {
-        PsiClass containingClass = member.getContainingClass();
-        if (containingClass != null) {
-          //constructors cannot be overridden so their use scope can't be wider than their class's
-          return containingClass.getUseScope();
-        }
-      }
-      return maximalUseScope; // class use scope doesn't matter, since another very visible class can inherit from aClass
+      SearchScope classScope = getClassUseScopeIfApplicable(member, aClass, accessLevel);
+      return (classScope != null) ? classScope : maximalUseScope;
     }
     if (accessLevel == PsiUtil.ACCESS_LEVEL_PRIVATE) {
       PsiClass topClass = PsiUtil.getTopLevelClass(member);
@@ -409,12 +404,27 @@ public final class PsiImplUtil {
     }
     if (file instanceof PsiJavaFile) {
       PsiPackage aPackage = JavaPsiFacade.getInstance(project).findPackage(((PsiJavaFile)file).getPackageName());
+      final SearchScope classScope = getClassUseScopeIfApplicable(member, aClass, accessLevel);
+      if (classScope != null) return classScope;
       if (aPackage != null) {
         SearchScope scope = PackageScope.packageScope(aPackage, false);
         return scope.intersectWith(maximalUseScope);
       }
     }
     return maximalUseScope;
+  }
+
+  private static SearchScope getClassUseScopeIfApplicable(PsiMember member, PsiClass aClass, int accessLevel) {
+    if (aClass == null) return null;
+    final PsiModifierList classModifierList = aClass.getModifierList();
+    if (classModifierList == null) return null;
+    if (!classModifierList.hasModifierProperty(PsiModifier.FINAL) &&
+        !(member instanceof PsiMethod && ((PsiMethod)member).isConstructor())) {
+      // class use scope doesn't matter, since another very visible class can inherit from aClass
+      return null;
+    }
+    // constructors and members of final classes cannot be accessed via a subclass so their use scope can't be wider than their class's
+    return (PsiUtil.getAccessLevel(classModifierList) < accessLevel) ? aClass.getUseScope() : null;
   }
 
   public static boolean isInServerPage(@Nullable final PsiElement element) {
@@ -685,14 +695,19 @@ public final class PsiImplUtil {
   }
 
   /**
-   * Returns enclosing label statement for given label expression
+   * Returns enclosing label statement for given case label element
    *
-   * @param expression switch label expression
-   * @return enclosing label statement or null if given expression is not a label statement expression
+   * @param labelElement case label element
+   * @return enclosing label statement or null if {@param labelElement} is an expression but not a label statement expression
    */
   @Nullable
-  public static PsiSwitchLabelStatementBase getSwitchLabel(@NotNull PsiExpression expression) {
-    PsiElement parent = PsiUtil.skipParenthesizedExprUp(expression.getParent());
+  public static PsiSwitchLabelStatementBase getSwitchLabel(@NotNull PsiCaseLabelElement labelElement) {
+    PsiElement parent = labelElement instanceof PsiParenthesizedPattern
+                        ? JavaPsiPatternUtil.skipParenthesizedPatternUp(labelElement.getParent())
+                        : PsiUtil.skipParenthesizedExprUp(labelElement.getParent());
+    if (parent instanceof PsiPatternGuard) {
+      parent = parent.getParent();
+    }
     if (parent instanceof PsiCaseLabelElementList) {
       PsiElement grand = parent.getParent();
       if (grand instanceof PsiSwitchLabelStatementBase) {
@@ -792,7 +807,7 @@ public final class PsiImplUtil {
       return ((LightJavaModule)module).getRootVirtualFile();
     }
     else {
-      VirtualFile file = module.getContainingFile().getVirtualFile();
+      VirtualFile file = PsiUtilCore.getVirtualFile(module);
       if (file == null) {
         throw new IllegalArgumentException("Module '" + module + "' lost its VF; file=" + module.getContainingFile() + "; valid=" + module.isValid());
       }

@@ -322,8 +322,6 @@ public final class SvnUtil {
   /**
    * Gets working copy internal format. Works for 1.7 and 1.8.
    *
-   * @param path
-   * @return
    */
   @NotNull
   public static WorkingCopyFormat getFormat(final File path) {
@@ -549,16 +547,6 @@ public final class SvnUtil {
     while (file != null);
 
     return null;
-  }
-
-  /**
-   * @deprecated Use {@link SvnUtil#getWorkingCopyRoot(File)} instead.
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
-  @Nullable
-  public static File getWorkingCopyRootNew(@NotNull File file) {
-    return getWorkingCopyRoot(file);
   }
 
   @Nullable

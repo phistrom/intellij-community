@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package com.intellij.xdebugger;
 
@@ -12,6 +12,7 @@ import com.intellij.xdebugger.breakpoints.XBreakpoint;
 import com.intellij.xdebugger.breakpoints.XBreakpointHandler;
 import com.intellij.xdebugger.evaluation.XDebuggerEditorsProvider;
 import com.intellij.xdebugger.evaluation.XDebuggerEvaluator;
+import com.intellij.xdebugger.frame.XDropFrameHandler;
 import com.intellij.xdebugger.frame.XStackFrame;
 import com.intellij.xdebugger.frame.XSuspendContext;
 import com.intellij.xdebugger.frame.XValueMarkerProvider;
@@ -91,7 +92,6 @@ public abstract class XDebugProcess {
    * Do not call this method directly. Use {@link XDebugSession#stepOver} instead
    */
   public void startStepOver(@Nullable XSuspendContext context) {
-    //noinspection deprecation
     startStepOver();
   }
 
@@ -120,7 +120,6 @@ public abstract class XDebugProcess {
    * Do not call this method directly. Use {@link XDebugSession#stepInto} instead
    */
   public void startStepInto(@Nullable XSuspendContext context) {
-    //noinspection deprecation
     startStepInto();
   }
 
@@ -138,7 +137,6 @@ public abstract class XDebugProcess {
    * Do not call this method directly. Use {@link XDebugSession#stepOut} instead
    */
   public void startStepOut(@Nullable XSuspendContext context) {
-    //noinspection deprecation
     startStepOut();
   }
 
@@ -148,6 +146,16 @@ public abstract class XDebugProcess {
    */
   @Nullable
   public XSmartStepIntoHandler<?> getSmartStepIntoHandler() {
+    return null;
+  }
+
+  /**
+   * Implement {@link  XDropFrameHandler} and return its instance from this method to enable Drop Frame action
+   * @return {@link  XDropFrameHandler} instance
+   */
+  @ApiStatus.Experimental
+  @Nullable
+  public XDropFrameHandler getDropFrameHandler() {
     return null;
   }
 
@@ -178,7 +186,6 @@ public abstract class XDebugProcess {
    * Do not call this method directly. Use {@link XDebugSession#resume} instead
    */
   public void resume(@Nullable XSuspendContext context) {
-    //noinspection deprecation
     resume();
   }
 
@@ -198,7 +205,6 @@ public abstract class XDebugProcess {
    * @param position position in source code
    */
   public void runToPosition(@NotNull XSourcePosition position, @Nullable XSuspendContext context) {
-    //noinspection deprecation
     runToPosition(position);
   }
 
@@ -275,8 +281,9 @@ public abstract class XDebugProcess {
   }
 
   /**
-   * Add or not SortValuesAction (alphabetically sort)
-   * @todo this action should be moved to "Variables" as gear action
+   * Add or not SortValuesAction (alphabetically sort).
+   * <p>
+   * TODO this action should be moved to "Variables" as gear action
    */
   public boolean isValuesCustomSorted() {
     return false;

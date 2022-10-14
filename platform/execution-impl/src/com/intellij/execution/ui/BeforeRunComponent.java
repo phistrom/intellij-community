@@ -37,6 +37,7 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -51,7 +52,7 @@ public final class BeforeRunComponent extends JPanel implements DnDTarget, Dispo
   private RunConfiguration myConfiguration;
 
   public BeforeRunComponent(@NotNull Disposable parentDisposable) {
-    super(new WrapLayout(FlowLayout.LEADING, 0, FragmentedSettingsBuilder.TAG_VGAP));
+    super(new WrapLayout(FlowLayout.LEADING, 0, JBUI.scale(FragmentedSettingsBuilder.TAG_VGAP)));
     Disposer.register(parentDisposable, this);
     add(Box.createVerticalStrut(30));
 
@@ -72,8 +73,9 @@ public final class BeforeRunComponent extends JPanel implements DnDTarget, Dispo
   }
 
   private List<BeforeRunTaskProvider<BeforeRunTask<?>>> getProviders() {
+    Set<? extends Key<?>> existing = ContainerUtil.map2Set(myTags, button -> button.myTask.getProviderId());
     return ContainerUtil.filter(BeforeRunTaskProvider.EP_NAME.getExtensions(myConfiguration.getProject()),
-                                provider -> provider.createTask(myConfiguration) != null);
+                                provider -> provider.createTask(myConfiguration) != null && (!provider.isSingleton() || !existing.contains(provider.getId())));
   }
 
   private TaskButton createTag(BeforeRunTaskProvider<BeforeRunTask<?>> provider) {
@@ -263,7 +265,7 @@ public final class BeforeRunComponent extends JPanel implements DnDTarget, Dispo
     private BeforeRunTask<?> myTask;
     private int myOrder;
 
-    private TaskButton(@NotNull BeforeRunTaskProvider<BeforeRunTask<?>> provider, Consumer<AnActionEvent> action) {
+    private TaskButton(@NotNull BeforeRunTaskProvider<BeforeRunTask<?>> provider, Consumer<? super AnActionEvent> action) {
       super(provider.getName(), action);
       Disposer.register(BeforeRunComponent.this, this);
       add(myDropPlace, JLayeredPane.DRAG_LAYER);
@@ -273,9 +275,13 @@ public final class BeforeRunComponent extends JPanel implements DnDTarget, Dispo
         @Override
         public void mouseClicked(MouseEvent e) {
           if (e.getClickCount() == 2) {
+            BeforeRunTask clone = myTask.clone();
             if (!DumbService.isDumb(myConfiguration.getProject()) || DumbService.isDumbAware(myProvider)) {
-              myProvider.configureTask(DataManager.getInstance().getDataContext(TaskButton.this), myConfiguration, myTask)
-                .onSuccess(aBoolean -> setTask(myTask));
+              myProvider.configureTask(DataManager.getInstance().getDataContext(TaskButton.this), myConfiguration, clone)
+                .onSuccess(aBoolean -> {
+                  setTask(clone);
+                  updateButton();
+                });
             }
           }
         }
@@ -303,8 +309,8 @@ public final class BeforeRunComponent extends JPanel implements DnDTarget, Dispo
 
     private void updateButton() {
       if (myTask == null) return;
-      updateButton(myOrder + ". " + myProvider.getDescription(myTask), myProvider.getTaskIcon(myTask),
-                   !DumbService.isDumb(myConfiguration.getProject()) || DumbService.isDumbAware(myProvider));
+      setEnabled(!DumbService.isDumb(myConfiguration.getProject()) || DumbService.isDumbAware(myProvider));
+      updateButton(myOrder + ". " + myProvider.getDescription(myTask), myProvider.getTaskIcon(myTask));
     }
 
     private void showDropPlace(boolean show) {

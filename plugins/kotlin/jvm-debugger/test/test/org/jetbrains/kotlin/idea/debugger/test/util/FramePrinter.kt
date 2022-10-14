@@ -1,8 +1,9 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.kotlin.idea.debugger.test.util
 
 import com.intellij.debugger.SourcePosition
 import com.intellij.debugger.engine.DebuggerUtils
+import com.intellij.debugger.engine.JavaStackFrame
 import com.intellij.debugger.engine.SourcePositionProvider
 import com.intellij.debugger.engine.SuspendContextImpl
 import com.intellij.debugger.engine.evaluation.EvaluationContextImpl
@@ -10,6 +11,7 @@ import com.intellij.debugger.engine.events.SuspendContextCommandImpl
 import com.intellij.debugger.impl.DebuggerUtilsEx
 import com.intellij.debugger.ui.impl.watch.*
 import com.intellij.debugger.ui.tree.*
+import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.roots.JdkOrderEntry
 import com.intellij.openapi.roots.libraries.LibraryUtil
 import com.intellij.openapi.util.io.FileUtil
@@ -18,9 +20,11 @@ import com.intellij.xdebugger.XDebuggerTestUtil
 import com.intellij.xdebugger.XTestValueNode
 import com.intellij.xdebugger.frame.*
 import com.intellij.xdebugger.impl.ui.XDebuggerUIConstants
-import org.jetbrains.kotlin.idea.debugger.GetterDescriptor
+import com.sun.jdi.ArrayType
+import org.jetbrains.kotlin.idea.debugger.core.GetterDescriptor
+import org.jetbrains.kotlin.idea.debugger.core.invokeInManagerThread
+import org.jetbrains.kotlin.idea.debugger.core.stackFrame.DelegateDescriptor
 import org.jetbrains.kotlin.idea.debugger.coroutine.data.ContinuationVariableValueDescriptorImpl
-import org.jetbrains.kotlin.idea.debugger.invokeInManagerThread
 import org.jetbrains.kotlin.idea.debugger.test.KOTLIN_LIBRARY_NAME
 import org.jetbrains.kotlin.psi.KtFile
 import java.util.concurrent.TimeUnit
@@ -71,8 +75,7 @@ class FramePrinter(private val suspendContext: SuspendContextImpl) {
     )
 
     private fun computeInfo(container: XValueContainer): ValueInfo {
-        val name = if (container is XNamedValue) container.name.takeIf { it.isNotEmpty() } else null
-
+        val name = container.getName()
         when (container) {
             is XValue -> {
                 val node = XTestValueNode()
@@ -80,7 +83,7 @@ class FramePrinter(private val suspendContext: SuspendContextImpl) {
                 node.waitFor(XDebuggerTestUtil.TIMEOUT_MS.toLong())
 
                 val descriptor = if (container is NodeDescriptorProvider) container.descriptor else null
-                val kind = getLabel(descriptor)
+                val kind = getLabel(if (descriptor is DelegateDescriptor) descriptor.delegate else descriptor)
                 val type = (descriptor as? ValueDescriptorImpl)?.declaredType ?: node.myType?.takeIf { it.isNotEmpty() }
                 val value = (computeValue(descriptor) ?: node.myValue).takeIf { it.isNotEmpty() }
                 val sourcePosition = computeSourcePosition(descriptor)
@@ -96,6 +99,13 @@ class FramePrinter(private val suspendContext: SuspendContextImpl) {
         }
     }
 
+    private fun XValueContainer.getName() =
+        when (this) {
+            is XNamedValue -> name.takeIf { it.isNotEmpty() }
+            is JavaStackFrame -> descriptor.name
+            else -> null
+        }
+
     private fun computeValue(descriptor: NodeDescriptorImpl?): String? {
         val valueDescriptor = descriptor as? ValueDescriptorImpl ?: return null
         if (valueDescriptor is GetterDescriptor) {
@@ -104,6 +114,8 @@ class FramePrinter(private val suspendContext: SuspendContextImpl) {
 
         if (valueDescriptor.isMapEntryDescriptor) {
             return MAP_ENTRY_TEST_LABEL
+        } else if (valueDescriptor.isArrayDescriptor) {
+            return ARRAY_TEST_LABEL
         }
 
         val semaphore = Semaphore()
@@ -151,7 +163,9 @@ class FramePrinter(private val suspendContext: SuspendContextImpl) {
 
         val debugProcess = suspendContext.debugProcess
         return debugProcess.invokeInManagerThread { debuggerContext ->
-            SourcePositionProvider.getSourcePosition(descriptor, debugProcess.project, debuggerContext)
+            runReadAction {
+                SourcePositionProvider.getSourcePosition(descriptor, debugProcess.project, debuggerContext)
+            }
         }
     }
 
@@ -214,7 +228,17 @@ private fun patchHashCode(value: String): String {
  * (See com.intellij.debugger.settings.NodeRendererSettings.MapEntryLabelRenderer.calcLabel method for
  * the implementation of labels calculation)
  */
-private const val MAP_ENTRY_TEST_LABEL = "map_entry_tests_label"
+private const val MAP_ENTRY_TEST_LABEL = "... -> ..."
 
 private val ValueDescriptorImpl.isMapEntryDescriptor
     get() = DebuggerUtils.instanceOf(type, "java.util.Map.Entry")
+
+/**
+ * Rendering of array types is performed by com.intellij.debugger.ui.tree.render.ArrayRenderer.
+ * To render an array correctly, it has to fetch all of its values. After that the renderer
+ * asynchronously updates the array representation, which results in flaky tests.
+ */
+private const val ARRAY_TEST_LABEL = "[...]"
+
+private val ValueDescriptorImpl.isArrayDescriptor
+    get() = type is ArrayType

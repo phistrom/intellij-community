@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.formatter
 
@@ -11,7 +11,7 @@ import com.intellij.application.options.codeStyle.properties.CodeStylePropertyAc
 import com.intellij.lang.Language
 import com.intellij.openapi.application.ApplicationBundle
 import com.intellij.psi.codeStyle.*
-import org.jetbrains.kotlin.idea.KotlinBundle
+import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.KotlinLanguage
 import org.jetbrains.kotlin.idea.core.formatter.KotlinCodeStyleSettings
 import org.jetbrains.kotlin.idea.core.formatter.KotlinPackageEntryTable
@@ -34,7 +34,7 @@ class KotlinLanguageCodeStyleSettingsProvider : LanguageCodeStyleSettingsProvide
         initIndentOptions()
     }
 
-    override fun createCustomSettings(settings: CodeStyleSettings?): CustomCodeStyleSettings = KotlinCodeStyleSettings(settings)
+    override fun createCustomSettings(settings: CodeStyleSettings): CustomCodeStyleSettings = KotlinCodeStyleSettings(settings)
 
     override fun getAccessor(codeStyleObject: Any, field: Field): CodeStyleFieldAccessor<*, *>? {
         if (codeStyleObject is KotlinCodeStyleSettings && KotlinPackageEntryTable::class.java.isAssignableFrom(field.type)) {
@@ -196,6 +196,12 @@ class KotlinLanguageCodeStyleSettingsProvider : LanguageCodeStyleSettingsProvide
                 )
 
                 showCustomOption(
+                    KotlinCodeStyleSettings::LINE_BREAK_AFTER_MULTILINE_WHEN_ENTRY,
+                    KotlinBundle.message("formatter.title.line.break.after.multiline.when.entry"),
+                    codeStyleSettingsCustomizableOptions.WRAPPING_SWITCH_STATEMENT
+                )
+
+                showCustomOption(
                     KotlinCodeStyleSettings::LBRACE_ON_NEXT_LINE,
                     KotlinBundle.message("formatter.title.put.left.brace.on.new.line"),
                     codeStyleSettingsCustomizableOptions.WRAPPING_BRACES
@@ -291,6 +297,10 @@ class KotlinLanguageCodeStyleSettingsProvider : LanguageCodeStyleSettingsProvide
             }
             else -> consumer.showStandardOptions()
         }
+    }
+
+    override fun usesCommonKeepLineBreaks(): Boolean {
+        return true
     }
 
     override fun getCodeSample(settingsType: SettingsType): String = when (settingsType) {
@@ -421,7 +431,7 @@ class KotlinLanguageCodeStyleSettingsProvider : LanguageCodeStyleSettingsProvide
                        private val f: (Int)->Int = { a: Int -> a * 2 }
                        fun foo(): Int {
                            val test: Int = 12
-                           for (i in 10..42) {
+                           for (i in 10..<42) {
                                println (when {
                                    i < test -> -1
                                    i > test -> 1
@@ -433,6 +443,7 @@ class KotlinLanguageCodeStyleSettingsProvider : LanguageCodeStyleSettingsProvide
                            try {
                                when (test) {
                                    12 -> println("foo")
+                                   in 10..42 -> println("baz")
                                    else -> println("bar")
                                }
                            } catch (e: Exception) {

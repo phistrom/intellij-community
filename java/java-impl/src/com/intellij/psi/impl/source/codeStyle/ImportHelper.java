@@ -1,16 +1,18 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.impl.source.codeStyle;
 
 import com.intellij.application.options.CodeStyle;
 import com.intellij.codeInsight.ImportFilter;
 import com.intellij.codeInsight.daemon.impl.analysis.HighlightVisitorImpl;
 import com.intellij.ide.highlighter.JavaFileType;
+import com.intellij.jsp.JspSpiUtil;
 import com.intellij.lang.ASTNode;
 import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.Predicates;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
@@ -26,7 +28,6 @@ import com.intellij.psi.impl.source.resolve.reference.impl.providers.JavaClassRe
 import com.intellij.psi.impl.source.tree.ElementType;
 import com.intellij.psi.impl.source.tree.JavaJspElementType;
 import com.intellij.psi.jsp.JspFile;
-import com.intellij.jsp.JspSpiUtil;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.LocalSearchScope;
 import com.intellij.psi.search.searches.ReferencesSearch;
@@ -38,16 +39,13 @@ import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.ObjectUtils;
-import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.containers.MultiMap;
-import com.intellij.util.containers.NotNullList;
-import gnu.trove.TObjectIntHashMap;
-import gnu.trove.TObjectIntProcedure;
-import org.jetbrains.annotations.ApiStatus;
+import com.intellij.util.containers.*;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.*;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -68,15 +66,14 @@ public final class ImportHelper{
    * @deprecated Use {@link #ImportHelper(JavaCodeStyleSettings)} instead. The instance of JavaCodeStyleSettings
    *             can be obtained using {@link JavaCodeStyleSettings#getInstance(PsiFile)} method.
    */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @Deprecated(forRemoval = true)
   public ImportHelper(@NotNull CodeStyleSettings settings){
     mySettings = settings.getCustomSettings(JavaCodeStyleSettings.class);
   }
 
   @Nullable("null means no need to replace the import list because they are the same")
   PsiImportList prepareOptimizeImportsResult(@NotNull final PsiJavaFile file) {
-    return prepareOptimizeImportsResult(file, __ -> true);
+    return prepareOptimizeImportsResult(file, Predicates.alwaysTrue());
   }
 
   /**
@@ -153,42 +150,31 @@ public final class ImportHelper{
   public static void collectOnDemandImports(@NotNull List<? extends Pair<String, Boolean>> resultList,
                                             @NotNull JavaCodeStyleSettings settings,
                                             @NotNull Map<String, Boolean> outClassesOrPackagesToImportOnDemand) {
-    TObjectIntHashMap<String> packageToCountMap = new TObjectIntHashMap<>();
-    TObjectIntHashMap<String> classToCountMap = new TObjectIntHashMap<>();
+    ObjectIntMap<String> packageToCountMap = new ObjectIntHashMap<>();
+    ObjectIntMap<String> classToCountMap = new ObjectIntHashMap<>();
     for (Pair<String, Boolean> pair : resultList) {
       String name = pair.getFirst();
       Boolean isStatic = pair.getSecond();
       String packageOrClassName = getPackageOrClassName(name);
       if (packageOrClassName.isEmpty()) continue;
-      if (isStatic) {
-        int count = classToCountMap.get(packageOrClassName);
-        classToCountMap.put(packageOrClassName, count + 1);
-      }
-      else {
-        int count = packageToCountMap.get(packageOrClassName);
-        packageToCountMap.put(packageOrClassName, count + 1);
-      }
+      ObjectIntMap<String> map = isStatic ? classToCountMap : packageToCountMap;
+      map.put(packageOrClassName, map.getOrDefault(packageOrClassName, 0) + 1);
     }
 
-
-    final class MyVisitorProcedure implements TObjectIntProcedure<String> {
-      private final boolean myIsVisitingPackages;
-
-      private MyVisitorProcedure(boolean isVisitingPackages) {
-        myIsVisitingPackages = isVisitingPackages;
-      }
-
-      @Override
-      public boolean execute(final String packageOrClassName, final int count) {
-        if (isToUseImportOnDemand(packageOrClassName, count, !myIsVisitingPackages, settings)){
-          boolean isStatic = !myIsVisitingPackages;
-          outClassesOrPackagesToImportOnDemand.put(packageOrClassName, isStatic);
-        }
-        return true;
+    for (ObjectIntMap.Entry<String> entry : classToCountMap.entries()) {
+      String packageOrClassName = entry.getKey();
+      int count = entry.getValue();
+      if (isToUseImportOnDemand(packageOrClassName, count, true, settings)){
+        outClassesOrPackagesToImportOnDemand.put(packageOrClassName, true);
       }
     }
-    classToCountMap.forEachEntry(new MyVisitorProcedure(false));
-    packageToCountMap.forEachEntry(new MyVisitorProcedure(true));
+    for (ObjectIntMap.Entry<String> entry : packageToCountMap.entries()) {
+      String packageOrClassName = entry.getKey();
+      int count = entry.getValue();
+      if (isToUseImportOnDemand(packageOrClassName, count, false, settings)){
+        outClassesOrPackagesToImportOnDemand.put(packageOrClassName, false);
+      }
+    }
   }
 
   public static List<Pair<String, Boolean>> sortItemsAccordingToSettings(List<? extends Pair<String, Boolean>> names, final JavaCodeStyleSettings settings) {
@@ -362,7 +348,7 @@ public final class ImportHelper{
       String packageName = file.getPackageName();
       file.accept(new JavaRecursiveElementVisitor() {
         @Override
-        public void visitReferenceElement(PsiJavaCodeReferenceElement reference) {
+        public void visitReferenceElement(@NotNull PsiJavaCodeReferenceElement reference) {
           super.visitReferenceElement(reference);
           if (reference.getQualifier() != null) return;
           PsiElement element = reference.resolve();
@@ -445,9 +431,12 @@ public final class ImportHelper{
     String shortName = PsiNameHelper.getShortClassName(className);
 
     findUnusedSingleImport(file, shortName, className).ifPresent(PsiElement::delete);
-    PsiClass conflictSingleRef = findSingleImportByShortName(file, shortName);
-    if (conflictSingleRef != null && !forceReimport){
-      return className.equals(conflictSingleRef.getQualifiedName());
+
+    if (!forceReimport) {
+      PsiClass conflictSingleRef = findSingleImportByShortName(file, shortName);
+      if (conflictSingleRef != null) {
+        return className.equals(conflictSingleRef.getQualifiedName());
+      }
     }
 
     PsiClass curRefClass = helper.resolveReferencedClass(shortName, file);
@@ -646,8 +635,9 @@ public final class ImportHelper{
           }
 
           @Override
-          public void visitReferenceElement(PsiJavaCodeReferenceElement reference) {
-            if (file.getManager().areElementsEquivalent(reference.resolve(), aClass)) {
+          public void visitReferenceElement(@NotNull PsiJavaCodeReferenceElement reference) {
+            if (shortClassName.equals(reference.getReferenceName()) && 
+                file.getManager().areElementsEquivalent(reference.resolve(), aClass)) {
               foundRef[0] = true;
             }
             super.visitReferenceElement(reference);
@@ -673,7 +663,7 @@ public final class ImportHelper{
     String className = extractClassName(file, fullyQualifiedName);
 
     Project project = file.getProject();
-    PsiResolveHelper resolveHelper = PsiResolveHelper.SERVICE.getInstance(project);
+    PsiResolveHelper resolveHelper = PsiResolveHelper.getInstance(project);
 
     PsiClass psiClass = resolveHelper.resolveReferencedClass(className, file);
     return psiClass != null && fullyQualifiedName.equals(psiClass.getQualifiedName());
@@ -1009,7 +999,7 @@ public final class ImportHelper{
       if (!(aClass instanceof PsiCompiledElement)) {
         aClass.accept(new JavaRecursiveElementWalkingVisitor() {
           @Override
-          public void visitReferenceElement(PsiJavaCodeReferenceElement reference) {
+          public void visitReferenceElement(@NotNull PsiJavaCodeReferenceElement reference) {
             String name = reference.getReferenceName();
             Pair<String, Boolean> pair = unresolvedNames.get(name);
             if (reference.multiResolve(false).length == 0) {

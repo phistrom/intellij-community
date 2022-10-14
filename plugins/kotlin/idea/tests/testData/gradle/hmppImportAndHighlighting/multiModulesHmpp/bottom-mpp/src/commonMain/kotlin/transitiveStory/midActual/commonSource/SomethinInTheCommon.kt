@@ -1,13 +1,13 @@
 package transitiveStory.midActual.commonSource
 
 val moduleName = "bottom-mpp"
-expect val <!LINE_MARKER("descr='Has actuals in Native, JVM (2 modules)'")!>sourceSetName<!>: String
+expect val <!LINE_MARKER("descr='Has actuals in [multimod-hmpp.bottom-mpp.iosSimLibMain, multimod-hmpp.bottom-mpp.jvm16Main, multimod-hmpp.bottom-mpp.jvmWithJavaMain] module'")!>sourceSetName<!>: String
 
-expect open class <!LINE_MARKER("descr='Has actuals in Native, JVM (2 modules)'")!>SomeMPPInTheCommon<!>() {
-    val <!LINE_MARKER("descr='Has actuals in Native, JVM (2 modules)'")!>simpleVal<!>: Int
+expect open class <!LINE_MARKER("descr='Has actuals in [multimod-hmpp.bottom-mpp.iosSimLibMain, multimod-hmpp.bottom-mpp.jvm16Main, multimod-hmpp.bottom-mpp.jvmWithJavaMain] module'")!>SomeMPPInTheCommon<!>() {
+    val <!LINE_MARKER("descr='Has actuals in [multimod-hmpp.bottom-mpp.iosSimLibMain, multimod-hmpp.bottom-mpp.jvm16Main, multimod-hmpp.bottom-mpp.jvmWithJavaMain] module'")!>simpleVal<!>: Int
 
-    companion object <!LINE_MARKER("descr='Has actuals in Native, JVM (2 modules)'")!>Compainon<!> {
-        val <!LINE_MARKER("descr='Has actuals in Native, JVM (2 modules)'")!>inTheCompanionOfBottomActualDeclarations<!>: String
+    companion object <!LINE_MARKER("descr='Has actuals in [multimod-hmpp.bottom-mpp.iosSimLibMain, multimod-hmpp.bottom-mpp.jvm16Main, multimod-hmpp.bottom-mpp.jvmWithJavaMain] module'")!>Compainon<!> {
+        val <!LINE_MARKER("descr='Has actuals in [multimod-hmpp.bottom-mpp.iosSimLibMain, multimod-hmpp.bottom-mpp.jvm16Main, multimod-hmpp.bottom-mpp.jvmWithJavaMain] module'")!>inTheCompanionOfBottomActualDeclarations<!>: String
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.debugger.sequence.psi.impl
 
@@ -24,7 +24,7 @@ class PackageBasedCallChecker(private val supportedPackage: String) : StreamCall
         shouldSupportResult: Boolean
     ): Boolean {
         val resultType = expression.resolveType()
-        return shouldSupportResult == isSupportedType(resultType)
+        return resultType != null &&  shouldSupportResult == isSupportedType(resultType)
     }
 
     private fun checkReceiverSupported(expression: KtCallExpression): Boolean {

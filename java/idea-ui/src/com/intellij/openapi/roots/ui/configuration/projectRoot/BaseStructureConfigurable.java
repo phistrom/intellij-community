@@ -126,7 +126,7 @@ public abstract class BaseStructureConfigurable extends MasterDetailsComponent i
     myWasTreeInitialized = true;
 
     super.initTree();
-    new TreeSpeedSearch(myTree, treePath -> getTextForSpeedSearch((MyNode)treePath.getLastPathComponent()), true);
+    new TreeSpeedSearch(myTree, true, treePath -> getTextForSpeedSearch((MyNode)treePath.getLastPathComponent()));
     ToolTipManager.sharedInstance().registerComponent(myTree);
     myTree.setCellRenderer(new ProjectStructureElementRenderer(myContext));
   }
@@ -168,7 +168,7 @@ public abstract class BaseStructureConfigurable extends MasterDetailsComponent i
       MyNode node = (MyNode)selectionPath.getLastPathComponent();
       final NamedConfigurable configurable = node.getConfigurable();
       if (configurable instanceof ProjectStructureElementConfigurable) {
-        return ((ProjectStructureElementConfigurable)configurable).getProjectStructureElement();
+        return ((ProjectStructureElementConfigurable<?>)configurable).getProjectStructureElement();
       }
     }
     return null;
@@ -191,6 +191,10 @@ public abstract class BaseStructureConfigurable extends MasterDetailsComponent i
       }
     }
 
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
+    }
     @Override
     protected ProjectStructureElement getSelectedElement() {
       return BaseStructureConfigurable.this.getSelectedElement();

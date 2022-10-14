@@ -1,42 +1,55 @@
+/*******************************************************************************
+ * Copyright 2000-2022 JetBrains s.r.o. and contributors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ ******************************************************************************/
+
 package com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.panels.management.packagedetails
 
-import com.jetbrains.packagesearch.api.v2.ApiStandardPackage
 import com.jetbrains.packagesearch.intellij.plugin.PackageSearchBundle
 import com.jetbrains.packagesearch.intellij.plugin.fus.FUSGroupIds
 import com.jetbrains.packagesearch.intellij.plugin.fus.PackageSearchEventsLogger
+import com.jetbrains.packagesearch.intellij.plugin.normalizeWhitespace
 import com.jetbrains.packagesearch.intellij.plugin.ui.PackageSearchUI
 import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.models.KnownRepositories
 import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.models.PackageModel
 import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.models.PackageVersion
 import com.jetbrains.packagesearch.intellij.plugin.ui.updateAndRepaint
-import com.jetbrains.packagesearch.intellij.plugin.ui.util.Displayable
 import com.jetbrains.packagesearch.intellij.plugin.ui.util.ScaledPixels
+import com.jetbrains.packagesearch.intellij.plugin.ui.util.compensateForHighlightableComponentMarginLeft
 import com.jetbrains.packagesearch.intellij.plugin.ui.util.emptyBorder
 import com.jetbrains.packagesearch.intellij.plugin.ui.util.noInsets
 import com.jetbrains.packagesearch.intellij.plugin.ui.util.scaled
 import com.jetbrains.packagesearch.intellij.plugin.ui.util.scaledAsString
 import com.jetbrains.packagesearch.intellij.plugin.ui.util.skipInvisibleComponents
 import com.jetbrains.packagesearch.intellij.plugin.ui.util.withHtmlStyling
-import com.jetbrains.packagesearch.intellij.plugin.util.AppUI
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import net.miginfocom.layout.AC
 import net.miginfocom.layout.CC
 import net.miginfocom.layout.LC
 import net.miginfocom.swing.MigLayout
-import org.apache.commons.lang3.StringUtils
+import org.jetbrains.packagesearch.api.v2.ApiStandardPackage
 import java.awt.Component
 import java.awt.Dimension
 import javax.swing.JComponent
 import javax.swing.JPanel
 
 @Suppress("MagicNumber") // Swing dimension constants
-internal class PackageDetailsInfoPanel : JPanel(), Displayable<PackageDetailsInfoPanel.ViewModel> {
+internal class PackageDetailsInfoPanel : JPanel() {
 
     @ScaledPixels private val maxRowHeight = 180.scaled()
 
     private val noDataLabel = PackageSearchUI.createLabel {
-        foreground = PackageSearchUI.GRAY_COLOR
+        foreground = PackageSearchUI.Colors.infoLabelForeground
         text = PackageSearchBundle.message("packagesearch.ui.toolwindow.packages.details.noData")
             .withHtmlStyling(wordWrap = true)
     }.withMaxHeight(maxRowHeight)
@@ -80,13 +93,11 @@ internal class PackageDetailsInfoPanel : JPanel(), Displayable<PackageDetailsInf
                 .fill().gap()
                 .fill().gap()
         )
-        background = PackageSearchUI.UsualBackgroundColor
+        background = PackageSearchUI.Colors.panelBackground
         alignmentX = Component.LEFT_ALIGNMENT
 
-        @ScaledPixels val horizontalBorder = 12.scaled()
-        border = emptyBorder(left = horizontalBorder, bottom = 20.scaled(), right = horizontalBorder)
-
-        fun CC.compensateForHighlightableComponentMarginLeft() = pad(0, (-2).scaled(), 0, 0)
+        val horizontalBorder = 12
+        border = emptyBorder(left = horizontalBorder, bottom = 20, right = horizontalBorder)
 
         add(noDataLabel, CC().wrap())
         add(repositoriesLabel, CC().wrap())
@@ -107,10 +118,12 @@ internal class PackageDetailsInfoPanel : JPanel(), Displayable<PackageDetailsInf
         val allKnownRepositories: KnownRepositories.All
     )
 
-    override suspend fun display(viewModel: ViewModel) = withContext(Dispatchers.AppUI) {
+    fun display(viewModel: ViewModel) {
         clearPanelContents()
+        background = PackageSearchUI.Colors.panelBackground
+        displayUsagesIfAny(viewModel.packageModel)
         if (viewModel.packageModel.remoteInfo == null) {
-            return@withContext
+            return
         }
 
         noDataLabel.isVisible = false
@@ -130,7 +143,6 @@ internal class PackageDetailsInfoPanel : JPanel(), Displayable<PackageDetailsInf
         displayDocumentationIfAny(linkExtractor.documentation())
         displayReadmeIfAny(linkExtractor.readme())
         displayKotlinPlatformsIfAny(viewModel.packageModel.remoteInfo)
-        displayUsagesIfAny(viewModel.packageModel)
 
         updateAndRepaint()
         (parent as JComponent).updateAndRepaint()
@@ -165,7 +177,7 @@ internal class PackageDetailsInfoPanel : JPanel(), Displayable<PackageDetailsInf
         }
 
         descriptionLabel.isVisible = true
-        descriptionLabel.text = description.withHtmlStyling(wordWrap = true)
+        descriptionLabel.text = description.normalizeWhitespace().withHtmlStyling(wordWrap = true)
     }
 
     private fun displayRepositoriesIfAny(
@@ -198,7 +210,7 @@ internal class PackageDetailsInfoPanel : JPanel(), Displayable<PackageDetailsInf
         }
 
         val authorNames = authors.filterNot { it.name.isNullOrBlank() }
-            .map { StringUtils.normalizeSpace(it.name) }
+            .map { it.name.normalizeWhitespace() }
 
         val authorsString = if (authorNames.size == 1) {
             PackageSearchBundle.message("packagesearch.ui.toolwindow.packages.details.info.author", authorNames.joinToString())
@@ -240,7 +252,7 @@ internal class PackageDetailsInfoPanel : JPanel(), Displayable<PackageDetailsInf
             }
         )
         licensesLinkLabel.urlClickedListener = {
-            PackageSearchEventsLogger.logDetailsLinkClick(FUSGroupIds.DetailsLinkTypes.License, mainLicense.url)
+            PackageSearchEventsLogger.logDetailsLinkClick(FUSGroupIds.DetailsLinkTypes.License)
         }
     }
 
@@ -254,7 +266,7 @@ internal class PackageDetailsInfoPanel : JPanel(), Displayable<PackageDetailsInf
         projectWebsiteLinkLabel.url = projectWebsiteLink.url
         projectWebsiteLinkLabel.setDisplayText(projectWebsiteLink.displayNameCapitalized)
         projectWebsiteLinkLabel.urlClickedListener = {
-            PackageSearchEventsLogger.logDetailsLinkClick(FUSGroupIds.DetailsLinkTypes.ProjectWebsite, projectWebsiteLink.url)
+            PackageSearchEventsLogger.logDetailsLinkClick(FUSGroupIds.DetailsLinkTypes.ProjectWebsite)
         }
     }
 
@@ -268,7 +280,7 @@ internal class PackageDetailsInfoPanel : JPanel(), Displayable<PackageDetailsInf
         documentationLinkLabel.url = documentationLink.url
         documentationLinkLabel.setDisplayText(documentationLink.displayNameCapitalized)
         documentationLinkLabel.urlClickedListener = {
-            PackageSearchEventsLogger.logDetailsLinkClick(FUSGroupIds.DetailsLinkTypes.Documentation, documentationLink.url)
+            PackageSearchEventsLogger.logDetailsLinkClick(FUSGroupIds.DetailsLinkTypes.Documentation)
         }
     }
 
@@ -282,7 +294,7 @@ internal class PackageDetailsInfoPanel : JPanel(), Displayable<PackageDetailsInf
         readmeLinkLabel.url = readmeLink.url
         readmeLinkLabel.setDisplayText(readmeLink.displayNameCapitalized)
         readmeLinkLabel.urlClickedListener = {
-            PackageSearchEventsLogger.logDetailsLinkClick(FUSGroupIds.DetailsLinkTypes.Readme, readmeLink.url)
+            PackageSearchEventsLogger.logDetailsLinkClick(FUSGroupIds.DetailsLinkTypes.Readme)
         }
     }
 

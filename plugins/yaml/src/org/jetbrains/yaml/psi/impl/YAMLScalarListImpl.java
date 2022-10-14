@@ -13,6 +13,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.yaml.YAMLElementTypes;
 import org.jetbrains.yaml.YAMLTokenTypes;
+import org.jetbrains.yaml.psi.YAMLBlockScalar;
 import org.jetbrains.yaml.psi.YAMLScalarList;
 import org.jetbrains.yaml.psi.YamlPsiElementVisitor;
 
@@ -22,9 +23,9 @@ import static org.jetbrains.yaml.psi.impl.YAMLBlockScalarImplKt.isEol;
 
 /**
  * @author oleg
- * @see <http://www.yaml.org/spec/1.2/spec.html#id2795688>
+ * @see <a href="https://yaml.org/spec/1.2-old/spec.html#id2795688">YAML spec, 8.1.2</a>
  */
-public class YAMLScalarListImpl extends YAMLBlockScalarImpl implements YAMLScalarList {
+public class YAMLScalarListImpl extends YAMLBlockScalarImpl implements YAMLScalarList, YAMLBlockScalar {
   public YAMLScalarListImpl(@NotNull final ASTNode node) {
     super(node);
   }
@@ -97,7 +98,7 @@ public class YAMLScalarListImpl extends YAMLBlockScalarImpl implements YAMLScala
     int eolOffsetInParent = scalarEol.getStartOffsetInParent();
 
     int startContent = eolOffsetInParent + indent + 1;
-    if (startContent >= commonPrefixLength) {
+    if (startContent > commonPrefixLength) {
       // a very strange situation
       return super.updateText(text);
     }

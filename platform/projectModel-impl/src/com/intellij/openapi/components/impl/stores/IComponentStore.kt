@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.components.impl.stores
 
 import com.intellij.configurationStore.SaveSession
@@ -21,9 +21,7 @@ interface IComponentStore {
 
   fun initComponent(component: Any, serviceDescriptor: ServiceDescriptor?, pluginId: PluginId?)
 
-  @JvmDefault
-  fun unloadComponent(component: Any) {
-  }
+  fun unloadComponent(component: Any)
 
   fun initPersistencePlainComponent(component: Any, @NlsSafe key: String)
 
@@ -42,16 +40,9 @@ interface IComponentStore {
   fun removeComponent(name: String)
 
   @TestOnly
-  @JvmDefault
-  fun clearCaches() {}
+  fun clearCaches()
 
-  @JvmDefault
-  fun release() {}
-}
-
-@ApiStatus.Internal
-interface IComponentStoreOwner {
-  val componentStore: IComponentStore
+  fun release()
 }
 
 data class SaveSessionAndFile(val session: SaveSession, val file: VirtualFile)

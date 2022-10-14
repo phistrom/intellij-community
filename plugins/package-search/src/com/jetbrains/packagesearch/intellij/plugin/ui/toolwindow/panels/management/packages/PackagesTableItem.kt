@@ -1,24 +1,43 @@
+/*******************************************************************************
+ * Copyright 2000-2022 JetBrains s.r.o. and contributors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ ******************************************************************************/
+
 package com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.panels.management.packages
 
 import com.intellij.ide.CopyProvider
+import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.actionSystem.DataKey
 import com.intellij.openapi.actionSystem.DataProvider
 import com.intellij.openapi.actionSystem.PlatformDataKeys
 import com.intellij.openapi.ide.CopyPasteManager
-import com.intellij.util.text.VersionComparatorUtil
 import com.jetbrains.packagesearch.intellij.plugin.PackageSearchBundle
 import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.models.PackageModel
 import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.models.PackageScope
-import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.models.SelectedPackageModel
+import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.models.UiPackageModel
+import com.jetbrains.packagesearch.intellij.plugin.util.VersionNameComparator
 import java.awt.datatransfer.StringSelection
 
 internal sealed class PackagesTableItem<T : PackageModel> : DataProvider, CopyProvider {
 
     val packageModel: T
-        get() = selectedPackageModel.packageModel
+        get() = uiPackageModel.packageModel
 
-    abstract val selectedPackageModel: SelectedPackageModel<T>
+    abstract val uiPackageModel: UiPackageModel<T>
+
+    abstract val allScopes: List<PackageScope>
 
     protected open val handledDataKeys: List<DataKey<*>> = listOf(PlatformDataKeys.COPY_PROVIDER)
 
@@ -44,7 +63,7 @@ internal sealed class PackagesTableItem<T : PackageModel> : DataProvider, CopyPr
                 append(
                     versions.map { it.version }
                         .distinct()
-                        .sortedWith(VersionComparatorUtil.COMPARATOR)
+                        .sortedWith(VersionNameComparator)
                         .joinToString(", ")
                         .removeSuffix(", ")
                 )
@@ -79,18 +98,19 @@ internal sealed class PackagesTableItem<T : PackageModel> : DataProvider, CopyPr
 
     protected abstract fun additionalCopyText(): String
 
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+
     override fun isCopyVisible(dataContext: DataContext) = true
 
     override fun isCopyEnabled(dataContext: DataContext) = true
 
     data class InstalledPackage(
-        override val selectedPackageModel: SelectedPackageModel<PackageModel.Installed>,
-        val installedScopes: List<PackageScope>,
-        val defaultScope: PackageScope
+        override val uiPackageModel: UiPackageModel.Installed,
+        override val allScopes: List<PackageScope>
     ) : PackagesTableItem<PackageModel.Installed>() {
 
         init {
-            require(installedScopes.isNotEmpty()) { "An installed package must have at least one installed scope" }
+            require(allScopes.isNotEmpty()) { "An installed package must have at least one installed scope" }
         }
 
         override fun additionalCopyText() = buildString {
@@ -99,7 +119,7 @@ internal sealed class PackagesTableItem<T : PackageModel> : DataProvider, CopyPr
             appendLine()
             append("${PackageSearchBundle.message("packagesearch.package.copyableInfo.installedVersions")} ")
             append(
-                packageModel.usageInfo.map { it.version }
+                packageModel.usageInfo.map { it.declaredVersion }
                     .distinct()
                     .joinToString(", ")
                     .removeSuffix(", ")
@@ -108,15 +128,14 @@ internal sealed class PackagesTableItem<T : PackageModel> : DataProvider, CopyPr
     }
 
     data class InstallablePackage(
-        override val selectedPackageModel: SelectedPackageModel<PackageModel.SearchResult>,
-        val availableScopes: List<PackageScope>,
-        val defaultScope: PackageScope
+        override val uiPackageModel: UiPackageModel.SearchResult,
+        override val allScopes: List<PackageScope>
     ) : PackagesTableItem<PackageModel.SearchResult>() {
 
-        override fun additionalCopyText() = ""
-
         init {
-            require(availableScopes.isNotEmpty()) { "A package must have at least one available scope" }
+            require(allScopes.isNotEmpty()) { "An installable package must have at least one available scope" }
         }
+
+        override fun additionalCopyText() = ""
     }
 }

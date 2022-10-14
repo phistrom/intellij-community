@@ -1,3 +1,19 @@
+/*******************************************************************************
+ * Copyright 2000-2022 JetBrains s.r.o. and contributors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ ******************************************************************************/
+
 package com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.panels.management.packagedetails
 
 import com.intellij.icons.AllIcons
@@ -6,6 +22,7 @@ import com.jetbrains.packagesearch.intellij.plugin.fus.FUSGroupIds
 import com.jetbrains.packagesearch.intellij.plugin.fus.PackageSearchEventsLogger
 import com.jetbrains.packagesearch.intellij.plugin.ui.PackageSearchUI
 import com.jetbrains.packagesearch.intellij.plugin.ui.updateAndRepaint
+import com.jetbrains.packagesearch.intellij.plugin.ui.util.compensateForHighlightableComponentMarginLeft
 import com.jetbrains.packagesearch.intellij.plugin.ui.util.emptyBorder
 import com.jetbrains.packagesearch.intellij.plugin.ui.util.noInsets
 import com.jetbrains.packagesearch.intellij.plugin.ui.util.scaled
@@ -59,7 +76,7 @@ internal class GitHubInfoPanel : JPanel() {
         }
 
     init {
-        background = PackageSearchUI.UsualBackgroundColor
+        background = PackageSearchUI.Colors.panelBackground
         border = emptyBorder(0)
         layout = MigLayout(
             LC().skipInvisibleComponents()
@@ -69,9 +86,9 @@ internal class GitHubInfoPanel : JPanel() {
             AC().fill()
         )
         linkLabel.urlClickedListener = {
-            PackageSearchEventsLogger.logDetailsLinkClick(FUSGroupIds.DetailsLinkTypes.GitHub, url ?: "unknown")
+            PackageSearchEventsLogger.logDetailsLinkClick(FUSGroupIds.DetailsLinkTypes.GitHub)
         }
-        add(linkLabel, CC().pad(1, (-2).scaled(), 0, 0))
+        add(linkLabel, CC().compensateForHighlightableComponentMarginLeft())
         add(starsLabel)
     }
 }

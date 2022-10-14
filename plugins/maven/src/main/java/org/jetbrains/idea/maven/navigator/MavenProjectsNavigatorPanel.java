@@ -15,7 +15,7 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
 import com.intellij.ui.PopupHandler;
 import com.intellij.ui.ScrollPaneFactory;
-import com.intellij.ui.mac.TouchbarDataKeys;
+import com.intellij.ui.mac.touchbar.Touchbar;
 import com.intellij.ui.treeStructure.SimpleNode;
 import com.intellij.ui.treeStructure.SimpleTree;
 import com.intellij.util.containers.ContainerUtil;
@@ -116,15 +116,26 @@ public final class MavenProjectsNavigatorPanel extends SimpleToolWindowPanel imp
         return id;
       }
     });
+
+    Touchbar.setActions(this, "Maven.Reimport");
   }
 
   @Override
   @Nullable
   public Object getData(@NotNull @NonNls String dataId) {
-    if (PlatformDataKeys.HELP_ID.is(dataId)) return "reference.toolWindows.mavenProjects";
-
+    if (PlatformCoreDataKeys.BGT_DATA_PROVIDER.is(dataId)) {
+      return (DataProvider)slowId -> getSlowData(slowId);
+    }
+    if (PlatformCoreDataKeys.HELP_ID.is(dataId)) return "reference.toolWindows.mavenProjects";
     if (CommonDataKeys.PROJECT.is(dataId)) return myProject;
 
+    if (MavenDataKeys.MAVEN_PROJECTS_TREE.is(dataId)) {
+      return myTree;
+    }
+    return super.getData(dataId);
+  }
+
+  private @Nullable Object getSlowData(@NotNull String dataId) {
     if (CommonDataKeys.VIRTUAL_FILE.is(dataId)) return extractVirtualFile();
     if (CommonDataKeys.VIRTUAL_FILE_ARRAY.is(dataId)) return extractVirtualFiles();
 
@@ -138,14 +149,8 @@ public final class MavenProjectsNavigatorPanel extends SimpleToolWindowPanel imp
     if (MavenDataKeys.MAVEN_DEPENDENCIES.is(dataId)) {
       return extractDependencies();
     }
-    if (MavenDataKeys.MAVEN_PROJECTS_TREE.is(dataId)) {
-      return myTree;
-    }
-    if (TouchbarDataKeys.ACTIONS_KEY.is(dataId)) {
-      return new DefaultActionGroup(ActionManager.getInstance().getAction("Maven.Reimport"));
-    }
 
-    return super.getData(dataId);
+    return null;
   }
 
   private VirtualFile extractVirtualFile() {
@@ -286,6 +291,8 @@ public final class MavenProjectsNavigatorPanel extends SimpleToolWindowPanel imp
 
     @Override
     public boolean importData(final TransferSupport support) {
+
+      //todo new maven importing
       if (canImport(support)) {
         List<VirtualFile> pomFiles = new ArrayList<>();
 

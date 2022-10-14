@@ -5,8 +5,11 @@ import com.intellij.util.ArrayUtilRt;
 import com.intellij.util.ConcurrencyUtil;
 import com.intellij.util.Processor;
 import com.intellij.util.SystemProperties;
+import com.intellij.util.io.stats.PersistentEnumeratorStatistics;
+import com.intellij.util.io.stats.StorageStatsRegistrar;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.VisibleForTesting;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -24,6 +27,8 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
   private static final int DEFAULT_BTREE_PAGE_SIZE = 32768;
 
   private static final boolean DO_EXPENSIVE_CHECKS = SystemProperties.getBooleanProperty("idea.persistent.enumerator.do.expensive.checks", false);
+  @VisibleForTesting
+  public static final String DO_SELF_HEAL_PROP = "idea.persistent.enumerator.do.self.heal";
 
   static {
     BTREE_PAGE_SIZE = SystemProperties.getIntProperty("idea.btree.page.size", DEFAULT_BTREE_PAGE_SIZE);
@@ -48,17 +53,20 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
   private static final int COLLISION_OFFSET = 4;
   private int myValuesCount;
   private int myCollisions;
-  private int myExistingKeysEnumerated;
 
   private IntToIntBtree myBTree;
   private final boolean myInlineKeysNoMapping;
   private boolean myExternalKeysNoMapping;
+  private final boolean myRegisterForStats;
 
   private final @Nullable PersistentEnumeratorWal<Data> myWal;
 
   private static final int MAX_DATA_SEGMENT_LENGTH = 128;
 
-  protected static final int VERSION = 8 + IntToIntBtree.version() + BTREE_PAGE_SIZE + INTERNAL_PAGE_SIZE + MAX_DATA_SEGMENT_LENGTH;
+  protected static int baseVersion() {
+    return 8 + IntToIntBtree.version() + BTREE_PAGE_SIZE + INTERNAL_PAGE_SIZE + MAX_DATA_SEGMENT_LENGTH;
+  }
+
   private static final int KEY_SHIFT = 1;
 
   public PersistentBTreeEnumerator(@NotNull Path file, @NotNull KeyDescriptor<Data> dataDescriptor, int initialSize) throws IOException {
@@ -69,7 +77,7 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
                                    @NotNull KeyDescriptor<Data> dataDescriptor,
                                    int initialSize,
                                    @Nullable StorageLockContext lockContext) throws IOException {
-    this(file, dataDescriptor, initialSize, lockContext, 0, false);
+    this(file, dataDescriptor, initialSize, lockContext, 0, false, true);
   }
 
   public PersistentBTreeEnumerator(@NotNull Path file,
@@ -77,15 +85,16 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
                                    int initialSize,
                                    @Nullable StorageLockContext lockContext,
                                    int version) throws IOException {
-    this(file, dataDescriptor, initialSize, lockContext, version, false);
+    this(file, dataDescriptor, initialSize, lockContext, version, false, true);
   }
 
-  public PersistentBTreeEnumerator(@NotNull Path file,
-                                   @NotNull KeyDescriptor<Data> dataDescriptor,
-                                   int initialSize,
-                                   @Nullable StorageLockContext lockContext,
-                                   int version,
-                                   boolean enableWal) throws IOException {
+  PersistentBTreeEnumerator(@NotNull Path file,
+                            @NotNull KeyDescriptor<Data> dataDescriptor,
+                            int initialSize,
+                            @Nullable StorageLockContext lockContext,
+                            int version,
+                            boolean enableWal,
+                            boolean registerForStats) throws IOException {
     super(file,
           new ResizeableMappedFile(
             file,
@@ -93,45 +102,48 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
             lockContext,
             VALUE_PAGE_SIZE,
             true,
-            IOUtil.BYTE_BUFFERS_USE_NATIVE_BYTE_ORDER
+            IOUtil.useNativeByteOrderForByteBuffers()
           ),
           dataDescriptor,
           initialSize,
-          new Version(VERSION + version),
+          new Version(baseVersion() + version),
           new RecordBufferHandler(),
           false
     );
 
     myInlineKeysNoMapping = dataDescriptor instanceof InlineKeyDescriptor;
     myExternalKeysNoMapping = !(dataDescriptor instanceof InlineKeyDescriptor);
+    myRegisterForStats = registerForStats;
 
-    if (myBTree == null) {
+    if (myRegisterForStats) {
+      StorageStatsRegistrar.INSTANCE.registerEnumerator(file, this);
+    }
+
+    try {
+      lockStorageWrite();
+      storeVars(false);
+      initBtree(false);
+      storeBTreeVars(false);
+    }
+    catch (IOException e) {
       try {
-        lockStorageWrite();
-        storeVars(false);
-        initBtree(false);
-        storeBTreeVars(false);
+        close();  // cleanup already initialized state
       }
-      catch (IOException e) {
-        try {
-          close();  // cleanup already initialized state
-        }
-        catch (Throwable ignored) {
-        }
-        throw e;
+      catch (Throwable ignored) {
       }
-      catch (Throwable e) {
-        LOG.info(e);
-        try {
-          close();  // cleanup already initialized state
-        }
-        catch (Throwable ignored) {
-        }
-        throw new CorruptedException(file);
+      throw e;
+    }
+    catch (Throwable e) {
+      LOG.info(e);
+      try {
+        close();  // cleanup already initialized state
       }
-      finally {
-        unlockStorageWrite();
+      catch (Throwable ignored) {
       }
+      throw new CorruptedException(file);
+    }
+    finally {
+      unlockStorageWrite();
     }
 
     diagnose();
@@ -145,6 +157,7 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
 
   private void doExpensiveSanityCheck() {
     try {
+      LOG.info("Doing self diagnostic for " + myFile);
       List<Data> storedData = new ArrayList<>();
       iterateData(data -> {
         storedData.add(data);
@@ -158,7 +171,7 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
           if (tryEnumerate(data) != id) {
             throw new IOException(myFile + " is corrupted");
           }
-          if (myDataDescriptor.isEqual(valueOf(id), data)) {
+          if (!myDataDescriptor.isEqual(valueOf(id), data)) {
             throw new IOException(myFile + " is corrupted");
           }
         }
@@ -180,9 +193,61 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
   }
 
   @Override
-  protected void markCorrupted() {
-    diagnose();
-    super.markCorrupted();
+  protected boolean trySelfHeal() {
+    if (!SystemProperties.getBooleanProperty(DO_SELF_HEAL_PROP, false)) {
+      return false;
+    }
+    LOG.info("Trying to self-heal " + myFile);
+
+    class DataWithOffset {
+      final Data data;
+      final int offset;
+
+      DataWithOffset(Data data, int offset) {
+        this.data = data;
+        this.offset = offset;
+      }
+    }
+
+    List<DataWithOffset> items = new ArrayList<>();
+    try {
+      doIterateData((offset, data) -> {
+        items.add(new DataWithOffset(data, offset));
+        return true;
+      });
+
+      lockStorageWrite();
+      try {
+        myStorage.clear();
+        myKeyStorage.clear();
+        myStorage.ensureSize(4096);
+        markDirty(true);
+        putMetaData(0);
+        putMetaData2(0);
+
+        if (myBTree != null) {
+          myBTree.doClose();
+        }
+        setupEmptyFile();
+        doFlush();
+      }
+      finally {
+        unlockStorageWrite();
+      }
+
+      for (DataWithOffset item : items) {
+        int id = enumerate(item.data);
+        int expectedId = item.offset + 1;
+        if (expectedId != id) {
+          throw new IOException("Enumeration order has been changed while self-healing, were " + expectedId + " now " + id);
+        }
+      }
+    }
+    catch (Throwable throwable) {
+      LOG.info(throwable);
+      return false;
+    }
+    return true;
   }
 
   @NotNull
@@ -203,7 +268,7 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
     myDuplicatedValuesPageOffset = store(DATA_START + 20, myDuplicatedValuesPageOffset, toDisk);
     myValuesCount = store(DATA_START + 24, myValuesCount, toDisk);
     myCollisions = store(DATA_START + 28, myCollisions, toDisk);
-    myExistingKeysEnumerated = store(DATA_START + 32, myExistingKeysEnumerated, toDisk);
+    //store(DATA_START + 32, xxx, toDisk); empty field
     storeBTreeVars(toDisk);
   }
 
@@ -303,11 +368,6 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
           }
         });
       }
-      catch (IllegalStateException e) {
-        CorruptedException corruptedException = new CorruptedException(myFile);
-        corruptedException.initCause(e);
-        throw corruptedException;
-      }
       finally {
         unlockStorageRead();
       }
@@ -325,13 +385,14 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
   @Override
   protected int indexToAddr(int idx) throws IOException {
     if (myExternalKeysNoMapping) {
-      IntToIntBtree.myAssert(idx > 0);
+      assert idx > 0;
       return idx - KEY_SHIFT;
     }
 
     int anInt = myStorage.getInt(idx);
     if (IntToIntBtree.doSanityCheck) {
-      IntToIntBtree.myAssert(anInt >= 0 || myDataDescriptor instanceof InlineKeyDescriptor);
+      boolean b = anInt >= 0 || myDataDescriptor instanceof InlineKeyDescriptor;
+      assert b;
     }
     return anInt;
   }
@@ -379,11 +440,6 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
 
         return keyIdToNonNegativeOffset(myResultBuf[0]);
       }
-      catch (IllegalStateException e) {
-        CorruptedException exception = new CorruptedException(myFile);
-        exception.initCause(e);
-        throw exception;
-      }
       finally {
         unlockStorageRead();
       }
@@ -427,11 +483,6 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
           myStorage.putLong(pos, value);
           myBTree.put(intKey, -pos);
         }
-      }
-      catch (IllegalStateException e) {
-        CorruptedException exception = new CorruptedException(myFile);
-        exception.initCause(e);
-        throw exception;
       }
       finally {
         unlockStorageWrite();
@@ -485,7 +536,6 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
             // we found reference to no dupe key
             if (isKeyAtIndex(value, indexNodeValueAddress)) {
               if (!saveNewValue) {
-                ++myExistingKeysEnumerated;
                 return indexNodeValueAddress;
               }
               hasExistingData = true;
@@ -527,14 +577,7 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
         }
 
         if (IOStatistics.DEBUG && (myValuesCount & IOStatistics.KEYS_FACTOR_MASK) == 0) {
-          IOStatistics.dump("Index " +
-                            myFile +
-                            ", values " +
-                            myValuesCount +
-                            ", existing keys enumerated:" + myExistingKeysEnumerated +
-                            ", storage size:" +
-                            myStorage.length());
-          myBTree.dumpStatistics();
+          IOStatistics.dump("Enumerator " + myFile + ": " + getStatistics());
         }
 
         if (collisionAddress != NULL_ID) {
@@ -571,15 +614,10 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
         if (IntToIntBtree.doSanityCheck) {
           if (!myInlineKeysNoMapping) {
             Data data = valueOf(newValueId);
-            IntToIntBtree.myAssert(myDataDescriptor.isEqual(value, data));
+            assert myDataDescriptor.isEqual(value, data);
           }
         }
         return newValueId;
-      }
-      catch (IllegalStateException e) {
-        CorruptedException exception = new CorruptedException(myFile);
-        exception.initCause(e);
-        throw exception;
       }
       finally {
         if (onlyCheckForExisting) {
@@ -592,6 +630,20 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
     }
     finally {
       (onlyCheckForExisting ? getReadLock() : getWriteLock()).unlock();
+    }
+  }
+
+  public @NotNull PersistentEnumeratorStatistics getStatistics() throws IOException {
+    lockStorageRead();
+    try {
+      return new PersistentEnumeratorStatistics(myBTree.getStatistics(),
+                                                myCollisions,
+                                                myValuesCount,
+                                                myKeyStorage.getCurrentLength(),
+                                                myStorage.length());
+    }
+    finally {
+      unlockStorageRead();
     }
   }
 
@@ -608,6 +660,35 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
   }
 
   @Override
+  protected void dumpKeysOnCorruption() {
+    try {
+      force();
+    }
+    catch (Exception e) {
+      // ignore...
+    }
+
+    lockStorageWrite();
+    try {
+      try {
+        LOG.info("Listing corrupted enumerator:");
+        doIterateData((offset, data) -> {
+          LOG.info("Enumerator entry '" + data.toString() + "'");
+          return true;
+        });
+        LOG.info("Listing ended.");
+      }
+      catch (Throwable throwable) {
+        LOG.info(throwable);
+      }
+
+    }
+    finally {
+      unlockStorageWrite();
+    }
+  }
+
+  @Override
   public void close() throws IOException {
     try {
       super.close();
@@ -615,6 +696,9 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
     finally {
       if (myWal != null) {
         myWal.close();
+      }
+      if (myRegisterForStats) {
+        StorageStatsRegistrar.INSTANCE.unregisterEnumerator(myFile);
       }
     }
   }
@@ -628,6 +712,11 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
   public Data valueOf(int idx) throws IOException {
     assert !myInlineKeysNoMapping : "No valueOf for inline keys with no mapping option";
     return super.valueOf(idx);
+  }
+
+  @Override
+  protected boolean shouldLockOnValueOf() {
+    return !myExternalKeysNoMapping;
   }
 
   private int nextDuplicatedValueRecord() {

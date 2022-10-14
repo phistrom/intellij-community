@@ -22,9 +22,6 @@ import java.lang.reflect.Type;
 import java.util.*;
 import java.util.concurrent.ConcurrentMap;
 
-/**
- * @author peter
- */
 public final class ModelMergerImpl implements ModelMerger {
   private final List<Pair<InvocationStrategy, Class<?>>> myInvocationStrategies = new ArrayList<>();
   private final List<MergingStrategy> myMergingStrategies = new ArrayList<>();
@@ -297,11 +294,11 @@ public final class ModelMergerImpl implements ModelMerger {
     final Method method = getPrimaryKeyMethod(implementation.getClass());
     if (method != null) {
       final Object o = DomReflectionUtil.invokeMethod(method, implementation);
-      return ReflectionUtil.isAssignable(GenericValue.class, method.getReturnType()) ? ((GenericValue)o).getValue() : o;
+      return ReflectionUtil.isAssignable(GenericValue.class, method.getReturnType()) ? ((GenericValue<?>)o).getValue() : o;
     }
     else {
       if (implementation instanceof GenericValue) {
-        return singleValuedInvocation? Boolean.TRUE : ((GenericValue)implementation).getValue();
+        return singleValuedInvocation? Boolean.TRUE : ((GenericValue<?>)implementation).getValue();
       }
       else {
         return null;

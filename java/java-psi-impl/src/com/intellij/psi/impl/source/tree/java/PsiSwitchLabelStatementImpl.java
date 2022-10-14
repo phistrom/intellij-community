@@ -1,9 +1,10 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.impl.source.tree.java;
 
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.psi.*;
+import com.intellij.psi.controlFlow.*;
 import com.intellij.psi.impl.source.tree.ChildRole;
 import com.intellij.psi.impl.source.tree.ElementType;
 import com.intellij.psi.impl.source.tree.JavaElementType;
@@ -83,7 +84,7 @@ public class PsiSwitchLabelStatementImpl extends PsiSwitchLabelStatementBaseImpl
    *   <li>The current {@link PsiSwitchLabelStatement} is the switch label where it's legal to resolve the passed element.
    *      <p>
    *        Read more about scopes of variables in pattern matching for switch statements in
-   *        <a href="https://openjdk.java.net/jeps/406#3--Scope-of-pattern-variable-declarations">the JEP</a>.
+   *        <a href="https://openjdk.org/jeps/406#3--Scope-of-pattern-variable-declarations">the JEP</a>.
    *      </p>
    *   </li>
    * </ol>
@@ -96,61 +97,51 @@ public class PsiSwitchLabelStatementImpl extends PsiSwitchLabelStatementBaseImpl
     final AtomicBoolean thisSwitchLabelIsImmediate = new AtomicBoolean();
 
     PsiTreeUtil.treeWalkUp(place, getParent(), (currentScope, __) -> {
-      final PsiElement sibling = PsiTreeUtil.skipWhitespacesBackward(currentScope.getPrevSibling());
-      if (sibling == this) {
+
+      PsiSwitchLabelStatementBase immediateSwitchLabel;
+
+      if (currentScope instanceof PsiSwitchLabelStatementBase) {
+        immediateSwitchLabel = (PsiSwitchLabelStatementBase)currentScope;
+      }
+      else {
+        immediateSwitchLabel = PsiTreeUtil.getPrevSiblingOfType(currentScope, PsiSwitchLabelStatementBase.class);
+      }
+
+      while (immediateSwitchLabel != null && isFallthrough(immediateSwitchLabel) && isCaseNull(immediateSwitchLabel)) {
+        immediateSwitchLabel = PsiTreeUtil.getPrevSiblingOfType(immediateSwitchLabel, PsiSwitchLabelStatementBase.class);
+      }
+
+      if (immediateSwitchLabel == this) {
         thisSwitchLabelIsImmediate.set(true);
         return false;
       }
       return true;
     });
 
-    if (!thisSwitchLabelIsImmediate.get()) return false;
-
-    final PsiElement prevSibling = PsiTreeUtil.skipWhitespacesBackward(getPrevSibling());
-
-    if (prevSibling instanceof PsiBreakStatement) return true;
-    if (prevSibling instanceof PsiBlockStatement && hasBreakStatement((PsiBlockStatement)prevSibling)) return true;
-
-    final PsiSwitchLabelStatement prevCaseLabel = PsiTreeUtil.getPrevSiblingOfType(this, PsiSwitchLabelStatement.class);
-    if (prevCaseLabel != null && isNullCaseLabel(prevCaseLabel)) return true;
-
-    return isFirstCaseLabel(this);
+    return thisSwitchLabelIsImmediate.get();
   }
 
-  /**
-   * Checks if the passed switch case label is {@code "case null"} only
-   * @param label a switch case label to check
-   * @return true if the passed label is for {@code "case null"}
-   */
-  private static boolean isNullCaseLabel(PsiSwitchLabelStatement label) {
-    final PsiCaseLabelElementList list = label.getCaseLabelElementList();
-    if (list == null) return true;
-    final PsiCaseLabelElement[] elements = list.getElements();
-    return elements.length == 1 && elements[0].textMatches(PsiKeyword.NULL);
+  private static boolean isFallthrough(@NotNull PsiSwitchLabelStatementBase immediateSwitchLabel) {
+    final PsiStatement prevStmt = PsiTreeUtil.getPrevSiblingOfType(immediateSwitchLabel, PsiStatement.class);
+
+    if (prevStmt == null) return false;
+    if (prevStmt instanceof PsiSwitchLabelStatementBase) return true;
+
+    try {
+      final ControlFlow flow = ControlFlowFactory.getControlFlow(prevStmt, new LocalsControlFlowPolicy(prevStmt), ControlFlowOptions.NO_CONST_EVALUATE);
+      return ControlFlowUtil.canCompleteNormally(flow, 0, flow.getSize());
+    }
+    catch (AnalysisCanceledException e) {
+      return false;
+    }
   }
 
-  /**
-   * Checks if the block statement contains the {@code break} keyword
-   * @param block a code block to analyze
-   * @return true if the passed code block contains {@code break}
-   */
-  private static boolean hasBreakStatement(PsiBlockStatement block) {
-    final PsiCodeBlock prevCaseLabelCodeBlock = block.getCodeBlock();
-    final PsiStatement[] statements = prevCaseLabelCodeBlock.getStatements();
+  private static boolean isCaseNull(@NotNull PsiSwitchLabelStatementBase switchCaseLabel) {
+    if (switchCaseLabel.getCaseLabelElementList() == null) return false;
 
-    return statements.length != 0 && statements[statements.length - 1] instanceof PsiBreakStatement;
-  }
+    final PsiCaseLabelElement[] elements = switchCaseLabel.getCaseLabelElementList().getElements();
+    if (elements.length != 1) return false;
 
-  /**
-   * Checks if the passed {@link PsiSwitchLabelStatement} instance is the first switch case label of its switch statement
-   * @param switchLabel a switch case label to check
-   * @return true if the passed switch case label case is the first in its switch statement
-   */
-  private static boolean isFirstCaseLabel(PsiSwitchLabelStatement switchLabel) {
-    final PsiElement switchBody = switchLabel.getParent();
-    if (!(switchBody instanceof PsiCodeBlock)) return false;
-
-    final PsiStatement[] statements = ((PsiCodeBlock)switchBody).getStatements();
-    return statements.length != 0 && statements[0] == switchLabel;
+    return elements[0].getNode().getFirstChildNode().getElementType() == JavaTokenType.NULL_KEYWORD;
   }
 }

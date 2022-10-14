@@ -59,8 +59,11 @@ public final class JavaBackwardReferenceIndexReaderFactory implements CompilerRe
   }
 
   public static class BackwardReferenceReader extends CompilerReferenceReader<JavaCompilerBackwardReferenceIndex> {
+    private final Project myProject;
+
     protected BackwardReferenceReader(Project project, File buildDir) {
       super(buildDir, new JavaCompilerBackwardReferenceIndex(buildDir, new PathRelativizerService(project.getBasePath()), true));
+      myProject = project;
     }
 
     @Override
@@ -115,15 +118,20 @@ public final class JavaBackwardReferenceIndexReaderFactory implements CompilerRe
       Class<? extends CompilerRef> requiredCompilerRefClass = searchType.getRequiredClass(adapter);
 
       Map<VirtualFile, SearchId[]> candidatesPerFile = new HashMap<>();
-      myIndex.get(JavaCompilerIndices.BACK_HIERARCHY).getData(searchElement).forEach((fileId, defs) -> {
-        final List<CompilerRef> requiredCandidates = ContainerUtil.filter(defs, requiredCompilerRefClass::isInstance);
-        if (requiredCandidates.isEmpty()) return true;
-        final VirtualFile file = findFile(fileId);
-        if (file != null && effectiveSearchScope.contains(file)) {
-          candidatesPerFile.put(file, searchType.convertToIds(requiredCandidates, myIndex.getByteSeqEum()));
-        }
-        return true;
-      });
+      try {
+        myIndex.get(JavaCompilerIndices.BACK_HIERARCHY).getData(searchElement).process((fileId, defs) -> {
+          final List<CompilerRef> requiredCandidates = ContainerUtil.filter(defs, requiredCompilerRefClass::isInstance);
+          if (requiredCandidates.isEmpty()) return true;
+          final VirtualFile file = findFile(fileId);
+          if (file != null && effectiveSearchScope.contains(file)) {
+            candidatesPerFile.put(file, searchType.convertToIds(requiredCandidates, myIndex.getByteSeqEum()));
+          }
+          return true;
+        });
+      }
+      catch (IOException e) {
+        throw new StorageException(e);
+      }
       return candidatesPerFile.isEmpty() ? Collections.emptyMap() : candidatesPerFile;
     }
 
@@ -228,6 +236,7 @@ public final class JavaBackwardReferenceIndexReaderFactory implements CompilerRe
                                                                                                                                                            boolean includeAnonymous,
                                                                                                                                                            int interruptNumber) {
       try {
+        List<DirectInheritorProvider> directInheritorProviders = DirectInheritorProvider.EP_NAME.getExtensionList(myProject);
         Set<CompilerRef.CompilerClassHierarchyElementDef> result = new HashSet<>();
         Deque<CompilerRef.CompilerClassHierarchyElementDef> q = new ArrayDeque<>(10);
         q.addLast(hierarchyElement);
@@ -255,6 +264,17 @@ public final class JavaBackwardReferenceIndexReaderFactory implements CompilerRe
               }
               return true;
             });
+            try {
+              SearchId searchId = curClass instanceof SearchIdHolder
+                                  ? ((SearchIdHolder)curClass).getSearchId()
+                                  : CompilerHierarchySearchType.DIRECT_INHERITOR.convertToId(curClass, myIndex.getByteSeqEum());
+
+              for (DirectInheritorProvider provider : directInheritorProviders) {
+                q.addAll(provider.findDirectInheritors(searchId, myIndex.getByteSeqEum()));
+              }
+            }
+            catch (IOException ignored) {
+            }
           }
         }
         return result.toArray(CompilerRef.CompilerClassHierarchyElementDef.EMPTY_ARRAY);
@@ -264,7 +284,7 @@ public final class JavaBackwardReferenceIndexReaderFactory implements CompilerRe
       }
     }
 
-    CompilerRef.CompilerClassHierarchyElementDef @NotNull [] getDirectInheritors(CompilerRef hierarchyElement)
+    @NotNull Collection<CompilerRef.CompilerClassHierarchyElementDef> getDirectInheritors(CompilerRef hierarchyElement)
       throws StorageException {
       Set<CompilerRef.CompilerClassHierarchyElementDef> result = new HashSet<>();
       myIndex.get(JavaCompilerIndices.BACK_HIERARCHY).getData(hierarchyElement).forEach((id, children) -> {
@@ -275,7 +295,17 @@ public final class JavaBackwardReferenceIndexReaderFactory implements CompilerRe
         }
         return true;
       });
-      return result.toArray(CompilerRef.CompilerClassHierarchyElementDef.EMPTY_ARRAY);
+      return result;
+    }
+
+    @Override
+    public @NotNull SearchId @NotNull[] getDirectInheritorsNames(CompilerRef hierarchyElement) throws StorageException {
+      try {
+        return CompilerHierarchySearchType.DIRECT_INHERITOR.convertToIds(getDirectInheritors(hierarchyElement), myIndex.getByteSeqEum());
+      }
+      catch (IOException e) {
+        throw new StorageException(e);
+      }
     }
 
     private enum DefCount {NONE, ONE, MANY}

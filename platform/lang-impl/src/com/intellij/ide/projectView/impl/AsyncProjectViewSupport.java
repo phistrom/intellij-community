@@ -1,9 +1,9 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.projectView.impl;
 
 import com.intellij.ide.CopyPasteUtil;
-import com.intellij.ide.bookmarks.Bookmark;
-import com.intellij.ide.bookmarks.BookmarksListener;
+import com.intellij.ide.bookmark.BookmarksListener;
+import com.intellij.ide.bookmark.FileBookmarksListener;
 import com.intellij.ide.projectView.ProjectViewPsiTreeChangeListener;
 import com.intellij.ide.projectView.impl.ProjectViewPaneSelectionHelper.SelectionDescriptor;
 import com.intellij.ide.util.treeView.AbstractTreeNode;
@@ -30,7 +30,6 @@ import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.ui.tree.TreeUtil;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.concurrency.Promise;
 
 import javax.swing.*;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -38,6 +37,7 @@ import javax.swing.tree.TreePath;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
 import static com.intellij.ide.util.treeView.TreeState.expand;
 import static com.intellij.ui.tree.project.ProjectFileNode.findArea;
@@ -77,23 +77,7 @@ public class AsyncProjectViewSupport {
       }
     };
     MessageBusConnection connection = project.getMessageBus().connect(parent);
-    connection.subscribe(BookmarksListener.TOPIC, new BookmarksListener() {
-      @Override
-      public void bookmarkAdded(@NotNull Bookmark bookmark) {
-        bookmarkChanged(bookmark);
-      }
-
-      @Override
-      public void bookmarkRemoved(@NotNull Bookmark bookmark) {
-        bookmarkChanged(bookmark);
-      }
-
-      @Override
-      public void bookmarkChanged(@NotNull Bookmark bookmark) {
-        VirtualFile file = bookmark.getFile();
-        updateByFile(file, !file.isDirectory());
-      }
-    });
+    connection.subscribe(BookmarksListener.TOPIC, new FileBookmarksListener(file -> updateByFile(file, !file.isDirectory())));
     PsiManager.getInstance(project).addPsiTreeChangeListener(new ProjectViewPsiTreeChangeListener(project) {
       @Override
       protected boolean isFlattenPackages() {
@@ -229,8 +213,10 @@ public class AsyncProjectViewSupport {
 
   public void updateAll(Runnable onDone) {
     LOG.debug(new RuntimeException("reload a whole tree"));
-    Promise<?> promise = myStructureTreeModel.invalidate();
-    if (onDone != null) promise.onSuccess(res -> myAsyncTreeModel.onValidThread(onDone));
+    CompletableFuture<?> future = myStructureTreeModel.invalidateAsync();
+    if (onDone != null) {
+      future.thenRun(() -> myAsyncTreeModel.onValidThread(onDone));
+    }
   }
 
   public void update(@NotNull TreePath path, boolean structure) {

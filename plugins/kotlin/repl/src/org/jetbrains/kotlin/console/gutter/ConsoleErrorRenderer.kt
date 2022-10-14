@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.console.gutter
 
@@ -16,6 +16,7 @@ class ConsoleErrorRenderer(private val messages: List<SeverityDetails>) : Gutter
 
     override fun getTooltipText(): String {
         val htmlTooltips = messages.map { "<b>${msgType(it.severity)}</b> ${it.description}" }
+        @Suppress("HardCodedStringLiteral")
         return "<html>${htmlTooltips.joinToString("<hr size=1 noshade>")}</html>"
     }
 

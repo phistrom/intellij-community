@@ -1,7 +1,6 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.impl.search;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.intellij.compiler.CompilerDirectHierarchyInfo;
 import com.intellij.compiler.CompilerReferenceService;
 import com.intellij.concurrency.JobLauncher;
@@ -39,10 +38,8 @@ import com.intellij.psi.search.searches.FunctionalExpressionSearch.SearchParamet
 import com.intellij.psi.stubs.StubIndex;
 import com.intellij.psi.stubs.StubTextInconsistencyException;
 import com.intellij.psi.tree.IElementType;
-import com.intellij.psi.util.InheritanceUtil;
-import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.psi.util.PsiUtil;
-import com.intellij.psi.util.PsiUtilCore;
+import com.intellij.psi.util.*;
+import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.Processor;
 import com.intellij.util.Processors;
 import com.intellij.util.ThreeState;
@@ -52,6 +49,8 @@ import com.intellij.util.containers.MultiMap;
 import com.intellij.util.indexing.FileBasedIndex;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.VisibleForTesting;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -62,6 +61,9 @@ public final class JavaFunctionalExpressionSearcher extends QueryExecutorBase<Ps
 
   @Override
   public void processQuery(@NotNull SearchParameters p, @NotNull Processor<? super PsiFunctionalExpression> consumer) {
+    if (SearchScope.isEmptyScope(ReadAction.compute(() -> p.getEffectiveSearchScope()))) {
+      return;
+    }
     Session session = ReadAction.compute(() -> new Session(p, consumer));
     session.processResults();
     if (!session.filesLookedInside.isEmpty() && LOG.isDebugEnabled()) {
@@ -91,6 +93,11 @@ public final class JavaFunctionalExpressionSearcher extends QueryExecutorBase<Ps
           PsiMethod saMethod = Objects.requireNonNull(LambdaUtil.getFunctionalInterfaceMethod(samClass));
           PsiType samType = saMethod.getReturnType();
           if (samType == null) continue;
+          if (session.method != null && 
+              !saMethod.equals(session.method) && 
+              !MethodSignatureUtil.isSuperMethod(saMethod, session.method)) {
+            continue;
+          }
 
           SearchScope scope = psiSearchHelper.getUseScope(samClass).intersectWith(session.scope);
           descriptors.add(new SamDescriptor(samClass, saMethod, samType, GlobalSearchScopeUtil.toGlobalSearchScope(scope, project)));
@@ -138,6 +145,7 @@ public final class JavaFunctionalExpressionSearcher extends QueryExecutorBase<Ps
 
     Set<VirtualFile> filesFirst = getLikelyFiles(descriptors, allFiles, session.project);
     Processor<VirtualFile> vFileProcessor = vFile -> {
+      if (vFile.isDirectory()) return true;
       Collection<FunExprOccurrence> occurrences = allCandidates.get(vFile);
       session.contextsConsidered.addAndGet(occurrences.size());
       Map<FunExprOccurrence, Confidence> toLoad = filterInapplicable(samClasses, vFile, occurrences, session.project);
@@ -159,19 +167,20 @@ public final class JavaFunctionalExpressionSearcher extends QueryExecutorBase<Ps
 
   @NotNull
   private static Map<FunExprOccurrence, Confidence> filterInapplicable(@NotNull List<? extends PsiClass> samClasses,
-                                                           @NotNull VirtualFile vFile,
-                                                           @NotNull Collection<? extends FunExprOccurrence> occurrences,
-                                                           @NotNull Project project) {
-    Map<FunExprOccurrence, Confidence> map = new HashMap<>();
-    DumbService.getInstance(project).runReadActionInSmartMode(() -> {
+                                                                       @NotNull VirtualFile vFile,
+                                                                       @NotNull Collection<? extends FunExprOccurrence> occurrences,
+                                                                       @NotNull Project project) {
+    return ReadAction.nonBlocking(() -> {
+      Map<FunExprOccurrence, Confidence> map = new HashMap<>();
       for (FunExprOccurrence occurrence : occurrences) {
-        ThreeState result = occurrence.checkHasTypeLight(samClasses, vFile);
+        ThreeState result = occurrence.checkHasTypeLight(samClasses, vFile, project);
         if (result != ThreeState.NO) {
           map.put(occurrence, result == ThreeState.YES ? Confidence.sure : Confidence.needsCheck);
         }
       }
-    });
-    return map;
+      return map;
+    }).inSmartMode(project)
+      .executeSynchronously();
   }
 
   private enum Confidence { sure, needsCheck}
@@ -254,14 +263,21 @@ public final class JavaFunctionalExpressionSearcher extends QueryExecutorBase<Ps
     FileViewProvider viewProvider = file.getViewProvider();
     try {
       PsiMember member = Objects.requireNonNull(PsiTreeUtil.getStubOrPsiParentOfType(expression, PsiMember.class));
-      PsiFile fragment = fragmentCache.computeIfAbsent(TextRange.create(entry.contextStart, entry.contextEnd),
-                                                       range -> createMemberCopyFromText(member, range));
-      PsiFunctionalExpression psi = findPsiByAST(fragment, entry.exprStart - entry.contextStart);
+      PsiFunctionalExpression psi = null;
+      Exception ex = null;
+      try {
+        PsiFile fragment = fragmentCache.computeIfAbsent(TextRange.create(entry.contextStart, entry.contextEnd),
+                                                         range -> createMemberCopyFromText(member, range));
+        psi = findPsiByAST(fragment, entry.exprStart - entry.contextStart);
+      }
+      catch (IncorrectOperationException e) {
+        ex = e;
+      }
       if (psi == null) {
         StubTextInconsistencyException.checkStubTextConsistency(file);
         throw new RuntimeExceptionWithAttachments(
           "No functional expression at " + entry + ", file will be reindexed",
-          new Attachment(viewProvider.getVirtualFile().getPath(), viewProvider.getContents().toString()));
+          ex, new Attachment(viewProvider.getVirtualFile().getPath(), viewProvider.getContents().toString()));
       }
       return psi;
     }
@@ -449,7 +465,6 @@ public final class JavaFunctionalExpressionSearcher extends QueryExecutorBase<Ps
     private final Processor<? super PsiFunctionalExpression> consumer;
     private final Project project;
     private final SearchScope scope;
-    private final PsiManager psiManager;
     private final PsiClass elementToSearch;
 
     // statistics
@@ -458,16 +473,19 @@ public final class JavaFunctionalExpressionSearcher extends QueryExecutorBase<Ps
     private final AtomicInteger sureExprsAfterLightCheck = new AtomicInteger();
     private final AtomicInteger exprsToHeavyCheck = new AtomicInteger();
     private final Set<VirtualFile> filesLookedInside = ContainerUtil.newConcurrentSet();
+    private final @Nullable PsiMethod method;
 
     public Session(@NotNull SearchParameters parameters, @NotNull Processor<? super PsiFunctionalExpression> consumer) {
       this.consumer = consumer;
       elementToSearch = parameters.getElementToSearch();
+      method = parameters.getMethod();
       project = parameters.getProject();
-      psiManager = PsiManager.getInstance(project);
       scope = parameters.getEffectiveSearchScope();
     }
 
-    public Set<VirtualFile> getFilesLookedInside() {
+    @NotNull
+    @TestOnly
+    Set<VirtualFile> getFilesLookedInside() {
       return filesLookedInside;
     }
 
@@ -479,13 +497,10 @@ public final class JavaFunctionalExpressionSearcher extends QueryExecutorBase<Ps
         return;
       }
 
-      psiManager.startBatchFilesProcessingMode();
-      try {
+      PsiManager.getInstance(project).runInBatchFilesMode(() -> {
         processOffsets(descriptors, this);
-      }
-      finally {
-        psiManager.finishBatchFilesProcessingMode();
-      }
+        return null;
+      });
     }
 
     @Override

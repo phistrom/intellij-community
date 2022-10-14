@@ -1,55 +1,42 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.idea.maven.importing;
 
-import com.intellij.ProjectTopics;
+import com.intellij.maven.testFramework.MavenMultiVersionImportingTestCase;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.externalSystem.service.project.IdeModifiableModelsProvider;
 import com.intellij.openapi.externalSystem.service.project.IdeModifiableModelsProviderImpl;
 import com.intellij.openapi.module.ModifiableModuleModel;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.ModuleRootEvent;
-import com.intellij.openapi.roots.ModuleRootListener;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.testFramework.ExtensionTestUtil;
 import com.intellij.testFramework.PlatformTestUtil;
-import org.jetbrains.annotations.NotNull;
 import org.jetbrains.idea.maven.MavenCustomRepositoryHelper;
-import org.jetbrains.idea.maven.MavenMultiVersionImportingTestCase;
+import org.jetbrains.idea.maven.importing.workspaceModel.WorkspaceProjectImporterKt;
 import org.jetbrains.idea.maven.model.MavenId;
-import org.jetbrains.idea.maven.model.MavenProjectProblem;
 import org.jetbrains.idea.maven.project.MavenProject;
-import org.jetbrains.idea.maven.project.MavenProjectChanges;
-import org.jetbrains.idea.maven.project.MavenProjectsProcessorTask;
-import org.jetbrains.idea.maven.project.MavenProjectsTree;
 import org.jetbrains.idea.maven.server.MavenServerManager;
+import org.junit.Assume;
 import org.junit.Test;
 
 import java.io.File;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Properties;
 
 public class MiscImportingTest extends MavenMultiVersionImportingTestCase {
-  private int beforeRootsChangedCount;
-  private int rootsChangedCount;
+  private MavenEventsTestHelper myEventsTestHelper = new MavenEventsTestHelper();
 
   @Override
   protected void setUp() throws Exception {
     super.setUp();
-    myProject.getMessageBus().connect().subscribe(ProjectTopics.PROJECT_ROOTS, new ModuleRootListener() {
-      @Override
-      public void beforeRootsChange(@NotNull ModuleRootEvent event) {
-        beforeRootsChangedCount++;
-      }
+    myEventsTestHelper.setUp(myProject);
+  }
 
-      @Override
-      public void rootsChanged(@NotNull ModuleRootEvent event) {
-        rootsChangedCount++;
-      }
-    });
+  @Override
+  protected void tearDown() throws Exception {
+    myEventsTestHelper.tearDown();
+    super.tearDown();
   }
 
   @Test
@@ -60,7 +47,7 @@ public class MiscImportingTest extends MavenMultiVersionImportingTestCase {
                   "<name>1</name>");
 
     assertModules("project");
-    assertEquals("1", myProjectsTree.getRootProjects().get(0).getName());
+    assertEquals("1", getProjectsTree().getRootProjects().get(0).getName());
 
     MavenServerManager.getInstance().shutdown(true);
 
@@ -70,7 +57,28 @@ public class MiscImportingTest extends MavenMultiVersionImportingTestCase {
                   "<name>2</name>");
 
     assertModules("project");
-    assertEquals("2", myProjectsTree.getRootProjects().get(0).getName());
+    assertEquals("2", getProjectsTree().getRootProjects().get(0).getName());
+  }
+
+  @Test
+  public void testFallbackToSlowWorkspaceCommit() {
+    Assume.assumeTrue(isWorkspaceImport());
+
+    try {
+      WorkspaceProjectImporterKt.setWORKSPACE_IMPORTER_SKIP_FAST_APPLY_ATTEMPTS_ONCE(true);
+      importProject("<groupId>test</groupId>" +
+                    "<artifactId>project</artifactId>" +
+                    "<version>1</version>" +
+                    "<name>1</name>");
+
+      assertModules("project");
+
+      // make sure the logic in WorkspaceProjectImporter worked as expected
+      assertFalse(WorkspaceProjectImporterKt.getWORKSPACE_IMPORTER_SKIP_FAST_APPLY_ATTEMPTS_ONCE());
+    }
+    finally {
+      WorkspaceProjectImporterKt.setWORKSPACE_IMPORTER_SKIP_FAST_APPLY_ATTEMPTS_ONCE(false);
+    }
   }
 
   @Test
@@ -80,18 +88,18 @@ public class MiscImportingTest extends MavenMultiVersionImportingTestCase {
                            "  <mirror>" +
                            "  </mirror>" +
                            "  <mirror>" +
-                           "    <id></id>" +
-                           "    <url></url>" +
-                           "    <mirrorOf></mirrorOf>" +
+                           "    <id/>" +
+                           "    <url/>" +
+                           "    <mirrorOf/>" +
                            "  </mirror>" +
                            "  <mirror>" +
-                           "    <id></id>" +
+                           "    <id/>" +
                            "    <url>foo</url>" +
                            "    <mirrorOf>*</mirrorOf>" +
                            "  </mirror>" +
                            "  <mirror>" +
                            "    <id>foo</id>" +
-                           "    <url></url>" +
+                           "    <url/>" +
                            "    <mirrorOf>*</mirrorOf>" +
                            "  </mirror>" +
                            "</mirrors>" +
@@ -139,7 +147,41 @@ public class MiscImportingTest extends MavenMultiVersionImportingTestCase {
                   "<artifactId>project</artifactId>" +
                   "<version>1</version>");
 
-    assertRootsChanged(1);
+    myEventsTestHelper.assertRootsChanged(1);
+    myEventsTestHelper.assertWorkspaceModelChanges(isWorkspaceImport() ? 1 : 2);
+  }
+
+  @Test
+  public void testDoRootChangesOnProjectReimportWhenNothingChanges() {
+    importProject("<groupId>test</groupId>" +
+                  "<artifactId>project</artifactId>" +
+                  "<version>1</version>" +
+
+                  "<dependencies>" +
+                  "  <dependency>" +
+                  "    <groupId>junit</groupId>" +
+                  "    <artifactId>junit</artifactId>" +
+                  "    <version>4.0</version>" +
+                  "  </dependency>" +
+                  "</dependencies>");
+
+    myEventsTestHelper.assertRootsChanged(1);
+    myEventsTestHelper.assertWorkspaceModelChanges(isWorkspaceImport() ? 1 : 2);
+
+    importProject("<groupId>test</groupId>" +
+                  "<artifactId>project</artifactId>" +
+                  "<version>1</version>" +
+
+                  "<dependencies>" +
+                  "  <dependency>" +
+                  "    <groupId>junit</groupId>" +
+                  "    <artifactId>junit</artifactId>" +
+                  "    <version>4.0</version>" +
+                  "  </dependency>" +
+                  "</dependencies>");
+
+    myEventsTestHelper.assertRootsChanged(isWorkspaceImport() ? 0 : 1);
+    myEventsTestHelper.assertWorkspaceModelChanges(isWorkspaceImport() ? 0 : 1);
   }
 
   @Test
@@ -148,40 +190,8 @@ public class MiscImportingTest extends MavenMultiVersionImportingTestCase {
                   "<artifactId>project</artifactId>" +
                   "<version>1</version>");
 
-    assertRootsChanged(1);
-  }
-
-  @Test
-  public void testImportingWithLibrariesAndFacetsFiresRootChangesOnlyOnce() {
-    importProject("<groupId>test</groupId>" +
-                  "<artifactId>project</artifactId>" +
-                  "<version>1</version>" +
-                  "<packaging>war</packaging>" +
-
-                  "<dependencies>" +
-                  "  <dependency>" +
-                  "    <groupId>junit</groupId>" +
-                  "    <artifactId>junit</artifactId>" +
-                  "    <version>4.0</version>" +
-                  "  </dependency>" +
-                  "  <dependency>" +
-                  "    <groupId>jmock</groupId>" +
-                  "    <artifactId>jmock</artifactId>" +
-                  "    <version>1.0.0</version>" +
-                  "  </dependency>" +
-                  "</dependencies>");
-
-    assertRootsChanged(1);
-  }
-
-  @Test
-  public void testFacetsDoNotFireRootsChanges() {
-    importProject("<groupId>test</groupId>" +
-                  "<artifactId>project</artifactId>" +
-                  "<version>1</version>" +
-                  "<packaging>war</packaging>");
-
-    assertRootsChanged(1);
+    myEventsTestHelper.assertRootsChanged(1);
+    myEventsTestHelper.assertWorkspaceModelChanges(isWorkspaceImport() ? 1 : 2);
   }
 
   @Test
@@ -223,16 +233,13 @@ public class MiscImportingTest extends MavenMultiVersionImportingTestCase {
 
     myProjectsManager.listenForExternalChanges();
 
-    // valid password is 'fg3W9' (see http://www.jetbrains.net/confluence/display/JBINT/HTTP+Proxy+with+authorization)
     updateSettingsXml("<proxies>" +
                       " <proxy>" +
                       "    <id>my</id>" +
                       "    <active>true</active>" +
                       "    <protocol>http</protocol>" +
-                      "    <host>proxy-auth-test.labs.intellij.net</host>" +
+                      "    <host>invalid.host.in.intellij.net</host>" +
                       "    <port>3128</port>" +
-                      "    <username>user1</username>" +
-                      "    <password>invalid</password>" +
                       "  </proxy>" +
                       "</proxies>");
 
@@ -258,42 +265,6 @@ public class MiscImportingTest extends MavenMultiVersionImportingTestCase {
   }
 
   @Test
-  public void testClearUnresolvedPluginsAfterPluginResolution() {
-    try {
-      File repo = new File(myDir, "repo");
-      setRepositoryPath(repo.getPath());
-
-      createProjectPom("<groupId>test</groupId>" +
-                       "<artifactId>project</artifactId>" +
-                       "<version>1</version>" +
-                       "" +
-                       "<build>" +
-                       "  <plugins>" +
-                       "    <plugin>" +
-                       "      <artifactId>maven-surefire-plugin</artifactId>" +
-                       "    </plugin>" +
-                       "  </plugins>" +
-                       "</build>");
-      importProjectWithErrors();
-
-      List<MavenProjectProblem> problems = myProjectsTree.getRootProjects().get(0).getProblems();
-      assertTrue(problems.size() > 0);
-
-      for (MavenProjectProblem problem : problems) {
-        assertTrue(problem.getDescription(), problem.getDescription().contains("Unresolved plugin"));
-      }
-
-      resolvePlugins();
-
-      assertEquals(0, myProjectsTree.getRootProjects().get(0).getProblems().size());
-    }
-    finally {
-      // do not lock files by maven process
-      MavenServerManager.getInstance().shutdown(true);
-    }
-  }
-
-  @Test
   public void testMavenExtensionsAreLoadedAndAfterProjectsReadIsCalled() throws Exception {
     try {
       MavenCustomRepositoryHelper helper = new MavenCustomRepositoryHelper(myDir, "plugins");
@@ -314,7 +285,7 @@ public class MiscImportingTest extends MavenMultiVersionImportingTestCase {
                     "  </extensions>" +
                     "</build>");
 
-      List<MavenProject> projects = myProjectsTree.getProjects();
+      List<MavenProject> projects = getProjectsTree().getProjects();
       assertEquals(1, projects.size());
       MavenProject mavenProject = projects.get(0);
       assertEquals("Name for test:project generated by MyMavenExtension.", mavenProject.getFinalName());
@@ -322,8 +293,7 @@ public class MiscImportingTest extends MavenMultiVersionImportingTestCase {
       PlatformTestUtil.assertPathsEqual(myProjectPom.getPath(), mavenProject.getProperties().getProperty("workspace-info"));
     }
     finally {
-      // do not lock files by maven process
-      MavenServerManager.getInstance().shutdown(true);
+      MavenServerManager.getInstance().shutdown(true);  // to unlock files
     }
   }
 
@@ -349,7 +319,7 @@ public class MiscImportingTest extends MavenMultiVersionImportingTestCase {
                      "</build>");
     importProjectWithErrors();
 
-    List<MavenProject> projects = myProjectsTree.getProjects();
+    List<MavenProject> projects = getProjectsTree().getProjects();
     assertEquals(1, projects.size());
     MavenProject mavenProject = projects.get(0);
     assertEquals(mavenProject.getProblems().toString(), 1, mavenProject.getProblems().size());
@@ -415,11 +385,6 @@ public class MiscImportingTest extends MavenMultiVersionImportingTestCase {
     assertEquals("name-from-properties", project.getName());
   }
 
-  private void assertRootsChanged(int count) {
-    assertEquals(count, rootsChangedCount);
-    assertEquals(rootsChangedCount, beforeRootsChangedCount);
-  }
-
   private static class NameSettingMavenImporter extends MavenImporter {
     private final String myName;
 
@@ -436,24 +401,6 @@ public class MiscImportingTest extends MavenMultiVersionImportingTestCase {
     @Override
     public boolean isApplicable(MavenProject mavenProject) {
       return true;
-    }
-
-    @Override
-    public void preProcess(Module module,
-                           MavenProject mavenProject,
-                           MavenProjectChanges changes,
-                           IdeModifiableModelsProvider modifiableModelsProvider) {
-    }
-
-    @Override
-    public void process(IdeModifiableModelsProvider modifiableModelsProvider,
-                        Module module,
-                        MavenRootModelAdapter rootModel,
-                        MavenProjectsTree mavenModel,
-                        MavenProject mavenProject,
-                        MavenProjectChanges changes,
-                        Map<MavenProject, String> mavenProjectToModuleName,
-                        List<MavenProjectsProcessorTask> postTasks) {
     }
   }
 }

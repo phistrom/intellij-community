@@ -1,13 +1,12 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.browsers;
 
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.components.PersistentStateComponent;
-import com.intellij.openapi.components.State;
-import com.intellij.openapi.components.Storage;
+import com.intellij.openapi.components.*;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.util.text.Strings;
 import com.intellij.util.PathUtil;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
@@ -20,7 +19,8 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
-@State(name = "WebBrowsersConfiguration", storages = @Storage("web-browsers.xml"))
+@Service(Service.Level.APP)
+@State(name = "WebBrowsersConfiguration", storages = @Storage(value = "web-browsers.xml", roamingType = RoamingType.DISABLED))
 public final class WebBrowserManager extends SimpleModificationTracker implements PersistentStateComponent<Element> {
   private static final Logger LOG = Logger.getInstance(WebBrowserManager.class);
 
@@ -30,7 +30,6 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
   public static final UUID PREDEFINED_FIREFOX_ID = UUID.fromString("A7BB68E0-33C0-4D6F-A81A-AAC1FDB870C8");
   private static final UUID PREDEFINED_SAFARI_ID = UUID.fromString("E5120D43-2C3F-47EF-9F26-65E539E05186");
   private static final UUID PREDEFINED_OPERA_ID = UUID.fromString("53E2F627-B1A7-4DFA-BFA7-5B83CC034776");
-  private static final UUID PREDEFINED_YANDEX_ID = UUID.fromString("B1B2EC2C-20BD-4EE2-89C4-616DB004BCD4");
   private static final UUID PREDEFINED_EXPLORER_ID = UUID.fromString("16BF23D4-93E0-4FFC-BFD6-CB13575177B0");
   private static final UUID PREDEFINED_OLD_EDGE_ID = UUID.fromString("B2A9DCA7-9D0B-4E1E-98A8-AFB19C1328D2");
   private static final UUID PREDEFINED_EDGE_ID = UUID.fromString("37cae5b9-e8b2-4949-9172-aafa37fbc09c");
@@ -40,13 +39,14 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
     PREDEFINED_FIREFOX_ID,
     PREDEFINED_SAFARI_ID,
     PREDEFINED_OPERA_ID,
-    PREDEFINED_YANDEX_ID,
     PREDEFINED_EXPLORER_ID,
     PREDEFINED_EDGE_ID
   };
 
-  @NotNull
-  private static String getEdgeExecutionPath() {
+  public static final ReloadMode BROWSER_RELOAD_MODE_DEFAULT = ReloadMode.RELOAD_ON_SAVE;
+  public static final ReloadMode PREVIEW_RELOAD_MODE_DEFAULT = ReloadMode.RELOAD_ON_SAVE;
+
+  private static @NotNull String getEdgeExecutionPath() {
     if (SystemInfo.isWindows) {
       return "msedge";
     }
@@ -66,9 +66,6 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
                                  BrowserFamily.SAFARI.getExecutionPath(), SystemInfo.isMac,
                                  BrowserFamily.SAFARI.createBrowserSpecificSettings()),
       new ConfigurableWebBrowser(PREDEFINED_OPERA_ID, BrowserFamily.CHROME, "Opera", SystemInfo.isMac ? "Opera" : "opera", false, null),
-      new ConfigurableWebBrowser(PREDEFINED_YANDEX_ID, BrowserFamily.CHROME, "Yandex",
-                                 SystemInfo.isWindows ? "browser" : (SystemInfo.isMac ? "Yandex" : "yandex"), false,
-                                 BrowserFamily.CHROME.createBrowserSpecificSettings()),
       new ConfigurableWebBrowser(PREDEFINED_EXPLORER_ID, BrowserFamily.EXPLORER, BrowserFamily.EXPLORER.getName(),
                                  BrowserFamily.EXPLORER.getExecutionPath(), false,
                                  BrowserFamily.EXPLORER.createBrowserSpecificSettings()),
@@ -79,9 +76,11 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
   }
 
   private List<ConfigurableWebBrowser> browsers;
-  private boolean myShowBrowserHover = true;
-  private boolean myShowBrowserHoverXml = false;
+  private boolean showBrowserHover = true;
+  private boolean showBrowserHoverXml = false;
   DefaultBrowserPolicy defaultBrowserPolicy = DefaultBrowserPolicy.SYSTEM;
+  ReloadMode webServerReloadMode = BROWSER_RELOAD_MODE_DEFAULT;
+  ReloadMode webPreviewReloadMode = PREVIEW_RELOAD_MODE_DEFAULT;
 
   public WebBrowserManager() {
     browsers = new ArrayList<>(getPredefinedBrowsers());
@@ -92,11 +91,7 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
   }
 
   public static boolean isYandexBrowser(@NotNull WebBrowser browser) {
-    return browser.getFamily().equals(BrowserFamily.CHROME) && (browser.getId().equals(PREDEFINED_YANDEX_ID) || checkNameAndPath("Yandex", browser));
-  }
-
-  public static boolean isDartium(@NotNull WebBrowser browser) {
-    return browser.getFamily().equals(BrowserFamily.CHROME) && checkNameAndPath("Dartium", browser);
+    return browser.getFamily().equals(BrowserFamily.CHROME) && checkNameAndPath("Yandex", browser);
   }
 
   public static boolean isEdge(@NotNull WebBrowser browser) {
@@ -139,9 +134,16 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
     return false;
   }
 
-  @NotNull
-  public DefaultBrowserPolicy getDefaultBrowserPolicy() {
+  public @NotNull DefaultBrowserPolicy getDefaultBrowserPolicy() {
     return defaultBrowserPolicy;
+  }
+
+  public @NotNull ReloadMode getWebServerReloadMode() {
+    return webServerReloadMode;
+  }
+
+  public @NotNull ReloadMode getWebPreviewReloadMode() {
+    return webPreviewReloadMode;
   }
 
   @Override
@@ -150,10 +152,16 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
     if (defaultBrowserPolicy != DefaultBrowserPolicy.SYSTEM) {
       state.setAttribute("default", StringUtil.toLowerCase(defaultBrowserPolicy.name()));
     }
-    if (!myShowBrowserHover) {
+    if (webServerReloadMode != BROWSER_RELOAD_MODE_DEFAULT) {
+      state.setAttribute("serverReloadMode", StringUtil.toLowerCase(webServerReloadMode.name()));
+    }
+    if (webPreviewReloadMode != PREVIEW_RELOAD_MODE_DEFAULT) {
+      state.setAttribute("previewReloadMode", StringUtil.toLowerCase(webPreviewReloadMode.name()));
+    }
+    if (!showBrowserHover) {
       state.setAttribute("showHover", "false");
     }
-    if (myShowBrowserHoverXml) {
+    if (showBrowserHoverXml) {
       state.setAttribute("showHoverXml", "true");
     }
 
@@ -187,11 +195,9 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
     return state;
   }
 
-  @Nullable
-  private static BrowserFamily readFamily(String value) {
+  private static @Nullable BrowserFamily readFamily(String value) {
     try {
-      if ("OPERA".equals(value)) return BrowserFamily.CHROME;
-      return BrowserFamily.valueOf(value);
+      return "OPERA".equals(value) ? BrowserFamily.CHROME : BrowserFamily.valueOf(value);
     }
     catch (RuntimeException e) {
       LOG.warn(e);
@@ -206,26 +212,17 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
     }
   }
 
-  @Nullable
-  private static UUID readId(String value, @NotNull BrowserFamily family, @NotNull List<ConfigurableWebBrowser> existingBrowsers) {
+  private static @Nullable UUID readId(String value, @NotNull BrowserFamily family, @NotNull List<ConfigurableWebBrowser> existingBrowsers) {
     if (StringUtil.isEmpty(value)) {
       UUID id;
       switch (family) {
-        case CHROME:
-          id = PREDEFINED_CHROME_ID;
-          break;
-        case EXPLORER:
-          id = PREDEFINED_EXPLORER_ID;
-          break;
-        case FIREFOX:
-          id = PREDEFINED_FIREFOX_ID;
-          break;
-        case SAFARI:
-          id = PREDEFINED_SAFARI_ID;
-          break;
-
-        default:
+        case CHROME -> id = PREDEFINED_CHROME_ID;
+        case EXPLORER -> id = PREDEFINED_EXPLORER_ID;
+        case FIREFOX -> id = PREDEFINED_FIREFOX_ID;
+        case SAFARI -> id = PREDEFINED_SAFARI_ID;
+        default -> {
           return null;
+        }
       }
 
       for (ConfigurableWebBrowser browser : existingBrowsers) {
@@ -249,17 +246,25 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
 
   @Override
   public void loadState(@NotNull Element element) {
-    String defaultValue = element.getAttributeValue("default");
-    if (!StringUtil.isEmpty(defaultValue)) {
-      try {
-        defaultBrowserPolicy = DefaultBrowserPolicy.valueOf(StringUtil.toUpperCase(defaultValue));
+    try {
+      String defaultValue = element.getAttributeValue("default");
+      if (!StringUtil.isEmpty(defaultValue)) {
+          defaultBrowserPolicy = DefaultBrowserPolicy.valueOf(StringUtil.toUpperCase(defaultValue));
       }
-      catch (IllegalArgumentException e) {
-        LOG.warn(e);
+      String serverReload = element.getAttributeValue("serverReloadMode");
+      if (!StringUtil.isEmpty(serverReload)) {
+        webServerReloadMode = ReloadMode.valueOf(StringUtil.toUpperCase(serverReload));
+      }
+      String previewReload = element.getAttributeValue("previewReloadMode");
+      if (!StringUtil.isEmpty(previewReload)) {
+        webPreviewReloadMode = ReloadMode.valueOf(StringUtil.toUpperCase(previewReload));
       }
     }
+    catch (IllegalArgumentException e) {
+      LOG.warn(e);
+    }
 
-    myShowBrowserHover = !"false".equals(element.getAttributeValue("showHover"));
+    showBrowserHover = !"false".equals(element.getAttributeValue("showHover"));
 
     List<ConfigurableWebBrowser> list = new ArrayList<>();
     for (Element child : element.getChildren("browser")) {
@@ -303,7 +308,6 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
     Map<UUID, ConfigurableWebBrowser> idToBrowser = null;
     int n = list.size();
     pb: for (UUID predefinedBrowserId : PREDEFINED_BROWSER_IDS) {
-      //noinspection ForLoopReplaceableByForEach
       for (int i = 0; i < n; i++) {
         if (list.get(i).getId().equals(predefinedBrowserId)) {
           continue pb;
@@ -319,8 +323,7 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
     setList(list);
   }
 
-  @NotNull
-  public List<WebBrowser> getBrowsers() {
+  public @NotNull List<WebBrowser> getBrowsers() {
     return Collections.unmodifiableList(browsers);
   }
 
@@ -334,18 +337,15 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
     incModificationCount();
   }
 
-  @NotNull
-  public List<WebBrowser> getActiveBrowsers() {
+  public @NotNull List<WebBrowser> getActiveBrowsers() {
     return getBrowsers(Conditions.alwaysTrue(), true);
   }
 
-  @NotNull
-  public List<WebBrowser> getBrowsers(@NotNull Condition<? super WebBrowser> condition) {
+  public @NotNull List<WebBrowser> getBrowsers(@NotNull Condition<? super WebBrowser> condition) {
     return getBrowsers(condition, true);
   }
 
-  @NotNull
-  public List<WebBrowser> getBrowsers(@NotNull Condition<? super WebBrowser> condition, boolean onlyActive) {
+  public @NotNull List<WebBrowser> getBrowsers(@NotNull Condition<? super WebBrowser> condition, boolean onlyActive) {
     List<WebBrowser> result = new SmartList<>();
     for (ConfigurableWebBrowser browser : browsers) {
       if ((!onlyActive || browser.isActive()) && condition.value(browser)) {
@@ -377,8 +377,7 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
     return browser;
   }
 
-  @Nullable
-  private static UUID parseUuid(@NotNull String id) {
+  private static @Nullable UUID parseUuid(@NotNull String id) {
     if (id.indexOf('-') == -1) {
       return null;
     }
@@ -394,9 +393,8 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
   /**
    * @param idOrFamilyName UUID or, due to backward compatibility, browser family name or JS debugger engine ID
    */
-  @Nullable
-  public WebBrowser findBrowserById(@Nullable String idOrFamilyName) {
-    if (StringUtil.isEmpty(idOrFamilyName)) {
+  public @Nullable WebBrowser findBrowserById(@Nullable String idOrFamilyName) {
+    if (Strings.isEmpty(idOrFamilyName)) {
       return null;
     }
 
@@ -419,8 +417,7 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
     return null;
   }
 
-  @Nullable
-  public WebBrowser getFirstBrowserOrNull(@NotNull BrowserFamily family) {
+  public @Nullable WebBrowser getFirstBrowserOrNull(@NotNull BrowserFamily family) {
     for (ConfigurableWebBrowser browser : browsers) {
       if (browser.isActive() && family.equals(browser.getFamily())) {
         return browser;
@@ -436,8 +433,7 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
     return null;
   }
 
-  @NotNull
-  public WebBrowser getFirstBrowser(@NotNull BrowserFamily family) {
+  public @NotNull WebBrowser getFirstBrowser(@NotNull BrowserFamily family) {
     WebBrowser result = getFirstBrowserOrNull(family);
     if (result == null) {
       throw new IllegalStateException("Must be at least one browser per family");
@@ -449,8 +445,7 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
     return !(browser instanceof ConfigurableWebBrowser) || ((ConfigurableWebBrowser)browser).isActive();
   }
 
-  @Nullable
-  public WebBrowser getFirstActiveBrowser() {
+  public @Nullable WebBrowser getFirstActiveBrowser() {
     for (ConfigurableWebBrowser browser : browsers) {
       if (browser.isActive() && browser.getPath() != null) {
         return browser;
@@ -460,18 +455,18 @@ public final class WebBrowserManager extends SimpleModificationTracker implement
   }
 
   public void setShowBrowserHover(boolean showBrowserHover) {
-    myShowBrowserHover = showBrowserHover;
+    this.showBrowserHover = showBrowserHover;
   }
 
   public void setShowBrowserHoverXml(boolean showBrowserHover) {
-    myShowBrowserHoverXml = showBrowserHover;
+    showBrowserHoverXml = showBrowserHover;
   }
 
   public boolean isShowBrowserHover() {
-    return myShowBrowserHover;
+    return showBrowserHover;
   }
 
   public boolean isShowBrowserHoverXml() {
-    return myShowBrowserHoverXml;
+    return showBrowserHoverXml;
   }
 }

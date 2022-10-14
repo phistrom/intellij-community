@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.codeInsight
 
@@ -11,12 +11,13 @@ import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.psi.PsiDocumentManager
+import com.intellij.psi.PsiElement
 import com.intellij.psi.SmartPsiElementPointer
 import com.intellij.psi.codeStyle.CodeStyleManager
 import com.intellij.refactoring.RefactoringHelper
 import com.intellij.usageView.UsageInfo
 import com.intellij.util.IncorrectOperationException
-import org.jetbrains.kotlin.idea.KotlinBundle
+import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.inspections.KotlinUnusedImportInspection
 import org.jetbrains.kotlin.idea.util.application.executeWriteCommand
 import org.jetbrains.kotlin.idea.util.application.runReadAction
@@ -32,6 +33,10 @@ class KotlinOptimizeImportsRefactoringHelper : RefactoringHelper<Set<KtFile>> {
         private val operationData: Set<KtFile>
     ) : Task.Backgroundable(project, COLLECT_UNUSED_IMPORTS_TITLE, true) {
 
+        override fun isConditionalModal(): Boolean = true
+
+        override fun shouldStartInBackground(): Boolean = !isOptimizeImportsSynchronously
+
         override fun run(indicator: ProgressIndicator) {
             indicator.isIndeterminate = false
 
@@ -46,7 +51,7 @@ class KotlinOptimizeImportsRefactoringHelper : RefactoringHelper<Set<KtFile>> {
                 }
                     .inSmartMode(project)
                     .wrapProgress(indicator)
-                    .expireWhen { !file.isValid || Disposer.isDisposed(project) }
+                    .expireWhen { !file.isValid || project.isDisposed() }
                     .executeSynchronously()
             }
         }
@@ -86,12 +91,24 @@ class KotlinOptimizeImportsRefactoringHelper : RefactoringHelper<Set<KtFile>> {
     }
 
     companion object {
+        private val isOptimizeImportsSynchronously: Boolean by lazy {
+            System.getProperty("kotlin.optimize.imports.synchronously") == "true"
+        }
         private val COLLECT_UNUSED_IMPORTS_TITLE get() = KotlinBundle.message("optimize.imports.collect.unused.imports")
         private val REMOVING_REDUNDANT_IMPORTS_TITLE get() = KotlinBundle.message("optimize.imports.task.removing.redundant.imports")
     }
 
     override fun prepareOperation(usages: Array<UsageInfo>): Set<KtFile> = usages.mapNotNullTo(LinkedHashSet()) {
         if (!it.isNonCodeUsage) it.file as? KtFile else null
+    }
+
+    override fun prepareOperation(usages: Array<out UsageInfo>, primaryElement: PsiElement): Set<KtFile> {
+        val files = super.prepareOperation(usages, primaryElement)
+        val file = primaryElement.containingFile
+        if (file is KtFile) {
+            (files as LinkedHashSet<KtFile>).add(file)
+        }
+        return files
     }
 
     override fun performOperation(project: Project, operationData: Set<KtFile>) {

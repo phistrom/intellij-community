@@ -159,11 +159,11 @@ final class DfGenericObjectType extends DfAntiConstantType<Object> implements Df
       else return false;
     }
     DfReferenceType type = (DfReferenceType)other;
-    if (isLocal() && !type.isLocal()) return false;
+    if (isLocal() && !type.isLocal() && !getConstraint().isComparedByEquals()) return false;
     if (type.getNullability() != getNullability() && getNullability() != DfaNullability.UNKNOWN &&
         type.getNullability() != DfaNullability.NOT_NULL) return false;
     if (!getConstraint().isSuperConstraintOf(type.getConstraint())) return false;
-    if (getMutability().ordinal() > type.getMutability().ordinal()) return false;
+    if (getMutability().join(type.getMutability()) != getMutability()) return false;
     SpecialField sf = getSpecialField();
     if (sf != null) {
       if (sf != type.getSpecialField()) return false;
@@ -193,8 +193,11 @@ final class DfGenericObjectType extends DfAntiConstantType<Object> implements Df
     }
     DfReferenceType type = (DfReferenceType)other;
     TypeConstraint constraint = getConstraint().join(type.getConstraint());
+    if (constraint == TypeConstraints.BOTTOM) {
+      throw new AssertionError("Join failed: " + this + " | " + other);
+    }
     DfaNullability nullability = getNullability().unite(type.getNullability());
-    Mutability mutability = getMutability().unite(type.getMutability());
+    Mutability mutability = getMutability().join(type.getMutability());
     boolean locality = isLocal() && type.isLocal();
     SpecialField sf = Objects.equals(getSpecialField(), type.getSpecialField()) ? getSpecialField() : null;
     DfType sfType = sf == null ? BOTTOM : getSpecialFieldType().join(type.getSpecialFieldType());
@@ -255,26 +258,27 @@ final class DfGenericObjectType extends DfAntiConstantType<Object> implements Df
       if (!otherSfType.equals(mySpecialFieldType)) bits |= SF_TYPE;
       if (otherLocal != myLocal) bits |= LOCAL;
       switch (bits) {
-        case CONSTRAINT:
-        case NULLABILITY | CONSTRAINT: {
+        case CONSTRAINT, NULLABILITY | CONSTRAINT -> {
           TypeConstraint constraint = otherConstraint.tryJoinExactly(myConstraint);
           return constraint == null ? null :
                  new DfGenericObjectType(myNotValues, constraint, myNullability.unite(otherNullability), myMutability,
                                          mySpecialField, mySpecialFieldType, myLocal);
         }
-        case MUTABILITY:
-          return new DfGenericObjectType(myNotValues, myConstraint, myNullability, myMutability.unite(otherMutability),
+        case MUTABILITY -> {
+          return new DfGenericObjectType(myNotValues, myConstraint, myNullability, myMutability.join(otherMutability),
                                          mySpecialField, mySpecialFieldType, myLocal);
-        case NULLABILITY:
+        }
+        case NULLABILITY -> {
           return new DfGenericObjectType(myNotValues, myConstraint, myNullability.unite(otherNullability), myMutability,
                                          mySpecialField, mySpecialFieldType, myLocal);
-        case NOT_VALUES: {
+        }
+        case NOT_VALUES -> {
           Set<Object> notValues = new HashSet<>(myNotValues);
           notValues.retainAll(otherNotValues);
           return new DfGenericObjectType(notValues, myConstraint, myNullability, myMutability,
                                          mySpecialField, mySpecialFieldType, myLocal);
         }
-        case SF_TYPE: {
+        case SF_TYPE -> {
           DfType sfType = otherSfType.tryJoinExactly(mySpecialFieldType);
           return sfType == null ? null :
                  new DfGenericObjectType(myNotValues, myConstraint, myNullability, myMutability,
@@ -301,7 +305,8 @@ final class DfGenericObjectType extends DfAntiConstantType<Object> implements Df
     }
     DfaNullability nullability = getNullability().intersect(type.getNullability());
     if (nullability == null) return BOTTOM;
-    Mutability mutability = getMutability().intersect(type.getMutability());
+    Mutability mutability = getMutability().meet(type.getMutability());
+    if (mutability == null) return BOTTOM;
     boolean locality = isLocal() || type.isLocal();
     SpecialField sf;
     DfType sfType;
@@ -335,6 +340,9 @@ final class DfGenericObjectType extends DfAntiConstantType<Object> implements Df
         }
       }
     }
+    if (nullability == DfaNullability.NOT_NULL && constraint.isSingleton()) {
+      return new DfReferenceConstantType(constraint, constraint, false);
+    }
     return new DfGenericObjectType(notValues, constraint, nullability, mutability, sf, sfType, locality);
   }
 
@@ -366,6 +374,15 @@ final class DfGenericObjectType extends DfAntiConstantType<Object> implements Df
       return new DfEphemeralReferenceType(constraint);
     }
     return null;
+  }
+
+  @Override
+  public @NotNull DfType meetRelation(@NotNull RelationType relationType,
+                                      @NotNull DfType other) {
+    if ((relationType == RelationType.EQ || relationType == RelationType.IS) && isLocal() && myConstraint.isComparedByEquals()) {
+      return dropLocality().meetRelation(relationType, other);
+    }
+    return super.meetRelation(relationType, other);
   }
 
   @Override

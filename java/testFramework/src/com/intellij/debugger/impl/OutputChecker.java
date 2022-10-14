@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.debugger.impl;
 
 import com.intellij.execution.process.ProcessOutputTypes;
@@ -24,6 +24,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.project.IntelliJProjectConfiguration;
 import com.intellij.util.PathUtil;
 import com.intellij.util.Producer;
+import com.intellij.util.UriUtil;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
@@ -169,10 +170,6 @@ public class OutputChecker {
     }
   }
 
-  public boolean contains(String str) {
-    return buildOutputString().contains(str);
-  }
-
   private synchronized String buildOutputString() {
     StringBuilder result = new StringBuilder();
     for (Key key : OUTPUT_ORDER) {
@@ -219,7 +216,7 @@ public class OutputChecker {
 
       File productionFile = new File(PathUtil.getJarPathForClass(OutputChecker.class));
       if (productionFile.isDirectory()) {
-        result = replacePath(result, StringUtil.trimTrailing(productionFile.getParentFile().toURI().toString(), '/'), "!PRODUCTION_PATH!");
+        result = replacePath(result, UriUtil.trimTrailingSlashes(productionFile.getParentFile().toURI().toString()), "!PRODUCTION_PATH!");
       }
 
       result = replacePath(result, PathManager.getHomePath(), "!IDEA_HOME!");

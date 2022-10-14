@@ -29,6 +29,7 @@ import org.jetbrains.idea.maven.project.MavenConfigurableBundle.message
 import org.jetbrains.idea.maven.project.MavenProjectBundle
 import org.jetbrains.idea.maven.project.MavenProjectsManager
 import org.jetbrains.idea.maven.server.MavenDistributionsCache
+import java.nio.file.Paths
 import java.util.concurrent.CompletableFuture
 import java.util.function.Consumer
 
@@ -49,10 +50,11 @@ class MavenBadJvmConfigEventParser : MavenLoggedEventParser {
         errorLine += "\n$causeLine"
       }
       messageConsumer.accept(
-        BuildIssueEventImpl(parentId,
-                            MavenJvmConfigBuildIssue
-                              .getRunnerIssue(logLine.line, errorLine, parsingContext.ideaProject, parsingContext.runConfiguration),
-                            MessageEvent.Kind.ERROR)
+        BuildIssueEventImpl(
+          parentId,
+          MavenJvmConfigBuildIssue.getRunnerIssue(logLine.line, errorLine, parsingContext.ideaProject, parsingContext.runConfiguration),
+          MessageEvent.Kind.ERROR
+        )
       )
       return true
     }
@@ -83,7 +85,7 @@ class MavenImportBadJvmConfigEventParser : MavenImportLoggedEventParser {
   }
 }
 
-class MavenJvmConfigOpenQuickFix(val jvmConfig: VirtualFile) : BuildIssueQuickFix {
+class MavenJvmConfigOpenQuickFix(private val jvmConfig: VirtualFile) : BuildIssueQuickFix {
 
   override val id: String = "open_maven_jvm_config_quick_fix_" + jvmConfig
 
@@ -93,7 +95,7 @@ class MavenJvmConfigOpenQuickFix(val jvmConfig: VirtualFile) : BuildIssueQuickFi
   }
 }
 
-class MavenRunConfigurationOpenQuickFix(val runnerAndConfigurationSettings: RunnerAndConfigurationSettings) : BuildIssueQuickFix {
+class MavenRunConfigurationOpenQuickFix(private val runnerAndConfigurationSettings: RunnerAndConfigurationSettings) : BuildIssueQuickFix {
 
   override val id: String = "open_maven_run_configuration_open_quick_fix"
 
@@ -107,11 +109,12 @@ object MavenJvmConfigBuildIssue {
   const val VM_INIT_ERROR: String = "Error occurred during initialization of VM"
 
   fun getRunnerIssue(title: String, errorMessage: String, project: Project, runConfiguration: MavenRunConfiguration): BuildIssue {
-    val mavenProject = MavenProjectsManager.getInstance(project)
-      .rootProjects.filter { runConfiguration.settings.workingDirectory.contains(it.directory) }.firstOrNull()
-    val jvmConfig: VirtualFile? = mavenProject?.file?.path
-      ?.let { MavenDistributionsCache.getInstance(project).getMultimoduleDirectory(it) }
-      ?.let { MavenExternalParameters.getJvmConfig(it) }
+    val jvmConfig: VirtualFile? = MavenExternalParameters.getJvmConfig(runConfiguration.runnerParameters.workingDirPath)
+    val mavenProject = MavenProjectsManager.getInstance(project).projectsFiles
+      .asSequence()
+      .filter { Paths.get(runConfiguration.runnerParameters.workingDirPath).equals(it.toNioPath().parent) }
+      .map { MavenProjectsManager.getInstance(project).findProject(it) }
+      .firstOrNull()
 
     val quickFixes = mutableListOf<BuildIssueQuickFix>()
     val issueDescription = StringBuilder(errorMessage)
@@ -141,7 +144,7 @@ object MavenJvmConfigBuildIssue {
       val mavenJvmConfigOpenQuickFix = MavenJvmConfigOpenQuickFix(jvmConfig)
       quickFixes.add(mavenJvmConfigOpenQuickFix)
       issueDescription.append(MavenProjectBundle.message("maven.quickfix.jvm.options.config.file",
-                                                         mavenProject.displayName,
+                                                         mavenProject?.displayName ?: "",
                                                          mavenJvmConfigOpenQuickFix.id))
     }
 
@@ -186,4 +189,3 @@ object MavenJvmConfigBuildIssue {
     }
   }
 }
-

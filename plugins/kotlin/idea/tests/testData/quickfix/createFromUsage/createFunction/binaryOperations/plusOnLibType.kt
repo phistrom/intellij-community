@@ -1,6 +1,5 @@
 // "Create extension function 'Int.plus'" "true"
-// WITH_RUNTIME
-// COMPILER_ARGUMENTS: -XXLanguage:-NewInference
+// WITH_STDLIB
 
 class A<T>(val n: T)
 

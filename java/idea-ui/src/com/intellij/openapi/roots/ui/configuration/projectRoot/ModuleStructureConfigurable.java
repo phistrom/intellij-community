@@ -6,7 +6,7 @@ import com.intellij.facet.Facet;
 import com.intellij.facet.impl.ProjectFacetsConfigurator;
 import com.intellij.facet.impl.ui.actions.AddFacetToModuleAction;
 import com.intellij.icons.AllIcons;
-import com.intellij.ide.IdeBundle;
+import com.intellij.ide.IdeCoreBundle;
 import com.intellij.ide.JavaUiBundle;
 import com.intellij.ide.highlighter.ModuleFileType;
 import com.intellij.ide.impl.FlattenModulesToggleAction;
@@ -50,7 +50,6 @@ import com.intellij.util.PlatformIcons;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.io.PathKt;
 import com.intellij.util.ui.tree.TreeUtil;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -472,8 +471,7 @@ public class ModuleStructureConfigurable extends BaseStructureConfigurable imple
   /**
    * @deprecated use {@link ProjectStructureConfigurable#getModulesConfig()} instead
    */
-  @ApiStatus.ScheduledForRemoval(inVersion = "2022.1")
-  @Deprecated
+  @Deprecated(forRemoval = true)
   public static ModuleStructureConfigurable getInstance(final Project project) {
     return ProjectStructureConfigurable.getInstance(project).getModulesConfig();
   }
@@ -791,6 +789,7 @@ public class ModuleStructureConfigurable extends BaseStructureConfigurable imple
         .ifEq(LangDataKeys.MODULE_CONTEXT_ARRAY).thenGet(this::getModuleContexts)
         .ifEq(LangDataKeys.MODULE_CONTEXT).thenGet(() -> getSelectedModule())
         .ifEq(LangDataKeys.MODIFIABLE_MODULE_MODEL).thenGet(() -> myContext.myModulesConfigurator.getModuleModel())
+        .ifEq(PlatformCoreDataKeys.SELECTED_ITEM).thenGet(() -> getSelectedObject())
         .orNull();
     }
 
@@ -840,6 +839,11 @@ public class ModuleStructureConfigurable extends BaseStructureConfigurable imple
       if (myContext.myModulesConfigurator != null) {
         presentation.setVisible(myContext.myModulesConfigurator.getModuleModel().hasModuleGroups());
       }
+    }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
     }
 
     @Override
@@ -937,7 +941,7 @@ public class ModuleStructureConfigurable extends BaseStructureConfigurable imple
 
       try {
         ModuleEditor moduleEditor = ((ModuleConfigurable)namedConfigurable).getModuleEditor();
-        String modulePresentation = IdeBundle.message("project.new.wizard.module.identification");
+        String modulePresentation = IdeCoreBundle.message("project.new.wizard.module.identification");
         NamePathComponent component = new NamePathComponent(JavaUiBundle.message("label.module.name"),
                                                             JavaUiBundle.message("label.component.file.location", StringUtil.capitalize(modulePresentation)),
                                                             JavaUiBundle
@@ -1010,6 +1014,11 @@ public class ModuleStructureConfigurable extends BaseStructureConfigurable imple
         final NamedConfigurable<?> selectedConfigurable = getSelectedConfigurable();
         e.getPresentation().setEnabled(selectedConfigurable instanceof ModuleConfigurable || canBeCopiedByExtension(selectedConfigurable));
       }
+    }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
     }
   }
 

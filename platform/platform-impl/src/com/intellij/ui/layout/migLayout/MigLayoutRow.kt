@@ -19,6 +19,7 @@ import com.intellij.ui.components.Label
 import com.intellij.ui.layout.*
 import com.intellij.util.SmartList
 import net.miginfocom.layout.*
+import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
 import javax.swing.*
 import javax.swing.border.LineBorder
@@ -97,6 +98,8 @@ internal class MigLayoutRow(private val parent: MigLayoutRow?,
   private var isTrailingSeparator = false
   private var isComment = false
 
+  @ApiStatus.ScheduledForRemoval
+  @Deprecated("Use Kotlin UI DSL Version 2")
   override fun withButtonGroup(title: String?, buttonGroup: ButtonGroup, body: () -> Unit) {
     if (title != null) {
       label(title)
@@ -194,6 +197,7 @@ internal class MigLayoutRow(private val parent: MigLayoutRow?,
       }
     }
 
+  @Deprecated("Use Kotlin UI DSL Version 2")
   override var subRowIndent: Int = -1
 
   internal val isLabeledIncludingSubRows: Boolean
@@ -458,7 +462,7 @@ internal class MigLayoutRow(private val parent: MigLayoutRow?,
     addCommentRow(component, forComponent, null)
   }
 
-  fun addCommentRow(component: JComponent, forComponent: Boolean, anchorComponent: JComponent?) {
+  private fun addCommentRow(component: JComponent, forComponent: Boolean, anchorComponent: JComponent?) {
     gapAfter = "${spacing.commentVerticalTopGap}px!"
 
     val isParentRowLabeled = labeled
@@ -495,10 +499,6 @@ internal class MigLayoutRow(private val parent: MigLayoutRow?,
 
   override fun largeGapAfter() {
     gapAfter = "${spacing.largeVerticalGap}px!"
-  }
-
-  override fun createRow(label: String?): Row {
-    return createChildRow(label = label?.let { Label(it) })
   }
 
   override fun createNoteOrCommentRow(component: JComponent): Row {
@@ -574,11 +574,6 @@ private class CellBuilderImpl<T : JComponent>(
     return this
   }
 
-  override fun commentComponent(component: JComponent, forComponent: Boolean): CellBuilder<T> {
-    row.addCommentRow(component, forComponent, viewComponent)
-    return this
-  }
-
   override fun focused(): CellBuilder<T> {
     builder.preferredFocusedComponent = viewComponent
     return this
@@ -639,10 +634,12 @@ private class CellBuilderImpl<T : JComponent>(
     return !(applyIfEnabled && !viewComponent.isEnabled)
   }
 
+  @Deprecated("Use Kotlin UI DSL Version 2")
   override fun actsAsLabel() {
     builder.updateComponentConstraints(viewComponent) { spanX = 1 }
   }
 
+  @Deprecated("Use Kotlin UI DSL Version 2")
   override fun noGrowY() {
     builder.updateComponentConstraints(viewComponent) {
       growY(0.0f)
@@ -650,6 +647,7 @@ private class CellBuilderImpl<T : JComponent>(
     }
   }
 
+  @Deprecated("Use Kotlin UI DSL Version 2, see Cell.widthGroup()")
   override fun sizeGroup(name: String): CellBuilderImpl<T> {
     builder.updateComponentConstraints(viewComponent) {
       sizeGroup(name)
@@ -657,6 +655,7 @@ private class CellBuilderImpl<T : JComponent>(
     return this
   }
 
+  @Deprecated("Use Kotlin UI DSL Version 2")
   override fun growPolicy(growPolicy: GrowPolicy): CellBuilder<T> {
     builder.updateComponentConstraints(viewComponent) {
       builder.defaultComponentConstraintCreator.applyGrowPolicy(this, growPolicy)

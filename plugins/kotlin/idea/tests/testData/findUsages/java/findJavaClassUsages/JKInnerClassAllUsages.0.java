@@ -8,8 +8,10 @@ public class Outer {
 
         }
 
-        public void foo() {
+        public void foo () {
 
         }
     }
 }
+
+// FIR_COMPARISON

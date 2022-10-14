@@ -233,7 +233,7 @@ public class MissortedModifiersInspection extends BaseInspection implements Clea
     }
 
     @Override
-    public void visitRequiresStatement(PsiRequiresStatement statement) {
+    public void visitRequiresStatement(@NotNull PsiRequiresStatement statement) {
       super.visitRequiresStatement(statement);
       checkForMissortedModifiers(statement);
     }
@@ -280,7 +280,7 @@ public class MissortedModifiersInspection extends BaseInspection implements Clea
                 typeAnnotation = annotation;
               }
               final PsiAnnotation.TargetType[] targets = AnnotationTargetUtil.getTargetsForLocation(annotation.getOwner());
-              if (AnnotationTargetUtil.findAnnotationTarget(annotation, targets[0]) == PsiAnnotation.TargetType.UNKNOWN) {
+              if (targets.length > 0 && AnnotationTargetUtil.findAnnotationTarget(annotation, targets[0]) == PsiAnnotation.TargetType.UNKNOWN) {
                 typeAnnotation = annotation;
               }
               continue;

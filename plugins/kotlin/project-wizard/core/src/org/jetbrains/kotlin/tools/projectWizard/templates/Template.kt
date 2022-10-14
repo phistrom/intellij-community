@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.kotlin.tools.projectWizard.templates
 
 import org.jetbrains.kotlin.tools.projectWizard.Identificator
@@ -70,24 +70,20 @@ abstract class Template : SettingsOwner, EntitiesOwnerDescriptor, DisplayableSet
     abstract val title: String
     abstract val description: String
 
-    fun isSupportedByModuleType(module: Module, projectKind: ProjectKind): Boolean {
-         return isPermittedForModule(module) && isApplicableTo(module, projectKind)
+    open val filesToOpenInEditor: List<String>? = null
+
+    fun isSupportedByModuleType(module: Module, projectKind: ProjectKind, reader: Reader): Boolean {
+         return isPermittedForModule(module) && isApplicableTo(module, projectKind, reader)
     }
 
-    private fun isPermittedForModule(module: Module): Boolean {
+    fun isPermittedForModule(module: Module): Boolean {
         return module.permittedTemplateIds?.contains(id) ?: true // not specified? - no restrictions, let template decide
     }
 
-    abstract fun isApplicableTo(module: Module, projectKind: ProjectKind): Boolean
+    abstract fun isApplicableTo(module: Module, projectKind: ProjectKind, reader: Reader): Boolean
 
 
     override val text: String get() = title
-
-    open fun isApplicableTo(
-        reader: Reader,
-        module: Module
-    ): Boolean = true
-
     open val settings: List<TemplateSetting<*, *>> = emptyList()
     open val interceptionPoints: List<InterceptionPoint<Any>> = emptyList()
 

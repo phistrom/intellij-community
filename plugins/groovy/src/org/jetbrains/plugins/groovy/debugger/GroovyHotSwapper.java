@@ -32,9 +32,6 @@ import org.jetbrains.plugins.groovy.GroovyFileType;
 import java.io.File;
 import java.util.regex.Pattern;
 
-/**
- * @author peter
- */
 final class GroovyHotSwapper extends JavaProgramPatcher {
   private static final Logger LOG = Logger.getInstance(GroovyHotSwapper.class);
   private static final String GROOVY_HOTSWAP_AGENT_PATH = "groovy.hotswap.agent.path";
@@ -86,7 +83,7 @@ final class GroovyHotSwapper extends JavaProgramPatcher {
     }
 
     if (configuration instanceof ModuleBasedConfiguration) {
-      final Module module = ((ModuleBasedConfiguration)configuration).getConfigurationModule().getModule();
+      final Module module = ((ModuleBasedConfiguration<?, ?>)configuration).getConfigurationModule().getModule();
       if (module != null) {
         final LanguageLevel level = LanguageLevelUtil.getEffectiveLanguageLevel(module);
         if (!level.isAtLeast(LanguageLevel.JDK_1_5)) {

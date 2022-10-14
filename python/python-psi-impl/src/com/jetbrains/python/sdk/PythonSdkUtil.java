@@ -40,7 +40,7 @@ import java.util.stream.Collectors;
 
 /**
  * Utility methods for Python {@link Sdk} based on the project model and the file system.
- *
+ * <p>
  * TODO: Extract SDK "flavor" specific methods into a "Python SDK provider" so that each SDK flavor can be defined independently
  *
  * @see PySdkUtil for run-time Python SDK utils
@@ -142,10 +142,11 @@ public class PythonSdkUtil {
   }
 
 
-  public static boolean isRemote(@Nullable String sdkPath) {
-    return isRemote(findSdkByPath(sdkPath));
-  }
-
+  /**
+   * Checks if SDK is legacy remote or remote bases on targets.
+   * Never assume {@link Sdk#getSdkAdditionalData()} has certain type if this method returns true.
+   * In most cases you are encouraged to obtain additional data and check it explicitly
+   */
   public static boolean isRemote(@Nullable Sdk sdk) {
     return sdk != null && sdk.getSdkAdditionalData() instanceof PyRemoteSdkAdditionalDataMarker;
   }
@@ -198,18 +199,6 @@ public class PythonSdkUtil {
   @NotNull
   public static String getSkeletonsRootPath(String basePath) {
     return basePath + File.separator + SKELETON_DIR_NAME;
-  }
-
-  public static String getRemoteSourcesLocalPath(String sdkHome) {
-    String sep = File.separator;
-
-    String basePath = PathManager.getSystemPath();
-    return basePath +
-           File.separator +
-           REMOTE_SOURCES_DIR_NAME +
-           sep +
-           FileUtil.toSystemIndependentName(sdkHome).hashCode() +
-           sep;
   }
 
   @Nullable
@@ -277,6 +266,10 @@ public class PythonSdkUtil {
     return false;
   }
 
+  /**
+   * @deprecated use PySdkExt.isValid
+   */
+  @Deprecated
   public static boolean isInvalid(@NotNull Sdk sdk) {
     if (isRemote(sdk)) {
       return PyRemoteSdkValidator.Companion.isInvalid(sdk);
@@ -421,6 +414,10 @@ public class PythonSdkUtil {
     return findPythonSdk(ModuleUtilCore.findModuleForPsiElement(element));
   }
 
+  /**
+   * @deprecated path is not unique, use {@link #findSdkByKey(String)} instead
+   */
+  @Deprecated
   @Nullable
   public static Sdk findSdkByPath(@Nullable String path) {
     if (path != null) {
@@ -429,6 +426,11 @@ public class PythonSdkUtil {
     return null;
   }
 
+
+  /**
+   * @deprecated path is not unique, use {@link #findSdkByKey(String)} instead
+   */
+  @Deprecated
   @Nullable
   public static Sdk findSdkByPath(List<? extends Sdk> sdkList, @Nullable String path) {
     if (path != null) {
@@ -519,7 +521,7 @@ public class PythonSdkUtil {
   }
 
   @Nullable
-  private static VirtualFile findCondaMeta(@Nullable String sdkPath) {
+  public static VirtualFile findCondaMeta(@Nullable String sdkPath) {
     if (sdkPath == null) {
       return null;
     }

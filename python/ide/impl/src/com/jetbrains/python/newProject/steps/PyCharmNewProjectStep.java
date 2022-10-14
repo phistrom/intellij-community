@@ -3,11 +3,11 @@ package com.jetbrains.python.newProject.steps;
 
 import com.intellij.ide.util.projectWizard.AbstractNewProjectStep;
 import com.intellij.ide.util.projectWizard.ProjectSettingsStepBase;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.platform.DirectoryProjectGenerator;
-import com.jetbrains.python.newProject.PyFrameworkProjectGenerator;
-import com.jetbrains.python.newProject.PyNewProjectSettings;
-import com.jetbrains.python.newProject.PythonProjectGenerator;
+import com.intellij.util.ObjectUtils;
+import com.jetbrains.python.newProject.*;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
 
@@ -37,7 +37,14 @@ public final class PyCharmNewProjectStep extends AbstractNewProjectStep<PyNewPro
     @Override
     protected ProjectSettingsStepBase<PyNewProjectSettings> createProjectSpecificSettingsStep(@NotNull DirectoryProjectGenerator<PyNewProjectSettings> projectGenerator,
                                                                                               @NotNull AbstractCallback<PyNewProjectSettings> callback) {
-      return new ProjectSpecificSettingsStep<>(projectGenerator, callback);
+      var npwGenerator = ObjectUtils.tryCast(projectGenerator, NewProjectWizardDirectoryGeneratorAdapter.class);
+      if (npwGenerator != null) {
+        //noinspection unchecked
+        return new NewProjectWizardProjectSettingsStep<PyNewProjectSettings>(npwGenerator);
+      }
+      else {
+        return new ProjectSpecificSettingsStep<>(projectGenerator, callback);
+      }
     }
 
     @Override
@@ -58,5 +65,10 @@ public final class PyCharmNewProjectStep extends AbstractNewProjectStep<PyNewPro
         .flatMap(generator -> StreamEx.of(getActions((DirectoryProjectGenerator<PyNewProjectSettings>)generator, callback)))
         .toArray(EMPTY_ARRAY);
     }
+  }
+
+  @Override
+  public @NotNull ActionUpdateThread getActionUpdateThread() {
+    return ActionUpdateThread.BGT;
   }
 }

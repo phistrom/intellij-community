@@ -1,7 +1,8 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.nj2k.tree
 
+import com.intellij.psi.PsiElement
 import org.jetbrains.kotlin.nj2k.tree.visitors.JKVisitor
 
 abstract class JKStatement : JKTreeElement(), PsiOwner by PsiOwnerImpl()
@@ -45,6 +46,11 @@ class JKBreakStatement(label: JKLabel) : JKStatement() {
     override fun accept(visitor: JKVisitor) = visitor.visitBreakStatement(this)
 }
 
+class JKJavaYieldStatement(expression: JKExpression) : JKStatement() {
+    val expression: JKExpression by child(expression)
+    override fun accept(visitor: JKVisitor) = visitor.visitJavaYieldStatement(this)
+}
+
 class JKContinueStatement(label: JKLabel) : JKStatement() {
     var label: JKLabel by child(label)
     override fun accept(visitor: JKVisitor) = visitor.visitContinueStatement(this)
@@ -73,9 +79,10 @@ class JKDeclarationStatement(declaredStatements: List<JKDeclaration>) : JKStatem
 class JKKtWhenStatement(
     expression: JKExpression,
     cases: List<JKKtWhenCase>
-) : JKStatement() {
-    var expression: JKExpression by child(expression)
-    var cases: List<JKKtWhenCase> by children(cases)
+) : JKStatement(), JKKtWhenBlock {
+    override var expression: JKExpression by child(expression)
+    override var cases: List<JKKtWhenCase> by children(cases)
+
     override fun accept(visitor: JKVisitor) = visitor.visitKtWhenStatement(this)
 }
 
@@ -110,9 +117,9 @@ class JKReturnStatement(
 class JKJavaSwitchStatement(
     expression: JKExpression,
     cases: List<JKJavaSwitchCase>
-) : JKStatement() {
-    var expression: JKExpression by child(expression)
-    var cases: List<JKJavaSwitchCase> by children(cases)
+) : JKStatement(), JKJavaSwitchBlock {
+    override var expression: JKExpression by child(expression)
+    override var cases: List<JKJavaSwitchCase> by children(cases)
     override fun accept(visitor: JKVisitor) = visitor.visitJavaSwitchStatement(this)
 }
 
@@ -189,3 +196,6 @@ class JKJavaAnnotationMethod(
 }
 
 
+class JKErrorStatement(override var psi: PsiElement?, override val reason: String? = null) : JKStatement(), JKErrorElement {
+    override fun accept(visitor: JKVisitor) = visitor.visitErrorStatement(this)
+}

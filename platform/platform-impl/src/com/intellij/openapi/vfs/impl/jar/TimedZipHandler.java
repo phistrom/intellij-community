@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vfs.impl.jar;
 
 import com.intellij.openapi.diagnostic.Logger;
@@ -53,7 +53,7 @@ public class TimedZipHandler extends ZipHandlerBase {
   @ApiStatus.Internal
   public static void closeOpenZipReferences() {
     synchronized (ourOpenFileLimitGuard) {
-      ourOpenFileLimitGuard.keySet().forEach(TimedZipHandler::dispose);
+      ourOpenFileLimitGuard.keySet().forEach(TimedZipHandler::clearCaches);
     }
   }
 
@@ -68,8 +68,8 @@ public class TimedZipHandler extends ZipHandlerBase {
   }
 
   @Override
-  public void dispose() {
-    super.dispose();
+  public void clearCaches() {
+    super.clearCaches();
     myHandle.invalidateZipReference();
   }
 

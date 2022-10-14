@@ -17,6 +17,7 @@ import com.intellij.openapi.editor.ex.*;
 import com.intellij.openapi.editor.impl.event.DocumentEventImpl;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.progress.ProcessCanceledException;
+import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.text.StringUtil;
@@ -128,10 +129,11 @@ public final class DocumentImpl extends UserDataHolderBase implements DocumentEx
 
   static final Key<Reference<RangeMarkerTree<RangeMarkerEx>>> RANGE_MARKERS_KEY = Key.create("RANGE_MARKERS_KEY");
   static final Key<Reference<RangeMarkerTree<RangeMarkerEx>>> PERSISTENT_RANGE_MARKERS_KEY = Key.create("PERSISTENT_RANGE_MARKERS_KEY");
-  public void documentCreatedFrom(@NotNull VirtualFile f) {
+  @ApiStatus.Internal
+  public void documentCreatedFrom(@NotNull VirtualFile f, int tabSize) {
     processQueue();
-    getSaveRMTree(f, RANGE_MARKERS_KEY, myRangeMarkers);
-    getSaveRMTree(f, PERSISTENT_RANGE_MARKERS_KEY, myPersistentRangeMarkers);
+    getSaveRMTree(f, RANGE_MARKERS_KEY, myRangeMarkers, tabSize);
+    getSaveRMTree(f, PERSISTENT_RANGE_MARKERS_KEY, myPersistentRangeMarkers, tabSize);
   }
 
   // are some range markers retained by strong references?
@@ -144,7 +146,9 @@ public final class DocumentImpl extends UserDataHolderBase implements DocumentEx
   }
 
   private void getSaveRMTree(@NotNull VirtualFile f,
-                             @NotNull Key<Reference<RangeMarkerTree<RangeMarkerEx>>> key, @NotNull RangeMarkerTree<RangeMarkerEx> tree) {
+                             @NotNull Key<Reference<RangeMarkerTree<RangeMarkerEx>>> key,
+                             @NotNull RangeMarkerTree<RangeMarkerEx> tree,
+                             int tabSize) {
     RMTreeReference freshRef = new RMTreeReference(tree, f);
     Reference<RangeMarkerTree<RangeMarkerEx>> oldRef;
     do {
@@ -160,10 +164,9 @@ public final class DocumentImpl extends UserDataHolderBase implements DocumentEx
     }
 
     // old tree was saved in the virtual file. Have to transfer markers from there.
-    TextRange myDocumentRange = new TextRange(0, getTextLength());
-    oldTree.processAll(r ->{
-      if (r.isValid() && myDocumentRange.contains(r)) {
-        registerRangeMarker(r, r.getStartOffset(), r.getEndOffset(), r.isGreedyToLeft(), r.isGreedyToRight(), 0);
+    oldTree.processAll(r -> {
+      if (r.isValid()) {
+        ((RangeMarkerImpl)r).reRegister(this, tabSize);
       }
       else {
         ((RangeMarkerImpl)r).invalidate("document was gc-ed and re-created");
@@ -172,9 +175,11 @@ public final class DocumentImpl extends UserDataHolderBase implements DocumentEx
     });
   }
 
+  // track GC of RangeMarkerTree: means no-one is interested in range markers for this file anymore
   private static final ReferenceQueue<RangeMarkerTree<RangeMarkerEx>> rmTreeQueue = new ReferenceQueue<>();
   private static class RMTreeReference extends WeakReference<RangeMarkerTree<RangeMarkerEx>> {
-    @NotNull private final VirtualFile virtualFile;
+    @NotNull
+    private final VirtualFile virtualFile;
 
     RMTreeReference(@NotNull RangeMarkerTree<RangeMarkerEx> referent, @NotNull VirtualFile virtualFile) {
       super(referent, rmTreeQueue);
@@ -196,16 +201,17 @@ public final class DocumentImpl extends UserDataHolderBase implements DocumentEx
    */
   @NotNull
   static RangeMarker createRangeMarkerForVirtualFile(@NotNull VirtualFile file,
-                                                     int startOffset,
-                                                     int endOffset,
+                                                     int offset,
                                                      int startLine,
                                                      int startCol,
                                                      int endLine,
                                                      int endCol,
                                                      boolean persistent) {
+    int estimatedLength = RangeMarkerImpl.estimateDocumentLength(file);
+    offset = Math.min(offset, estimatedLength);
     RangeMarkerImpl marker = persistent
-                             ? new PersistentRangeMarker(file, startOffset, endOffset, startLine, startCol, endLine, endCol, false)
-                             : new RangeMarkerImpl(file, startOffset, endOffset, false);
+                             ? new PersistentRangeMarker(file, offset, offset, startLine, startCol, endLine, endCol, estimatedLength, false)
+                             : new RangeMarkerImpl(file, offset, offset, estimatedLength, false);
     Key<Reference<RangeMarkerTree<RangeMarkerEx>>> key = persistent ? PERSISTENT_RANGE_MARKERS_KEY : RANGE_MARKERS_KEY;
     RangeMarkerTree<RangeMarkerEx> tree;
     while (true) {
@@ -216,7 +222,7 @@ public final class DocumentImpl extends UserDataHolderBase implements DocumentEx
       RMTreeReference reference = new RMTreeReference(tree, file);
       if (file.replace(key, oldRef, reference)) break;
     }
-    tree.addInterval(marker, startOffset, endOffset, false, false, false, 0);
+    tree.addInterval(marker, offset, offset, false, false, false, 0);
 
     return marker;
 
@@ -869,14 +875,16 @@ public final class DocumentImpl extends UserDataHolderBase implements DocumentEx
 
     if (!ShutDownTracker.isShutdownHookRunning()) {
       DocumentListener[] listeners = getListeners();
-      for (int i = listeners.length - 1; i >= 0; i--) {
-        try {
-          listeners[i].beforeDocumentChange(event);
+      ProgressManager.getInstance().executeNonCancelableSection(() -> {
+        for (int i = listeners.length - 1; i >= 0; i--) {
+          try {
+            listeners[i].beforeDocumentChange(event);
+          }
+          catch (Throwable e) {
+            exceptions.register(e);
+          }
         }
-        catch (Throwable e) {
-          exceptions.register(e);
-        }
-      }
+      });
     }
 
     myEventsHandling = true;
@@ -908,14 +916,16 @@ public final class DocumentImpl extends UserDataHolderBase implements DocumentEx
 
       if (!ShutDownTracker.isShutdownHookRunning()) {
         DocumentListener[] listeners = getListeners();
-        for (DocumentListener listener : listeners) {
-          try {
-            listener.documentChanged(event);
+        ProgressManager.getInstance().executeNonCancelableSection(() -> {
+          for (DocumentListener listener : listeners) {
+            try {
+              listener.documentChanged(event);
+            }
+            catch (Throwable e) {
+              exceptions.register(e);
+            }
           }
-          catch (Throwable e) {
-            exceptions.register(e);
-          }
-        }
+        });
       }
     }
     finally {
@@ -1197,7 +1207,11 @@ public final class DocumentImpl extends UserDataHolderBase implements DocumentEx
 
   @Override
   public String toString() {
-    return "DocumentImpl[" + FileDocumentManager.getInstance().getFile(this) + (isInEventsHandling() ? ",inEventHandling" : "") + "]";
+    return "DocumentImpl[" + FileDocumentManager.getInstance().getFile(this) +
+           (isInEventsHandling() ? ",inEventHandling" : "") +
+           (!myAssertThreading ? ",nonWriteThreadOnly" : "") +
+           (myAcceptSlashR ? ",acceptSlashR" : "") +
+           "]";
   }
 
   @NotNull
@@ -1222,7 +1236,7 @@ public final class DocumentImpl extends UserDataHolderBase implements DocumentEx
     private final Attachment[] myAttachments;
 
     private UnexpectedBulkUpdateStateException(Throwable enteringTrace) {
-      super("Current operation is not permitted in bulk mode, see Document.setInBulkUpdate javadoc");
+      super("Current operation is not permitted in bulk mode, see Document.isInBulkUpdate() javadoc");
       myAttachments = enteringTrace == null ? Attachment.EMPTY_ARRAY
                                             : new Attachment[] {new Attachment("enteringTrace.txt", enteringTrace)};
     }

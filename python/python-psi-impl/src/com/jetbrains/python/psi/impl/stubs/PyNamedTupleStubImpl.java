@@ -167,14 +167,10 @@ public final class PyNamedTupleStubImpl implements PyNamedTupleStub {
   @Nullable
   private static LinkedHashMap<String, Optional<String>> resolveTupleFields(@NotNull PyCallExpression callExpression,
                                                                             @NotNull NamedTupleModule module) {
-    switch (module) {
-      case TYPING:
-        return resolveTypingNTFields(callExpression);
-      case COLLECTIONS:
-        return resolveCollectionsNTFields(callExpression);
-      default:
-        return null;
-    }
+    return switch (module) {
+      case TYPING -> resolveTypingNTFields(callExpression);
+      case COLLECTIONS -> resolveCollectionsNTFields(callExpression);
+    };
   }
 
   @NotNull
@@ -305,6 +301,11 @@ public final class PyNamedTupleStubImpl implements PyNamedTupleStub {
   @Nullable
   private static String textIfPresent(@Nullable PsiElement element) {
     return element == null ? null : element.getText();
+  }
+
+  @Override
+  public String toString() {
+    return "PyNamedTupleStub(calleeName=" + myCalleeName + ", name=" + myName + ", fields=" + myFields + ')';
   }
 
   private enum NamedTupleModule {

@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.quickfix
 
@@ -13,18 +13,18 @@ import org.jetbrains.kotlin.psi.psiUtil.createSmartPointer
 import org.jetbrains.kotlin.resolve.lazy.BodyResolveMode
 
 abstract class KotlinSingleIntentionActionFactoryWithDelegate<E : KtElement, D : Any>(
-    private val actionPriority: IntentionActionPriority = IntentionActionPriority.NORMAL
+    protected val actionPriority: IntentionActionPriority = IntentionActionPriority.NORMAL
 ) : KotlinIntentionActionFactoryWithDelegate<E, D>() {
 
     protected abstract fun createFix(originalElement: E, data: D): IntentionAction?
 
-    final override fun createFixes(
+    override fun createFixes(
         originalElementPointer: SmartPsiElementPointer<E>,
         diagnostic: Diagnostic,
-        quickFixDataFactory: () -> D?
+        quickFixDataFactory: (E) -> D?
     ): List<QuickFixWithDelegateFactory> = QuickFixWithDelegateFactory(actionPriority) factory@{
         val originalElement = originalElementPointer.element ?: return@factory null
-        val data = quickFixDataFactory() ?: return@factory null
+        val data = quickFixDataFactory(originalElement) ?: return@factory null
         createFix(originalElement, data)
     }.let(::listOf)
 }
@@ -35,7 +35,7 @@ abstract class KotlinIntentionActionFactoryWithDelegate<E : KtElement, D : Any> 
     protected abstract fun createFixes(
         originalElementPointer: SmartPsiElementPointer<E>,
         diagnostic: Diagnostic,
-        quickFixDataFactory: () -> D?
+        quickFixDataFactory: (E) -> D?
     ): List<QuickFixWithDelegateFactory>
 
     abstract fun extractFixData(element: E, diagnostic: Diagnostic): D?

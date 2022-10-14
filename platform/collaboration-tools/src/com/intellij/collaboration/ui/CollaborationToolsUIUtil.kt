@@ -3,19 +3,18 @@ package com.intellij.collaboration.ui
 
 import com.intellij.ide.ui.laf.darcula.ui.DarculaButtonUI
 import com.intellij.openapi.util.NlsSafe
-import com.intellij.ui.ComponentUtil
+import com.intellij.openapi.wm.IdeFocusManager
+import com.intellij.ui.ClientProperty
 import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.ScrollingUtil
 import com.intellij.ui.SearchTextField
+import com.intellij.ui.content.Content
 import com.intellij.ui.speedSearch.NameFilteringListModel
 import com.intellij.ui.speedSearch.SpeedSearch
 import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import java.beans.PropertyChangeListener
-import javax.swing.JButton
-import javax.swing.JComponent
-import javax.swing.JList
-import javax.swing.KeyStroke
+import javax.swing.*
 import javax.swing.event.DocumentEvent
 
 object CollaborationToolsUIUtil {
@@ -79,10 +78,23 @@ object CollaborationToolsUIUtil {
   /**
    * Makes the button blue like a default button in dialogs
    */
-  fun JButton.defaultButton(): JButton {
-    ComponentUtil.putClientProperty(this, DarculaButtonUI.DEFAULT_STYLE_KEY, true)
-    return this
+  fun JButton.defaultButton(): JButton = apply {
+    isDefault = true
   }
+
+  /**
+   * Makes the button blue like a default button in dialogs
+   */
+  var JButton.isDefault: Boolean
+    get() = ClientProperty.isTrue(this, DarculaButtonUI.DEFAULT_STYLE_KEY)
+    set(value) {
+      if (value) {
+        ClientProperty.put(this, DarculaButtonUI.DEFAULT_STYLE_KEY, true)
+      }
+      else {
+        ClientProperty.remove(this, DarculaButtonUI.DEFAULT_STYLE_KEY)
+      }
+    }
 
   /**
    * Removes http(s) protocol and trailing slash from given [url]
@@ -93,4 +105,50 @@ object CollaborationToolsUIUtil {
     .removePrefix("https://")
     .removePrefix("http://")
     .removeSuffix("/")
+
+  /**
+   * Checks if focus is somewhere down the hierarchy from [component]
+   */
+  fun isFocusParent(component: JComponent): Boolean {
+    val focusOwner = IdeFocusManager.findInstanceByComponent(component).focusOwner ?: return false
+    return SwingUtilities.isDescendingFrom(focusOwner, component)
+  }
+
+  /**
+   * Finds the proper focus target for [panel] and set focus to it
+   */
+  fun focusPanel(panel: JComponent) {
+    val focusManager = IdeFocusManager.findInstanceByComponent(panel)
+    val toFocus = focusManager.getFocusTargetFor(panel) ?: return
+    focusManager.doWhenFocusSettlesDown { focusManager.requestFocus(toFocus, true) }
+  }
+
+  fun setComponentPreservingFocus(content: Content, component: JComponent) {
+    val focused = isFocusParent(content.component)
+    content.component = component
+    if (focused) {
+      focusPanel(content.component)
+    }
+  }
 }
+
+internal fun <E> ListModel<E>.findIndex(item: E): Int {
+  for (i in 0 until size) {
+    if (getElementAt(i) == item) return i
+  }
+  return -1
+}
+
+internal val <E> ListModel<E>.items
+  get() = Iterable {
+    object : Iterator<E> {
+      private var idx = -1
+
+      override fun hasNext(): Boolean = idx < size - 1
+
+      override fun next(): E {
+        idx++
+        return getElementAt(idx)
+      }
+    }
+  }

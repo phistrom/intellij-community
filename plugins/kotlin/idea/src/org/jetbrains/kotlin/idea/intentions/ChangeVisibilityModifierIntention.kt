@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.intentions
 
@@ -8,19 +8,19 @@ import com.intellij.openapi.util.TextRange
 import org.jetbrains.kotlin.descriptors.CallableDescriptor
 import org.jetbrains.kotlin.descriptors.DeclarationDescriptorWithVisibility
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
-import org.jetbrains.kotlin.idea.KotlinBundle
+import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
+import org.jetbrains.kotlin.idea.codeinsight.api.classic.intentions.SelfTargetingRangeIntention
 import org.jetbrains.kotlin.idea.core.*
 import org.jetbrains.kotlin.idea.util.runCommandOnAllExpectAndActualDeclaration
 import org.jetbrains.kotlin.lexer.KtModifierKeywordToken
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.startOffset
-import org.jetbrains.kotlin.psi.psiUtil.toVisibility
 import org.jetbrains.kotlin.psi.psiUtil.visibilityModifier
 import org.jetbrains.kotlin.psi.psiUtil.visibilityModifierType
 
 open class ChangeVisibilityModifierIntention protected constructor(val modifier: KtModifierKeywordToken) :
-    SelfTargetingRangeIntention<KtDeclaration>(KtDeclaration::class.java, KotlinBundle.lazyMessage("make.0", modifier.value)) {
+  SelfTargetingRangeIntention<KtDeclaration>(KtDeclaration::class.java, KotlinBundle.lazyMessage("make.0", modifier.value)) {
     override fun startInWriteAction(): Boolean = false
 
     override fun applicabilityRange(element: KtDeclaration): TextRange? {
@@ -94,7 +94,10 @@ open class ChangeVisibilityModifierIntention protected constructor(val modifier:
         else -> null
     }
 
-    class Public : ChangeVisibilityModifierIntention(KtTokens.PUBLIC_KEYWORD), HighPriorityAction
+    class Public : ChangeVisibilityModifierIntention(KtTokens.PUBLIC_KEYWORD), HighPriorityAction {
+        override fun applicabilityRange(element: KtDeclaration): TextRange? =
+            if (element.canBePublic()) super.applicabilityRange(element) else null
+    }
 
     class Private : ChangeVisibilityModifierIntention(KtTokens.PRIVATE_KEYWORD), HighPriorityAction {
         override fun applicabilityRange(element: KtDeclaration): TextRange? =

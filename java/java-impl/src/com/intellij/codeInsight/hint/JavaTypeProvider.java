@@ -34,6 +34,7 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.ui.ColorUtil;
+import com.intellij.util.containers.ContainerUtil;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
@@ -140,7 +141,8 @@ public class JavaTypeProvider extends ExpressionTypeProvider<PsiExpression> {
           infoLines.add(Pair.create(JavaBundle.message("type.information.locality"),
                                     refType.isLocal() ? JavaBundle.message("type.information.local.object") : ""));
           SpecialField field = refType.getSpecialField();
-          if (field != null) {
+          // ENUM_ORDINAL is not precise enough yet, and could be confusing for users
+          if (field != null && field != SpecialField.ENUM_ORDINAL) {
             infoLines.add(Pair.create(field.getPresentationName(), field.getPresentationText(refType.getSpecialFieldType(), type)));
           }
         }
@@ -149,7 +151,7 @@ public class JavaTypeProvider extends ExpressionTypeProvider<PsiExpression> {
     infoLines.removeIf(pair -> pair.getSecond().isEmpty());
     if (!infoLines.isEmpty()) {
       infoLines.add(0, Pair.create(JavaBundle.message("type.information.type"), basicType));
-      HtmlChunk[] rows = StreamEx.of(infoLines).map(pair -> makeHtmlRow(pair.getFirst(), pair.getSecond())).toArray(HtmlChunk.class);
+      HtmlChunk[] rows = ContainerUtil.map2Array(infoLines, HtmlChunk.class, pair -> makeHtmlRow(pair.getFirst(), pair.getSecond()));
       return HtmlChunk.tag("table").children(rows).toString();
     }
     return basicType;

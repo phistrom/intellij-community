@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.inspections
 
@@ -25,7 +25,7 @@ object InfixCallFixActionFactory : KotlinSingleIntentionActionFactory() {
             return null
         }
 
-        val infixCall = (diagnostic.psiElement as? KtOperationReferenceExpression)?.parent as? KtBinaryExpression ?: return null
-        return IntentionWrapper(InfixCallToOrdinaryIntention(), infixCall.containingFile)
+        if ((diagnostic.psiElement as? KtOperationReferenceExpression)?.parent !is KtBinaryExpression) return null
+        return IntentionWrapper(InfixCallToOrdinaryIntention())
     }
 }

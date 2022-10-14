@@ -3,9 +3,11 @@ package com.intellij.jarRepository;
 
 import com.intellij.CommonBundle;
 import com.intellij.core.JavaPsiBundle;
+import com.intellij.execution.process.ProcessIOExecutorService;
 import com.intellij.ide.JavaUiBundle;
 import com.intellij.jarRepository.services.MavenRepositoryServicesManager;
-import com.intellij.notification.Notification;
+import com.intellij.notification.NotificationGroup;
+import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
 import com.intellij.notification.Notifications;
 import com.intellij.openapi.application.ApplicationManager;
@@ -31,7 +33,8 @@ import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.util.Processor;
-import com.intellij.util.concurrency.SequentialTaskExecutor;
+import com.intellij.util.SystemProperties;
+import com.intellij.util.concurrency.AppExecutorUtil;
 import org.eclipse.aether.artifact.Artifact;
 import org.eclipse.aether.repository.RemoteRepository;
 import org.eclipse.aether.transfer.RepositoryOfflineException;
@@ -63,6 +66,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static com.intellij.jarRepository.JarRepositoryAuthenticationDataProviderKt.obtainAuthenticationData;
+
 public final class JarRepositoryManager {
   private static final Logger LOG = Logger.getInstance(JarRepositoryManager.class);
 
@@ -79,9 +84,14 @@ public final class JarRepositoryManager {
     ourClassifierToRootType.put(ArtifactKind.ANNOTATIONS.getClassifier(), AnnotationOrderRootType.getInstance());
   }
 
-  private static final class JobExecutor {
-    static final ExecutorService INSTANCE = SequentialTaskExecutor.createSequentialApplicationPoolExecutor("RemoteLibraryDownloader");
-  }
+  static final ExecutorService DOWNLOADER_EXECUTOR = AppExecutorUtil.createBoundedApplicationPoolExecutor("RemoteLibraryDownloader",
+                                                                                                          ProcessIOExecutorService.INSTANCE,
+                                                                                                          4);
+
+  // used in integration tests
+  private static final boolean DO_REFRESH = SystemProperties.getBooleanProperty("idea.do.refresh.after.jps.library.downloaded", true);
+
+  public final static NotificationGroup GROUP = NotificationGroupManager.getInstance().getNotificationGroup("Repository");
 
   public static boolean hasRunningTasks() {
     return ourTasksInProgress.get() > 0;   // todo: count tasks on per-project basis?
@@ -249,14 +259,6 @@ public final class JarRepositoryManager {
     return submitBackgroundJob(newOrderRootResolveJob(desc, artifactKinds, effectiveRepos, copyTo));
   }
 
-  public static @NotNull Promise<Collection<Artifact>> loadArtifactForDependenciesAsync(@NotNull Project project,
-                                                                                        @NotNull JpsMavenRepositoryLibraryDescriptor desc,
-                                                                                        @NotNull final Set<ArtifactKind> artifactKinds,
-                                                                                        @Nullable List<RemoteRepositoryDescription> repos) {
-    Collection<RemoteRepositoryDescription> effectiveRepos = addDefaultsIfEmpty(project, repos);
-    return submitBackgroundJob(new LibraryResolveJob(desc, artifactKinds, effectiveRepos));
-  }
-
   @Nullable
   public static List<OrderRoot> loadDependenciesSync(@NotNull Project project,
                                                                JpsMavenRepositoryLibraryDescriptor desc,
@@ -336,7 +338,7 @@ public final class JarRepositoryManager {
       sb.append(root.getFile().getName());
     }
     @NlsSafe final String content = sb.toString();
-    Notifications.Bus.notify(new Notification("Repository", title, content, NotificationType.INFORMATION), project);
+    Notifications.Bus.notify(GROUP.createNotification(title, content, NotificationType.INFORMATION), project);
   }
 
   public static void searchArtifacts(Project project,
@@ -458,10 +460,10 @@ public final class JarRepositoryManager {
   }
 
   @NotNull
-  private static <T> Promise<T> submitBackgroundJob(@NotNull Function<? super ProgressIndicator, ? extends T> job) {
+  public static <T> Promise<T> submitBackgroundJob(@NotNull Function<? super ProgressIndicator, ? extends T> job) {
     ModalityState startModality = ModalityState.defaultModalityState();
     AsyncPromise<T> promise = new AsyncPromise<>();
-    JobExecutor.INSTANCE.execute(() -> {
+    DOWNLOADER_EXECUTOR.execute(() -> {
       try {
         ourTasksInProgress.incrementAndGet();
         final ProgressIndicator indicator = new EmptyProgressIndicator(startModality);
@@ -499,9 +501,9 @@ public final class JarRepositoryManager {
 
   private static abstract class AetherJob<T> implements Function<ProgressIndicator, T> {
     @NotNull
-    private final Collection<? extends RemoteRepositoryDescription> myRepositories;
+    private final Collection<RemoteRepositoryDescription> myRepositories;
 
-    AetherJob(@NotNull Collection<? extends RemoteRepositoryDescription> repositories) {
+    AetherJob(@NotNull Collection<RemoteRepositoryDescription> repositories) {
       myRepositories = repositories;
     }
 
@@ -515,12 +517,7 @@ public final class JarRepositoryManager {
         indicator.setText(getProgressText());
         indicator.setIndeterminate(true);
 
-        final ArrayList<RemoteRepository> remotes = new ArrayList<>();
-        for (RemoteRepositoryDescription repository : myRepositories) {
-          remotes.add(
-            ArtifactRepositoryManager.createRemoteRepository(repository.getId(), repository.getUrl(), repository.isAllowSnapshots())
-          );
-        }
+        List<RemoteRepository> remotes = createRemoteRepositories(myRepositories);
         try {
           return perform(indicator, new ArtifactRepositoryManager(getLocalRepositoryPath(), remotes, new ProgressConsumer() {
             @Override
@@ -544,8 +541,21 @@ public final class JarRepositoryManager {
       return getDefaultResult();
     }
 
+    private static List<RemoteRepository> createRemoteRepositories(Collection<RemoteRepositoryDescription> repositoryDescriptions) {
+      ArrayList<RemoteRepository> remotes = new ArrayList<>();
+      for (RemoteRepositoryDescription repository : repositoryDescriptions) {
+        ArtifactRepositoryManager.ArtifactAuthenticationData authData = obtainAuthenticationData(repository.getUrl());
+        remotes.add(
+          ArtifactRepositoryManager.createRemoteRepository(repository.getId(), repository.getUrl(), authData, repository.isAllowSnapshots())
+        );
+      }
+      return remotes;
+    }
+
     protected abstract @NlsContexts.ProgressText String getProgressText();
+
     protected abstract T perform(ProgressIndicator progress, @NotNull ArtifactRepositoryManager manager) throws Exception;
+
     protected abstract T getDefaultResult();
   }
 
@@ -561,6 +571,7 @@ public final class JarRepositoryManager {
     final List<OrderRoot> result = new ArrayList<>();
     final VirtualFileManager manager = VirtualFileManager.getInstance();
     for (Artifact each : artifacts) {
+      long ms = System.currentTimeMillis();
       try {
         File repoFile = each.getFile();
         File toFile = repoFile;
@@ -570,18 +581,26 @@ public final class JarRepositoryManager {
             FileUtil.copy(repoFile, toFile);
           }
         }
-        // search for jar file first otherwise lib root won't be found!
-        manager.refreshAndFindFileByUrl(VfsUtilCore.pathToUrl(toFile.getPath()));
-        final String url = VfsUtil.getUrlForLibraryRoot(toFile);
-        final VirtualFile file = manager.refreshAndFindFileByUrl(url);
-        if (file != null) {
-          OrderRootType rootType = ourClassifierToRootType.getOrDefault(each.getClassifier(), OrderRootType.CLASSES);
 
-          result.add(new OrderRoot(file, rootType));
+        if (DO_REFRESH) {
+          // search for jar file first otherwise lib root won't be found!
+          manager.refreshAndFindFileByUrl(VfsUtilCore.pathToUrl(toFile.getPath()));
+          final String url = VfsUtil.getUrlForLibraryRoot(toFile);
+          final VirtualFile file = manager.refreshAndFindFileByUrl(url);
+          if (file != null) {
+            OrderRootType rootType = ourClassifierToRootType.getOrDefault(each.getClassifier(), OrderRootType.CLASSES);
+
+            result.add(new OrderRoot(file, rootType));
+          }
         }
       }
       catch (IOException e) {
         LOG.warn(e);
+      }
+      finally {
+        if (LOG.isTraceEnabled()) {
+          LOG.trace("Artifact " + each.toString() + " refreshed in " + (System.currentTimeMillis() - ms) + "ms");
+        }
       }
     }
     return result;
@@ -618,10 +637,13 @@ public final class JarRepositoryManager {
 
     @Override
     protected Collection<Artifact> perform(ProgressIndicator progress, @NotNull ArtifactRepositoryManager manager) throws Exception {
+      long ms = System.currentTimeMillis();
       final String version = myDesc.getVersion();
       try {
-        return manager.resolveDependencyAsArtifact(myDesc.getGroupId(), myDesc.getArtifactId(), version, myKinds,
-                                                   myDesc.isIncludeTransitiveDependencies(), myDesc.getExcludedDependencies());
+        Collection<Artifact> artifacts = manager.resolveDependencyAsArtifact(myDesc.getGroupId(), myDesc.getArtifactId(), version, myKinds,
+                                                                             myDesc.isIncludeTransitiveDependencies(),
+                                                                             myDesc.getExcludedDependencies());
+        return artifacts;
       }
       catch (TransferCancelledException e) {
         throw new ProcessCanceledException(e);
@@ -640,6 +662,11 @@ public final class JarRepositoryManager {
         }
         catch (TransferCancelledException e1) {
           throw new ProcessCanceledException(e1);
+        }
+      }
+      finally {
+        if (LOG.isTraceEnabled()) {
+          LOG.trace("Artifact " + myDesc + " resolved in " + (System.currentTimeMillis() - ms) + "ms");
         }
       }
     }

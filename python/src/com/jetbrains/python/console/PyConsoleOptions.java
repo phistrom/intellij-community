@@ -2,6 +2,7 @@
 package com.jetbrains.python.console;
 
 import com.google.common.collect.Maps;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
@@ -10,18 +11,20 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.util.PathMappingSettings;
+import com.intellij.util.PlatformUtils;
 import com.intellij.util.containers.ComparatorUtil;
 import com.intellij.util.xmlb.annotations.Attribute;
 import com.intellij.util.xmlb.annotations.Tag;
 import com.intellij.util.xmlb.annotations.XCollection;
 import com.intellij.util.xmlb.annotations.XMap;
+import com.jetbrains.python.console.actions.CommandQueueForPythonConsoleService;
 import com.jetbrains.python.run.AbstractPyCommonOptionsForm;
 import com.jetbrains.python.run.AbstractPythonRunConfigurationParams;
 import com.jetbrains.python.run.PythonRunParams;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.Map;
+import java.util.*;
 
 @State(
   name = "PyConsoleOptionsProvider",
@@ -69,6 +72,25 @@ public class PyConsoleOptions implements PersistentStateComponent<PyConsoleOptio
     myState.myUseExistingConsole = enabled;
   }
 
+  public void setCommandQueueEnabled(boolean selected) {
+    myState.myCommandQueueEnabled = selected;
+    if (!selected) {
+      ApplicationManager.getApplication().getService(CommandQueueForPythonConsoleService.class).disableCommandQueue();
+    }
+  }
+
+  public boolean isCommandQueueEnabled() {
+    return myState.myCommandQueueEnabled;
+  }
+
+  public void setAutoCompletionEnabled(boolean selected) {
+    myState.myAutoCompletionEnabled = selected;
+  }
+
+  public boolean isAutoCompletionEnabled() {
+    return myState.myAutoCompletionEnabled;
+  }
+
   public static PyConsoleOptions getInstance(Project project) {
     return project.getService(PyConsoleOptions.class);
   }
@@ -85,6 +107,8 @@ public class PyConsoleOptions implements PersistentStateComponent<PyConsoleOptio
     myState.myPythonConsoleState = state.myPythonConsoleState;
     myState.myIpythonEnabled = state.myIpythonEnabled;
     myState.myUseExistingConsole = state.myUseExistingConsole;
+    myState.myCommandQueueEnabled = state.myCommandQueueEnabled;
+    myState.myAutoCompletionEnabled = state.myAutoCompletionEnabled;
   }
 
   public static class State {
@@ -94,6 +118,8 @@ public class PyConsoleOptions implements PersistentStateComponent<PyConsoleOptio
     public boolean myShowVariablesByDefault = true;
     public boolean myIpythonEnabled = true;
     public boolean myUseExistingConsole = false;
+    public boolean myCommandQueueEnabled = PlatformUtils.isDataSpell();
+    public boolean myAutoCompletionEnabled = false;
   }
 
   @Tag("console-settings")

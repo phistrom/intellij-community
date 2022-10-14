@@ -4,6 +4,7 @@ package com.intellij.ide.actions;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.OccurenceNavigator;
 import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.impl.Utils;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
@@ -22,7 +23,13 @@ import javax.swing.*;
 import java.awt.*;
 import java.util.LinkedList;
 
-abstract class OccurenceNavigatorActionBase extends DumbAwareAction implements UpdateInBackground {
+abstract class OccurenceNavigatorActionBase extends DumbAwareAction {
+
+  @Override
+  public @NotNull ActionUpdateThread getActionUpdateThread() {
+    return ActionUpdateThread.BGT;
+  }
+
   @Override
   public final void actionPerformed(@NotNull AnActionEvent e) {
     Project project = e.getProject();
@@ -61,7 +68,9 @@ abstract class OccurenceNavigatorActionBase extends DumbAwareAction implements U
       presentation.setVisible(!ActionPlaces.isMainMenuOrActionSearch(event.getPlace()));
       return;
     }
-    OccurenceNavigator navigator = getNavigator(event.getDataContext());
+    UpdateSession session = Utils.getOrCreateUpdateSession(event);
+    OccurenceNavigator navigator = session.compute(
+      this, "getNavigator", ActionUpdateThread.EDT, () -> getNavigator(event.getDataContext()));
     if (navigator == null) {
       presentation.setEnabled(false);
       // make it invisible only in main menu to avoid initial invisibility in toolbars
@@ -70,7 +79,9 @@ abstract class OccurenceNavigatorActionBase extends DumbAwareAction implements U
     }
     presentation.setVisible(true);
     try {
-      presentation.setEnabled(hasOccurenceToGo(navigator));
+      boolean enabled = Boolean.TRUE.equals(session.compute(
+        navigator, "hasOccurenceToGo", navigator.getActionUpdateThread(), () -> hasOccurenceToGo(navigator)));
+      presentation.setEnabled(enabled);
       presentation.setText(getDescription(navigator));
     }
     catch (IndexNotReadyException e) {
@@ -126,7 +137,7 @@ abstract class OccurenceNavigatorActionBase extends DumbAwareAction implements U
 
   private static @Nullable OccurenceNavigator getOccurenceNavigatorFromContext(@NotNull DataContext dataContext) {
     Project project = CommonDataKeys.PROJECT.getData(dataContext);
-    Component component = PlatformDataKeys.CONTEXT_COMPONENT.getData(dataContext);
+    Component component = PlatformCoreDataKeys.CONTEXT_COMPONENT.getData(dataContext);
     for (Component c = component; c != null; c = c.getParent()) {
       if (c instanceof OccurenceNavigator) {
         return (OccurenceNavigator)c;

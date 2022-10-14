@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.nj2k.conversions
 
@@ -62,7 +62,7 @@ class AddElementsInfoConversion(context: NewJ2kConverterContext) : RecursiveAppl
         }
         return psiMethod.findSuperMethods().mapNotNull { superMethod ->
             when (superMethod) {
-                is KtLightMethod -> superMethod.kotlinOrigin?.resolveToDescriptorIfAny()?.safeAs()
+                is KtLightMethod -> superMethod.kotlinOrigin?.resolveToDescriptorIfAny() as? FunctionDescriptor
                 else -> superMethod.getJavaMethodDescriptor()
             }
         }

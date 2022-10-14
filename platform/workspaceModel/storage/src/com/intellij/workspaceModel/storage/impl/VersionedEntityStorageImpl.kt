@@ -4,6 +4,7 @@ package com.intellij.workspaceModel.storage.impl
 import com.github.benmanes.caffeine.cache.Cache
 import com.github.benmanes.caffeine.cache.Caffeine
 import com.intellij.workspaceModel.storage.*
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 internal class ValuesCache {
@@ -11,8 +12,8 @@ internal class ValuesCache {
   private val cachedValuesWithParameter: Cache<Pair<CachedValueWithParameter<*, *>, *>, Any?> =
     Caffeine.newBuilder().build()
 
-  fun <R> cachedValue(value: CachedValue<R>, storage: WorkspaceEntityStorage): R {
-    if (storage is WorkspaceEntityStorageBuilder) {
+  fun <R> cachedValue(value: CachedValue<R>, storage: EntityStorage): R {
+    if (storage is MutableEntityStorage) {
       error("storage must be immutable")
     }
 
@@ -29,8 +30,8 @@ internal class ValuesCache {
     }
   }
 
-  fun <P, R> cachedValue(value: CachedValueWithParameter<P, R>, parameter: P, storage: WorkspaceEntityStorage): R {
-    if (storage is WorkspaceEntityStorageBuilder) {
+  fun <P, R> cachedValue(value: CachedValueWithParameter<P, R>, parameter: P, storage: EntityStorage): R {
+    if (storage is MutableEntityStorage) {
       error("storage must be immutable")
     }
 
@@ -56,7 +57,7 @@ internal class ValuesCache {
   }
 }
 
-class VersionedEntityStorageOnBuilder(val builder: WorkspaceEntityStorageBuilder) : VersionedEntityStorage {
+class VersionedEntityStorageOnBuilder(private val builder: MutableEntityStorage) : VersionedEntityStorage {
   private val currentSnapshot: AtomicReference<StorageSnapshotCache> = AtomicReference()
   private val valuesCache: ValuesCache
     get() = getCurrentSnapshot().cache
@@ -64,10 +65,10 @@ class VersionedEntityStorageOnBuilder(val builder: WorkspaceEntityStorageBuilder
   override val version: Long
     get() = builder.modificationCount
 
-  override val current: WorkspaceEntityStorage
+  override val current: EntityStorage
     get() = getCurrentSnapshot().storage
 
-  override val base: WorkspaceEntityStorage
+  override val base: MutableEntityStorage
     get() = builder
 
   override fun <R> cachedValue(value: CachedValue<R>): R = valuesCache.cachedValue(value, current)
@@ -82,7 +83,7 @@ class VersionedEntityStorageOnBuilder(val builder: WorkspaceEntityStorageBuilder
   private fun getCurrentSnapshot(): StorageSnapshotCache {
     val snapshotCache = currentSnapshot.get()
     if (snapshotCache == null || builder.modificationCount != snapshotCache.storageVersion) {
-      val storageSnapshotCache = StorageSnapshotCache(builder.modificationCount, ValuesCache(), builder.toStorage())
+      val storageSnapshotCache = StorageSnapshotCache(builder.modificationCount, ValuesCache(), builder.toSnapshot())
       currentSnapshot.set(storageSnapshotCache)
       return storageSnapshotCache
     }
@@ -90,9 +91,9 @@ class VersionedEntityStorageOnBuilder(val builder: WorkspaceEntityStorageBuilder
   }
 }
 
-class VersionedEntityStorageOnStorage(private val storage: WorkspaceEntityStorage) : VersionedEntityStorage {
+class VersionedEntityStorageOnStorage(private val storage: EntityStorage) : VersionedEntityStorage {
   init {
-    if (storage is WorkspaceEntityStorageBuilder) error("storage must be immutable, but got: ${storage.javaClass.name}")
+    if (storage is MutableEntityStorage) error("storage must be immutable, but got: ${storage.javaClass.name}")
   }
 
   private val valuesCache = ValuesCache()
@@ -100,10 +101,10 @@ class VersionedEntityStorageOnStorage(private val storage: WorkspaceEntityStorag
   override val version: Long
     get() = 0
 
-  override val current: WorkspaceEntityStorage
+  override val current: EntityStorage
     get() = storage
 
-  override val base: WorkspaceEntityStorage
+  override val base: EntityStorage
     get() = storage
 
   override fun <R> cachedValue(value: CachedValue<R>): R = valuesCache.cachedValue(value, current)
@@ -116,14 +117,14 @@ class VersionedEntityStorageOnStorage(private val storage: WorkspaceEntityStorag
     valuesCache.clearCachedValue(value, parameter)
 }
 
-class DummyVersionedEntityStorage(private val builder: WorkspaceEntityStorageBuilder) : VersionedEntityStorage {
+class DummyVersionedEntityStorage(private val builder: MutableEntityStorage) : VersionedEntityStorage {
   override val version: Long
     get() = builder.modificationCount
 
-  override val current: WorkspaceEntityStorage
+  override val current: EntityStorage
     get() = builder
 
-  override val base: WorkspaceEntityStorage
+  override val base: EntityStorage
     get() = builder
 
   override fun <R> cachedValue(value: CachedValue<R>): R = value.source(current)
@@ -132,7 +133,7 @@ class DummyVersionedEntityStorage(private val builder: WorkspaceEntityStorageBui
   override fun <P, R> clearCachedValue(value: CachedValueWithParameter<P, R>, parameter: P) {}
 }
 
-open class VersionedEntityStorageImpl(initialStorage: WorkspaceEntityStorage) : VersionedEntityStorage {
+open class VersionedEntityStorageImpl(initialStorage: EntityStorageSnapshot) : VersionedEntityStorage {
   private val currentSnapshot: AtomicReference<StorageSnapshotCache> = AtomicReference()
   private val valuesCache: ValuesCache
     get() {
@@ -145,10 +146,10 @@ open class VersionedEntityStorageImpl(initialStorage: WorkspaceEntityStorage) : 
       return snapshotCache.cache
     }
 
-  override val current: WorkspaceEntityStorage
+  override val current: EntityStorage
     get() = currentPointer.storage
 
-  override val base: WorkspaceEntityStorage
+  override val base: EntityStorage
     get() = current
 
   override val version: Long
@@ -167,24 +168,26 @@ open class VersionedEntityStorageImpl(initialStorage: WorkspaceEntityStorage) : 
   override fun <P, R> clearCachedValue(value: CachedValueWithParameter<P, R>, parameter: P) =
     valuesCache.clearCachedValue(value, parameter)
 
-  class Current(val version: Long, val storage: WorkspaceEntityStorage)
+  class Current(val version: Long, val storage: EntityStorageSnapshot)
 
   @Volatile
   private var currentPointer: Current = Current(0, initialStorage)
 
   @Synchronized
-  fun replace(newStorage: WorkspaceEntityStorage, changes: Map<Class<*>, List<EntityChange<*>>>,
-              beforeChanged: (VersionedStorageChange) -> Unit, afterChanged: (VersionedStorageChange) -> Unit) {
+  fun replace(newStorage: EntityStorageSnapshot, changes: Map<Class<*>, List<EntityChange<*>>>,
+              beforeChanged: (VersionedStorageChange) -> Unit, afterChanged: (VersionedStorageChange) -> Unit,
+              locker: AtomicBoolean?) {
     val oldCopy = currentPointer
     if (oldCopy.storage == newStorage) return
     val change = VersionedStorageChangeImpl(this, oldCopy.storage, newStorage, changes)
     beforeChanged(change)
     currentPointer = Current(version = oldCopy.version + 1, storage = newStorage)
+    locker?.set(false)
     afterChanged(change)
   }
 
   @Synchronized
-  fun replaceSilently(newStorage: WorkspaceEntityStorage) {
+  fun replaceSilently(newStorage: EntityStorageSnapshot) {
     val oldCopy = currentPointer
     if (oldCopy.storage == newStorage) return
     currentPointer = Current(version = oldCopy.version + 1, storage = newStorage)
@@ -192,8 +195,8 @@ open class VersionedEntityStorageImpl(initialStorage: WorkspaceEntityStorage) : 
 }
 
 private class VersionedStorageChangeImpl(entityStorage: VersionedEntityStorage,
-                                         override val storageBefore: WorkspaceEntityStorage,
-                                         override val storageAfter: WorkspaceEntityStorage,
+                                         override val storageBefore: EntityStorageSnapshot,
+                                         override val storageAfter: EntityStorageSnapshot,
                                          private val changes: Map<Class<*>, List<EntityChange<*>>>) : VersionedStorageChange(
   entityStorage) {
   @Suppress("UNCHECKED_CAST")
@@ -203,4 +206,4 @@ private class VersionedStorageChangeImpl(entityStorage: VersionedEntityStorage,
   override fun getAllChanges(): Sequence<EntityChange<*>> = changes.values.asSequence().flatten()
 }
 
-private data class StorageSnapshotCache(val storageVersion: Long, val cache: ValuesCache, val storage: WorkspaceEntityStorage)
+private data class StorageSnapshotCache(val storageVersion: Long, val cache: ValuesCache, val storage: EntityStorage)

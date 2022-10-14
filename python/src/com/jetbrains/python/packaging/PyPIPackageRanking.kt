@@ -1,5 +1,4 @@
 // Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.jetbrains.python.packaging
 
 import com.google.common.io.Resources
@@ -24,7 +23,7 @@ object PyPIPackageRanking {
     get() = myPackageRank.asSequence().map { it.key }
 
   fun reload() {
-    assert(!ApplicationManager.getApplication().isDispatchThread)
+    ApplicationManager.getApplication().assertIsNonDispatchThread();
     val gson = Gson()
     val resource = PyPIPackageRanking::class.java.getResource("/packaging/pypi-ranking.json") ?: error("Python package ranking not found")
     val array = Resources.asCharSource(resource, Charsets.UTF_8).openBufferedStream().use {

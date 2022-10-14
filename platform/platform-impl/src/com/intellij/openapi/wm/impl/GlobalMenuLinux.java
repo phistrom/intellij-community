@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.wm.impl;
 
 import com.intellij.diagnostic.LoadingState;
@@ -24,8 +24,9 @@ import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.util.SystemInfo;
-import com.intellij.openapi.util.registry.Registry;
+import com.intellij.openapi.util.SystemInfoRt;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.util.system.CpuArch;
 import com.intellij.util.ui.ImageUtil;
 import com.sun.jna.Callback;
 import com.sun.jna.Library;
@@ -288,7 +289,10 @@ public final class GlobalMenuLinux implements LinuxGlobalMenuEventHandler, Dispo
 
         for (GlobalMenuLinux gml : ourInstances.values()) {
           if (gml.myFrame == wndParent) {
-            for (MenuItemInternal root : gml.myRoots) {
+            List<MenuItemInternal> currentRoots = gml.myRoots;
+            if (currentRoots == null) return false;
+
+            for (MenuItemInternal root : currentRoots) {
               if (eventChar == root.mnemonic) {
                 ourLib.showMenuItem(root.nativePeer);
                 return false;
@@ -484,23 +488,16 @@ public final class GlobalMenuLinux implements LinuxGlobalMenuEventHandler, Dispo
   }
 
   private static String _evtype2str(int eventType) {
-    switch (eventType) {
-      case GlobalMenuLib.EVENT_OPENED:
-        return "event-opened";
-      case GlobalMenuLib.EVENT_CLOSED:
-        return "event-closed";
-      case GlobalMenuLib.EVENT_CLICKED:
-        return "event-clicked";
-      case GlobalMenuLib.SIGNAL_ABOUT_TO_SHOW:
-        return "signal-about-to-show";
-      case GlobalMenuLib.SIGNAL_ACTIVATED:
-        return "signal-activated";
-      case GlobalMenuLib.SIGNAL_CHILD_ADDED:
-        return "signal-child-added";
-      case GlobalMenuLib.SIGNAL_SHOWN:
-        return "signal-shown";
-    }
-    return "unknown-event-type-" + eventType;
+    return switch (eventType) {
+      case GlobalMenuLib.EVENT_OPENED -> "event-opened";
+      case GlobalMenuLib.EVENT_CLOSED -> "event-closed";
+      case GlobalMenuLib.EVENT_CLICKED -> "event-clicked";
+      case GlobalMenuLib.SIGNAL_ABOUT_TO_SHOW -> "signal-about-to-show";
+      case GlobalMenuLib.SIGNAL_ACTIVATED -> "signal-activated";
+      case GlobalMenuLib.SIGNAL_CHILD_ADDED -> "signal-child-added";
+      case GlobalMenuLib.SIGNAL_SHOWN -> "signal-shown";
+      default -> "unknown-event-type-" + eventType;
+    };
   }
 
   private static byte[] _icon2png(Icon icon) {
@@ -787,9 +784,10 @@ public final class GlobalMenuLinux implements LinuxGlobalMenuEventHandler, Dispo
 
   private static GlobalMenuLib _loadLibrary() {
     Application app;
-    if (!SystemInfo.isLinux ||
+    if (!SystemInfoRt.isLinux ||
+        !(CpuArch.isIntel64() || CpuArch.isArm64()) ||
         (app = ApplicationManager.getApplication()) == null || app.isUnitTestMode() || app.isHeadlessEnvironment() ||
-        Registry.is("linux.native.menu.force.disable") ||
+        Boolean.getBoolean("linux.native.menu.force.disable") ||
         (LoadingState.COMPONENTS_REGISTERED.isOccurred() && !Experiments.getInstance().isFeatureEnabled("linux.native.menu")) ||
         !JnaLoader.isLoaded() ||
         isUnderVMWithSwiftPluginInstalled()) {
@@ -797,7 +795,7 @@ public final class GlobalMenuLinux implements LinuxGlobalMenuEventHandler, Dispo
     }
 
     try {
-      Path lib = PathManager.findBinFile("libdbm64.so");
+      @SuppressWarnings("SpellCheckingInspection") Path lib = PathManager.findBinFile("libdbm.so");
       assert lib != null : "DBM lib missing; bin=" + Arrays.toString(new File(PathManager.getBinPath()).list());
       return Native.load(lib.toString(), GlobalMenuLib.class, Collections.singletonMap("jna.encoding", "UTF8"));
     }

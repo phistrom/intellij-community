@@ -4,7 +4,7 @@ package org.jetbrains.plugins.github.pullrequest.ui
 import com.intellij.CommonBundle
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.ui.MessageDialogBuilder
-import com.intellij.collaboration.ui.codereview.InlineIconButton
+import com.intellij.util.ui.InlineIconButton
 import icons.CollaborationToolsIcons
 import org.jetbrains.plugins.github.i18n.GithubBundle
 import java.awt.event.ActionListener
@@ -25,13 +25,17 @@ internal object GHTextActions {
     return button
   }
 
-  fun createEditButton(paneHandle: GHEditableHtmlPaneHandle): JComponent {
+  fun createEditButton(paneHandle: GHEditableHtmlPaneHandle): InlineIconButton {
+    return createEditButton().apply {
+      actionListener = ActionListener {
+        paneHandle.showAndFocusEditor()
+      }
+    }
+  }
+
+  fun createEditButton(): InlineIconButton {
     val icon = AllIcons.General.Inline_edit
     val hoverIcon = AllIcons.General.Inline_edit_hovered
-    val button = InlineIconButton(icon, hoverIcon, tooltip = CommonBundle.message("button.edit"))
-    button.actionListener = ActionListener {
-      paneHandle.showAndFocusEditor()
-    }
-    return button
+    return InlineIconButton(icon, hoverIcon, tooltip = CommonBundle.message("button.edit"))
   }
 }

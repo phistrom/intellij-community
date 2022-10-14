@@ -11,15 +11,13 @@ fun x(a: A, b: Boolean, list: List<Int>) {
     val (x, y) = if (condition(a)) {
         print(A(1, "").toString())
         B(1, 2)
-    }
-    else {
+    } else {
         B(3, 4)
     }
 
     val (x1, y1) = if (b) {
         A(1, "").apply { val (x2, y2) = this }
-    }
-    else {
+    } else {
         return
     }
 
@@ -34,4 +32,6 @@ fun y3(a: A) {
     condition(a)
 }
 
-// FIR_IGNORE
+// FIR_COMPARISON
+// FIR_COMPARISON_WITH_DISABLED_COMPONENTS
+// IGNORE_FIR_LOG

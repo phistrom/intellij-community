@@ -1,15 +1,16 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.compiler;
 
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.notification.NotificationGroup;
+import com.intellij.notification.NotificationGroupManager;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleType;
+import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.vfs.VirtualFile;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -26,7 +27,7 @@ public abstract class CompilerManager {
   public static final Key<RunConfiguration> RUN_CONFIGURATION_KEY = Key.create("RUN_CONFIGURATION");
   public static final Key<String> RUN_CONFIGURATION_TYPE_ID_KEY = Key.create("RUN_CONFIGURATION_TYPE_ID");
 
-  public static final NotificationGroup NOTIFICATION_GROUP = NotificationGroup.logOnlyGroup("Compiler");
+  public static final NotificationGroup NOTIFICATION_GROUP = NotificationGroupManager.getInstance().getNotificationGroup("Compiler");
 
   /**
    * Returns the compiler manager instance for the specified project.
@@ -45,8 +46,7 @@ public abstract class CompilerManager {
    *
    * @deprecated use {@link CompileTask} extension instead
    */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @Deprecated(forRemoval = true)
   public abstract void addCompiler(@NotNull Compiler compiler);
 
   /**
@@ -54,8 +54,7 @@ public abstract class CompilerManager {
    *
    * @deprecated use {@link CompileTask} extension instead
    */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @Deprecated(forRemoval = true)
   public abstract void removeCompiler(@NotNull Compiler compiler);
 
   /**
@@ -81,8 +80,7 @@ public abstract class CompilerManager {
    * @param type the type for which the Compile action is disabled.
    * @deprecated use {@link CompilableFileTypesProvider} extension point to register compilable file types
    */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @Deprecated(forRemoval = true)
   public abstract void removeCompilableFileType(@NotNull FileType type);
 
   /**
@@ -107,8 +105,7 @@ public abstract class CompilerManager {
    * Registers a compiler task  that will be executed after the compilation.
    * @deprecated Use {@code compiler.task} extension point instead (see {@link CompileTask} for details).
    */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @Deprecated(forRemoval = true)
   public abstract void addAfterTask(@NotNull CompileTask task);
 
   /**
@@ -194,11 +191,22 @@ public abstract class CompilerManager {
   public abstract void makeWithModalProgress(@NotNull CompileScope scope, @Nullable CompileStatusNotification callback);
 
   /**
-   * Checks if compile scope given is up-to-date
-   * @param scope
-   * @return true if make on the scope specified wouldn't do anything or false if something is to be compiled or deleted
+   * Checks if compile scope given is up-to-date.
+   * If called from a non-EDT thread which is currently running under some progress, the method reuses the calling thread and executes under thread's ProgressIndicator.
+   * Otherwise, it spawns a new background thread with a new ProgressIndicator which performs the check. The calling thread will be still blocked waiting until the check is completed
+   * @param scope - a compilation scope to be checked
+   * @return true if build with the specified scope wouldn't do anything or false if something is to be compiled or deleted
    */
   public abstract boolean isUpToDate(@NotNull CompileScope scope);
+
+  /**
+   * Checks if compile scope given is up-to-date.
+   * This method reuses the calling thread and executes under the specified progress indicator
+   * @param scope - a compilation scope to be checked
+   * @param progress progress indicator to be used for reporting
+   * @return true if build with the specified scope wouldn't do anything or false if something is to be compiled or deleted
+   */
+  public abstract boolean isUpToDate(@NotNull CompileScope scope, @NotNull ProgressIndicator progress);
 
   /**
    * Rebuild the whole project from scratch. Compiler excludes are honored.
@@ -243,12 +251,23 @@ public abstract class CompilerManager {
    */
   @NotNull
   public abstract CompileScope createFilesCompileScope(VirtualFile @NotNull [] files);
+
   @NotNull
-  public abstract CompileScope createModuleCompileScope(@NotNull Module module, boolean includeDependentModules);
+  public CompileScope createModuleCompileScope(@NotNull Module module, boolean includeDependentModules) {
+    return createModulesCompileScope(new Module[] {module}, includeDependentModules);
+  }
+
   @NotNull
-  public abstract CompileScope createModulesCompileScope(Module @NotNull [] modules, boolean includeDependentModules);
+  public CompileScope createModulesCompileScope(Module @NotNull [] modules, boolean includeDependentModules) {
+    return createModulesCompileScope(modules, includeDependentModules, false);
+  }
+
   @NotNull
-  public abstract CompileScope createModulesCompileScope(Module @NotNull [] modules, boolean includeDependentModules, boolean includeRuntimeDependencies);
+  public CompileScope createModulesCompileScope(Module @NotNull [] modules, boolean includeDependentModules, boolean includeRuntimeDependencies){
+    return createModulesCompileScope(modules, includeDependentModules, includeRuntimeDependencies, true);
+  }
+
+  public abstract CompileScope createModulesCompileScope(Module @NotNull [] modules, boolean includeDependentModules, boolean includeRuntimeDependencies, boolean includeTests);
   @NotNull
   public abstract CompileScope createModuleGroupCompileScope(@NotNull Project project, Module @NotNull [] modules, boolean includeDependentModules);
   @NotNull

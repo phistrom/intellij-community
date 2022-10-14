@@ -19,12 +19,7 @@ class PyAutoDetectTestConfiguration(project: Project, factory: PyAutoDetectionCo
   override val useFrameworkNameInConfiguration: Boolean = false
 
   override fun getState(executor: Executor, environment: ExecutionEnvironment): RunProfileState? {
-    val conf = PyAutoDetectionConfigurationFactory.factoriesExcludingThis
-      .asSequence().map {
-        it.createTemplateConfiguration(project)
-      }.filter {
-        it.isFrameworkInstalled()
-      }.first()
+    val conf = detectedConfiguration() ?: return null
 
     copyTo(getProperties(conf))
     for (accessor in BeanBinding.getAccessors(PyAbstractTestConfiguration::class.java)) {
@@ -37,11 +32,17 @@ class PyAutoDetectTestConfiguration(project: Project, factory: PyAutoDetectionCo
     return conf.getState(executor, environment)
   }
 
+  fun detectedConfiguration(): PyAbstractTestConfiguration? {
+    return PyAutoDetectionConfigurationFactory.factoriesExcludingThis
+      .asSequence().map {
+        it.createTemplateConfiguration(project)
+      }.filter {
+        it.isFrameworkInstalled()
+      }.firstOrNull()
+  }
+
   override fun createConfigurationEditor(): SettingsEditor<PyAbstractTestConfiguration> {
     return object : PyAbstractTestSettingsEditor(PyTestSharedForm.create(this)) {}
   }
 
-  override fun isFrameworkInstalled(): Boolean {
-    return true // Depends on setting
-  }
 }

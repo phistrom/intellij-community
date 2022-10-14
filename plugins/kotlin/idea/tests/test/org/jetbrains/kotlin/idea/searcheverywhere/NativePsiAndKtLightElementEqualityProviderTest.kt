@@ -1,41 +1,64 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.searcheverywhere
 
-import com.intellij.ide.actions.searcheverywhere.SEResultsEqualityProvider.SEEqualElementsActionType.Replace
-import com.intellij.ide.actions.searcheverywhere.SEResultsEqualityProvider.SEEqualElementsActionType.Skip
-import com.intellij.ide.actions.searcheverywhere.SearchEverywhereFoundElementInfo
 import com.intellij.psi.util.parentOfType
-import com.intellij.testFramework.fixtures.LightJavaCodeInsightFixtureTestCase
-import org.jetbrains.kotlin.asJava.LightClassGenerationSupport
+import org.jetbrains.kotlin.asJava.toLightClass
+import org.jetbrains.kotlin.asJava.toLightMethods
 import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtFile
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.utils.addToStdlib.cast
 
 /**
  * @see KtSearchEverywhereEqualityProvider
  */
-class NativePsiAndKtLightElementEqualityProviderTest : LightJavaCodeInsightFixtureTestCase() {
-    fun `test KtLightElement should be skipped`() {
-        val file = myFixture.configureByText("Foo.kt", "class Fo<caret>o")
+class NativePsiAndKtLightElementEqualityProviderTest : KotlinSearchEverywhereTestCase() {
+    fun `test only class presented`() {
+        val file = myFixture.configureByText("MyKotlinClassWithStrangeName.kt", "class MyKotlinClassWithStrangeName")
         val klass = file.findElementAt(myFixture.caretOffset)?.parentOfType<KtClass>()!!
-        val ulc = LightClassGenerationSupport.getInstance(project).createUltraLightClass(klass)!!
-
-        val actualAction = KtSearchEverywhereEqualityProvider().compareItems(
-            newItem = SearchEverywhereFoundElementInfo(ulc, 0, null),
-            alreadyFoundItems = listOf(SearchEverywhereFoundElementInfo(klass, 0, null))
-        )
-        assertEquals(Skip, actualAction)
+        val ulc = klass.toLightClass()!!
+        findPsiByPattern("MyKotlinClassWithStrangeName") { results ->
+            assertTrue(klass in results)
+            assertFalse(file in results)
+            assertFalse(ulc in results)
+        }
     }
 
-    fun `test KtLightElement should be replaced`() {
-        val file = myFixture.configureByText("Foo.kt", "class Fo<caret>o")
-        val klass = file.findElementAt(myFixture.caretOffset)?.parentOfType<KtClass>()!!
-        val ulc = LightClassGenerationSupport.getInstance(project).createUltraLightClass(klass)!!
+    fun `test class conflict`() {
+        val file = myFixture.configureByText(
+            "MyKotlinClassWithStrangeName.kt",
+            "package one.two\nclass MyKotlinClassWithStrangeName\nclass MyKotlinClassWithStrangeName<T>",
+        ) as KtFile
 
-        val ulcElementInfo = SearchEverywhereFoundElementInfo(ulc, 0, null)
-        val actualAction = KtSearchEverywhereEqualityProvider().compareItems(
-            newItem = SearchEverywhereFoundElementInfo(klass, 0, null),
-            alreadyFoundItems = listOf(ulcElementInfo)
-        )
-        assertEquals(Replace(ulcElementInfo), actualAction)
+        val klass = file.declarations.first() as KtClass
+        val klass2 = file.declarations.last() as KtClass
+        val ulc = klass.toLightClass()!!
+        val ulc2 = klass2.toLightClass()!!
+        findPsiByPattern("MyKotlinClassWithStrangeName") { results ->
+            assertTrue(klass in results)
+            assertTrue(klass2 in results)
+            assertFalse(file in results)
+            assertFalse(ulc in results)
+            assertFalse(ulc2 in results)
+        }
+    }
+
+    fun `test class and file presented`() {
+        val file = myFixture.configureByText(
+            "MyKotlinClassWithStrangeName.kt",
+            "class MyKotlinClassWithStrangeName\nfun t(){}",
+        ) as KtFile
+
+        val klass = file.findElementAt(myFixture.caretOffset)?.parentOfType<KtClass>()!!
+        val ulc = klass.toLightClass()!!
+        val syntheticClass = file.declarations.last().cast<KtNamedFunction>().toLightMethods().single().parent
+        findPsiByPattern("MyKotlinClassWithStrangeName") { results ->
+            assertTrue(results.toString(), results.size == 1)
+            assertTrue(klass in results)
+            assertFalse(file in results)
+            assertFalse(syntheticClass in results)
+            assertFalse(ulc in results)
+        }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.util.ui;
 
 import com.intellij.openapi.util.NlsContexts;
@@ -10,7 +10,7 @@ import com.intellij.ui.components.JBViewport;
 import com.intellij.ui.scale.JBUIScale;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
-import org.jetbrains.annotations.ApiStatus;
+import com.intellij.util.containers.JBIterable;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -18,6 +18,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 public abstract class StatusText {
@@ -47,6 +48,16 @@ public abstract class StatusText {
         super.revalidateAndRepaint();
         updateBounds();
       }
+
+      @Override
+      public void updateUI() {
+        super.updateUI();
+        setOpaque(false);
+        if (myFont == null) {
+          setFont(StartupUiUtil.getLabelFont());
+        }
+        updateBounds();
+      }
     };
 
     private final Rectangle boundsInColumn = new Rectangle();
@@ -54,7 +65,7 @@ public abstract class StatusText {
 
     public Fragment() {
       myComponent.setOpaque(false);
-      myComponent.setFont(UIUtil.getLabelFont());
+      myComponent.setFont(StartupUiUtil.getLabelFont());
     }
   }
 
@@ -295,6 +306,21 @@ public abstract class StatusText {
     column.preferredSize.setSize(size);
   }
 
+  public Iterable<JComponent> getWrappedFragmentsIterable() {
+    return new Iterable<>() {
+      @NotNull
+      @Override
+      public Iterator<JComponent> iterator() {
+        Iterable<JComponent> components = JBIterable.<Fragment>empty()
+          .append(myPrimaryColumn.fragments)
+          .append(myPrimaryColumn.fragments)
+          .map(it -> it.myComponent);
+
+        return components.iterator();
+      }
+    };
+  }
+
   private Fragment getOrCreateFragment(boolean isPrimaryColumn, int row) {
     Column column = isPrimaryColumn ? myPrimaryColumn : mySecondaryColumn;
     if (column.fragments.size() < row) {
@@ -316,7 +342,9 @@ public abstract class StatusText {
     return fragment;
   }
 
-  public @NotNull StatusText appendSecondaryText(@NotNull @NlsContexts.StatusText String text, @NotNull SimpleTextAttributes attrs, @Nullable ActionListener listener) {
+  public @NotNull StatusText appendSecondaryText(@NotNull @NlsContexts.StatusText String text,
+                                                 @NotNull SimpleTextAttributes attrs,
+                                                 @Nullable ActionListener listener) {
     return appendText(true, 1, text, attrs, listener);
   }
 
@@ -342,8 +370,9 @@ public abstract class StatusText {
   }
 
   public void paint(Component owner, Graphics g) {
-    if (!isStatusVisible()) return;
-
+    if (!isStatusVisible()) {
+      return;
+    }
     if (owner == myOwner) {
       doPaintStatusText(g, getTextComponentBound());
     }
@@ -374,8 +403,12 @@ public abstract class StatusText {
     if (isPrimary && mySecondaryColumn.fragments.isEmpty()) {
       return new Point(bounds.x + (bounds.width - myPrimaryColumn.preferredSize.width) / 2, bounds.y);
     }
-    if (isPrimary) return new Point(bounds.x, bounds.y);
-    return new Point(bounds.x + bounds.width - mySecondaryColumn.preferredSize.width, bounds.y);
+    else if (isPrimary) {
+      return new Point(bounds.x, bounds.y);
+    }
+    else {
+      return new Point(bounds.x + bounds.width - mySecondaryColumn.preferredSize.width, bounds.y);
+    }
   }
 
   private void doPaintStatusText(@NotNull Graphics g, @NotNull Rectangle bounds) {
@@ -385,14 +418,16 @@ public abstract class StatusText {
 
   protected @NotNull Rectangle adjustComponentBounds(@NotNull JComponent component, @NotNull Rectangle bounds) {
     Dimension size = component.getPreferredSize();
+    int width = Math.min(size.width, bounds.width);
+    int height = Math.min(size.height, bounds.height);
 
     if (mySecondaryColumn.fragments.isEmpty()) {
-      return new Rectangle(bounds.x + (bounds.width - size.width) / 2, bounds.y, size.width, size.height);
+      return new Rectangle(bounds.x + (bounds.width - width) / 2, bounds.y, width, height);
     }
     else {
       return component == getComponent()
-             ? new Rectangle(bounds.x, bounds.y, size.width, size.height)
-             : new Rectangle(bounds.x + bounds.width - size.width, bounds.y, size.width, size.height);
+             ? new Rectangle(bounds.x, bounds.y, width, height)
+             : new Rectangle(bounds.x + bounds.width - width, bounds.y, width, height);
     }
   }
 

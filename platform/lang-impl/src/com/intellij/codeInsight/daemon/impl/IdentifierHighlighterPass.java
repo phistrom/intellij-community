@@ -223,7 +223,7 @@ public class IdentifierHighlighterPass {
              "virtual file: " + myFile.getVirtualFile());
   }
 
-  private static volatile int id;
+  private static int id;
   private int getId() {
     ApplicationManager.getApplication().assertIsDispatchThread();
     int id = IdentifierHighlighterPass.id;
@@ -279,7 +279,7 @@ public class IdentifierHighlighterPass {
     }
     Set<Pair<Object, TextRange>> existingMarkupTooltips = new HashSet<>();
     for (RangeHighlighter highlighter : myEditor.getMarkupModel().getAllHighlighters()) {
-      existingMarkupTooltips.add(Pair.create(highlighter.getErrorStripeTooltip(), new TextRange(highlighter.getStartOffset(), highlighter.getEndOffset())));
+      existingMarkupTooltips.add(Pair.create(highlighter.getErrorStripeTooltip(), highlighter.getTextRange()));
     }
 
     List<HighlightInfo> result = new ArrayList<>(myReadAccessRanges.size() + myWriteAccessRanges.size() + myCodeBlockMarkerRanges.size());

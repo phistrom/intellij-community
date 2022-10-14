@@ -1,8 +1,8 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.vcs.log.util;
 
-import com.google.common.util.concurrent.SettableFuture;
 import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.NlsSafe;
@@ -15,19 +15,15 @@ import com.intellij.openapi.vcs.changes.TextRevisionNumber;
 import com.intellij.openapi.vcs.changes.committed.CommittedChangesTreeBrowser;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.Consumer;
 import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.vcs.CommittedChangeListForRevision;
 import com.intellij.vcs.log.*;
 import com.intellij.vcs.log.data.CompressedRefs;
 import com.intellij.vcs.log.data.RefsModel;
-import com.intellij.vcs.log.data.VcsLogData;
-import com.intellij.vcs.log.impl.MainVcsLogUiProperties;
-import com.intellij.vcs.log.impl.VcsChangesLazilyParsedDetails;
-import com.intellij.vcs.log.impl.VcsLogManager;
-import com.intellij.vcs.log.impl.VcsLogUiProperties;
+import com.intellij.vcs.log.impl.*;
 import com.intellij.vcs.log.ui.VcsLogInternalDataKeys;
-import com.intellij.vcs.log.ui.VcsLogUiEx;
 import com.intellij.vcsUtil.VcsUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
@@ -49,20 +45,14 @@ public final class VcsLogUtil {
   public static final int FULL_HASH_LENGTH = 40;
   public static final int SHORT_HASH_LENGTH = 8;
   public static final Pattern HASH_REGEX = Pattern.compile("[a-fA-F0-9]{7,40}");
+  public static final Pattern HASH_PREFIX_REGEX = Pattern.compile("[a-fA-F0-9]{4,40}");
   @NlsSafe public static final String HEAD = "HEAD";
 
   @NotNull
   public static Map<VirtualFile, Set<VcsRef>> groupRefsByRoot(@NotNull Collection<? extends VcsRef> refs) {
-    return groupByRoot(refs, VcsRef::getRoot);
-  }
-
-  @NotNull
-  private static <T> Map<VirtualFile, Set<T>> groupByRoot(@NotNull Collection<? extends T> items,
-                                                          @NotNull Function<? super T, ? extends VirtualFile> rootGetter) {
-    Map<VirtualFile, Set<T>> map = new TreeMap<>(Comparator.comparing(VirtualFile::getPresentableUrl));
-    for (T item : items) {
-      VirtualFile root = rootGetter.fun(item);
-      map.computeIfAbsent(root, k -> new HashSet<>()).add(item);
+    Map<VirtualFile, Set<VcsRef>> map = new TreeMap<>(Comparator.comparing(VirtualFile::getPresentableUrl));
+    for (VcsRef item : refs) {
+      map.computeIfAbsent(item.getRoot(), k -> new HashSet<>()).add(item);
     }
     return map;
   }
@@ -200,12 +190,6 @@ public final class VcsLogUtil {
   }
 
   @NotNull
-  public static VcsFullCommitDetails getDetails(@NotNull VcsLogData data, @NotNull VirtualFile root, @NotNull Hash hash)
-    throws VcsException {
-    return Objects.requireNonNull(getFirstItem(getDetails(data.getLogProvider(root), root, singletonList(hash.asString()))));
-  }
-
-  @NotNull
   public static List<? extends VcsFullCommitDetails> getDetails(@NotNull VcsLogProvider logProvider,
                                                                 @NotNull VirtualFile root,
                                                                 @NotNull List<String> hashes) throws VcsException {
@@ -272,6 +256,18 @@ public final class VcsLogUtil {
     if (providers.isEmpty()) return null;
     VcsLogProvider provider = Objects.requireNonNull(getFirstItem(providers.values()));
     return provider.getVcsRoot(project, rootObject.getPath(), path);
+  }
+
+  @Nullable
+  public static VirtualFile getActualRoot(@NotNull Project project,
+                                          @NotNull Map<VirtualFile, VcsLogProvider> providers,
+                                          @NotNull FilePath path) {
+    List<VirtualFile> sortedRoots = ContainerUtil.sorted(providers.keySet(), Comparator.comparing(VirtualFile::getPath).reversed());
+    VirtualFile root = ContainerUtil.find(sortedRoots, r -> FileUtil.isAncestor(VfsUtilCore.virtualToIoFile(r), path.getIOFile(), false));
+    if (root == null) return null;
+    VcsLogProvider provider = providers.get(root);
+    if (provider == null) return null;
+    return provider.getVcsRoot(project, root, path);
   }
 
   @Nullable
@@ -385,10 +381,16 @@ public final class VcsLogUtil {
     });
   }
 
-  public static void jumpToRow(@NotNull VcsLogUiEx vcsLogUi, int row, boolean silently) {
-    vcsLogUi.jumpTo(row, (visiblePack, r) -> {
-      if (visiblePack.getVisibleGraph().getVisibleCommitCount() <= r) return -1;
-      return r;
-    }, SettableFuture.create(), silently, true);
+  public static void runWhenVcsAndLogIsReady(@NotNull Project project, @NotNull Consumer<? super VcsLogManager> action) {
+    VcsLogManager logManager = VcsProjectLog.getInstance(project).getLogManager();
+    if (logManager != null) {
+      action.consume(logManager);
+      return;
+    }
+    ProjectLevelVcsManager.getInstance(project).runAfterInitialization(() -> {
+      ApplicationManager.getApplication().invokeLater(() -> {
+        VcsProjectLog.runWhenLogIsReady(project, action);
+      });
+    });
   }
 }

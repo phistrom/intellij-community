@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.codeInsight
 
@@ -11,7 +11,7 @@ import com.intellij.refactoring.util.RefactoringDescriptionLocation
 import com.intellij.ui.breadcrumbs.BreadcrumbsProvider
 import com.intellij.usageView.UsageViewShortNameLocation
 import org.jetbrains.kotlin.KtNodeTypes
-import org.jetbrains.kotlin.idea.KotlinBundle
+import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.KotlinLanguage
 import org.jetbrains.kotlin.idea.intentions.branchedTransformations.isElseIf
 import org.jetbrains.kotlin.idea.intentions.loopToCallChain.unwrapIfLabeled
@@ -19,11 +19,11 @@ import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.getCallNameExpression
 import org.jetbrains.kotlin.psi.psiUtil.getQualifiedExpressionForSelector
 import org.jetbrains.kotlin.renderer.render
-import org.jetbrains.kotlin.resolve.calls.callUtil.getValueArgumentsInParentheses
+import org.jetbrains.kotlin.resolve.calls.util.getValueArgumentsInParentheses
 import kotlin.reflect.KClass
 
 class KotlinBreadcrumbsInfoProvider : BreadcrumbsProvider {
-    override fun isShownByDefault(): Boolean = !UISettings.instance.showMembersInNavigationBar
+    override fun isShownByDefault(): Boolean = !UISettings.getInstance().showMembersInNavigationBar
 
     private abstract class ElementHandler<TElement : KtElement>(val type: KClass<TElement>) {
         abstract fun elementInfo(element: TElement): String
@@ -31,24 +31,6 @@ class KotlinBreadcrumbsInfoProvider : BreadcrumbsProvider {
 
         open fun accepts(element: TElement): Boolean = true
     }
-
-    private val handlers = listOf<ElementHandler<*>>(
-        LambdaHandler,
-        AnonymousObjectHandler,
-        AnonymousFunctionHandler,
-        PropertyAccessorHandler,
-        DeclarationHandler,
-        IfThenHandler,
-        ElseHandler,
-        TryHandler,
-        CatchHandler,
-        FinallyHandler,
-        WhileHandler,
-        DoWhileHandler,
-        WhenHandler,
-        WhenEntryHandler,
-        ForHandler
-    )
 
     private object LambdaHandler : ElementHandler<KtFunctionLiteral>(KtFunctionLiteral::class) {
         override fun elementInfo(element: KtFunctionLiteral): String {
@@ -398,7 +380,7 @@ class KotlinBreadcrumbsInfoProvider : BreadcrumbsProvider {
     @Suppress("UNCHECKED_CAST")
     private fun handler(e: PsiElement): ElementHandler<in KtElement>? {
         if (e !is KtElement) return null
-        val handler = handlers.firstOrNull { it.type.java.isInstance(e) && (it as ElementHandler<in KtElement>).accepts(e) }
+        val handler = Holder.handlers.firstOrNull { it.type.java.isInstance(e) && (it as ElementHandler<in KtElement>).accepts(e) }
         return handler as ElementHandler<in KtElement>?
     }
 
@@ -427,45 +409,63 @@ class KotlinBreadcrumbsInfoProvider : BreadcrumbsProvider {
         }
     }
 
-    private companion object {
-        enum class TextKind(val maxTextLength: Int) {
-            INFO(16), TOOLTIP(100)
-        }
-
-        fun KtExpression.shortText(kind: TextKind): String {
-            return if (this is KtNameReferenceExpression) text else text.truncateEnd(kind)
-        }
-
-        //TODO: line breaks
-
-        fun String.orEllipsis(kind: TextKind): String {
-            return if (length <= kind.maxTextLength) this else ellipsis
-        }
-
-        fun String.truncateEnd(kind: TextKind): String {
-            val maxLength = kind.maxTextLength
-            return if (length > maxLength) substring(0, maxLength - ellipsis.length) + ellipsis else this
-        }
-
-        fun String.truncateStart(kind: TextKind): String {
-            val maxLength = kind.maxTextLength
-            return if (length > maxLength) ellipsis + substring(length - maxLength - 1) else this
-        }
-
-        const val ellipsis = "${Typography.ellipsis}"
-
-        fun KtContainerNode.bodyOwner(): KtExpression? {
-            return if (node.elementType == KtNodeTypes.BODY) parent as KtExpression else null
-        }
-
-        fun KtExpression.labelText(): String {
-            var result = ""
-            var current = parent
-            while (current is KtLabeledExpression) {
-                result = current.getLabelName() + "@ " + result
-                current = current.parent
-            }
-            return result
-        }
+    private object Holder {
+        val handlers: List<ElementHandler<*>> = listOf<ElementHandler<*>>(
+            LambdaHandler,
+            AnonymousObjectHandler,
+            AnonymousFunctionHandler,
+            PropertyAccessorHandler,
+            DeclarationHandler,
+            IfThenHandler,
+            ElseHandler,
+            TryHandler,
+            CatchHandler,
+            FinallyHandler,
+            WhileHandler,
+            DoWhileHandler,
+            WhenHandler,
+            WhenEntryHandler,
+            ForHandler
+        )
     }
+}
+
+internal enum class TextKind(val maxTextLength: Int) {
+    INFO(16), TOOLTIP(100)
+}
+
+internal fun KtExpression.shortText(kind: TextKind): String {
+    return if (this is KtNameReferenceExpression) text else text.truncateEnd(kind)
+}
+
+//TODO: line breaks
+
+internal fun String.orEllipsis(kind: TextKind): String {
+    return if (length <= kind.maxTextLength) this else ellipsis
+}
+
+internal fun String.truncateEnd(kind: TextKind): String {
+    val maxLength = kind.maxTextLength
+    return if (length > maxLength) substring(0, maxLength - ellipsis.length) + ellipsis else this
+}
+
+internal fun String.truncateStart(kind: TextKind): String {
+    val maxLength = kind.maxTextLength
+    return if (length > maxLength) ellipsis + substring(length - maxLength - 1) else this
+}
+
+internal const val ellipsis = "${Typography.ellipsis}"
+
+internal fun KtContainerNode.bodyOwner(): KtExpression? {
+    return if (node.elementType == KtNodeTypes.BODY) parent as KtExpression else null
+}
+
+internal fun KtExpression.labelText(): String {
+    var result = ""
+    var current = parent
+    while (current is KtLabeledExpression) {
+        result = current.getLabelName() + "@ " + result
+        current = current.parent
+    }
+    return result
 }

@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.repl
 
@@ -18,8 +18,8 @@ import org.jetbrains.kotlin.idea.test.KotlinWithJdkAndRuntimeLightProjectDescrip
 import org.jetbrains.kotlin.idea.test.runAll
 import org.jetbrains.kotlin.idea.util.application.runWriteAction
 import org.jetbrains.kotlin.platform.jvm.JvmPlatforms
-import org.jetbrains.kotlin.test.KotlinTestUtils.allowProjectRootAccess
-import org.jetbrains.kotlin.test.KotlinTestUtils.disposeVfsRootAccess
+import org.jetbrains.kotlin.idea.test.KotlinTestUtils.allowProjectRootAccess
+import org.jetbrains.kotlin.idea.test.KotlinTestUtils.disposeVfsRootAccess
 import java.io.File
 
 abstract class AbstractIdeReplCompletionTest : KotlinFixtureCompletionBaseTestCase() {
@@ -69,5 +69,5 @@ abstract class AbstractIdeReplCompletionTest : KotlinFixtureCompletionBaseTestCa
 
     private fun List<String>.prefixedWith(prefix: String) = filter { it.startsWith(prefix) }.map { it.removePrefix(prefix) }
 
-    override fun getProjectDescriptor(): LightProjectDescriptor = KotlinWithJdkAndRuntimeLightProjectDescriptor.INSTANCE_FULL_JDK
+    override fun getProjectDescriptor(): LightProjectDescriptor = KotlinWithJdkAndRuntimeLightProjectDescriptor.getInstanceFullJdk()
 }

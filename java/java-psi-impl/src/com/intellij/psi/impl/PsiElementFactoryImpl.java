@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.impl;
 
 import com.intellij.lang.*;
@@ -25,7 +25,7 @@ import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.ConcurrencyUtil;
 import com.intellij.util.IncorrectOperationException;
-import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.containers.CollectionFactory;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -39,7 +39,7 @@ import static com.intellij.psi.impl.PsiManagerImpl.ANY_PSI_CHANGE_TOPIC;
 
 public final class PsiElementFactoryImpl extends PsiJavaParserFacadeImpl implements PsiElementFactory, Disposable {
   private final ConcurrentMap<LanguageLevel, PsiClass> myArrayClasses = new ConcurrentHashMap<>();
-  private final ConcurrentMap<GlobalSearchScope, PsiClassType> myCachedObjectType = ContainerUtil.createConcurrentSoftMap();
+  private final ConcurrentMap<GlobalSearchScope, PsiClassType> myCachedObjectType = CollectionFactory.createConcurrentSoftMap();
 
   public PsiElementFactoryImpl(@NotNull Project project) {
     super(project);
@@ -114,13 +114,18 @@ public final class PsiElementFactoryImpl extends PsiJavaParserFacadeImpl impleme
   }
 
   @Override
+  public @NotNull PsiClass createRecord(@NotNull String name) throws IncorrectOperationException {
+    return createClassInner("record", name);
+  }
+
+  @Override
   public @NotNull PsiClass createAnnotationType(@NotNull String name) throws IncorrectOperationException {
     return createClassInner("@interface", name);
   }
 
   private PsiClass createClassInner(String type, String name) {
     PsiUtil.checkIsIdentifier(myManager, name);
-    PsiJavaFile aFile = createDummyJavaFile("public " + type +  " " +  name +  " { }");
+    PsiJavaFile aFile = createDummyJavaFile("public " + type +  " " +  name + ("record".equals(type) ? "()" : "") + " { }");
     PsiClass[] classes = aFile.getClasses();
     if (classes.length != 1) {
       throw new IncorrectOperationException("Incorrect " + type + " name \"" + name + "\".");

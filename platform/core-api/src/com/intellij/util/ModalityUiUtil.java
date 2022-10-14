@@ -19,10 +19,11 @@ public final class ModalityUiUtil {
    * Please use this method instead of {@link javax.swing.SwingUtilities#invokeLater(Runnable)} or {@link com.intellij.util.ui.UIUtil} methods
    * for the reasons described in {@link ModalityState} documentation.
    *
+   * @param modalityState    the state in which the runnable will be executed.
    * @param runnable the runnable to execute.
-   * @param state    the state in which the runnable will be executed.
    */
-  public static void invokeLaterIfNeeded(@NotNull Runnable runnable, @NotNull ModalityState modalityState) {
+  public static void invokeLaterIfNeeded(@NotNull ModalityState modalityState,
+                                         @NotNull Runnable runnable) {
     Application app = ApplicationManager.getApplication();
     if (app.isDispatchThread()) {
       runnable.run();
@@ -43,12 +44,12 @@ public final class ModalityUiUtil {
    * <p>
    * Please use this method instead of {@link javax.swing.SwingUtilities#invokeLater(Runnable)} or {@link com.intellij.util.ui.UIUtil} methods
    * for the reasons described in {@link ModalityState} documentation.
-   *
-   * @param runnable the runnable to execute.
-   * @param state    the state in which the runnable will be executed.
+   *  @param modalityState    the state in which the runnable will be executed.
    * @param expired  condition to check before execution.
+   * @param runnable the runnable to execute.
    */
-  public static void invokeLaterIfNeeded(@NotNull Runnable runnable, @NotNull ModalityState modalityState, @NotNull Condition expired) {
+  public static void invokeLaterIfNeeded(@NotNull ModalityState modalityState,
+                                         @NotNull Condition<?> expired, @NotNull Runnable runnable) {
     Application app = ApplicationManager.getApplication();
     if (app.isDispatchThread()) {
       runnable.run();

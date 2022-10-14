@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.nj2k.types
 
@@ -48,9 +48,6 @@ class JKTypeFactory(val symbolProvider: JKSymbolProvider) {
         val unit = typeByFqName(StandardNames.FqNames.unit)
         val nothing = typeByFqName(StandardNames.FqNames.nothing)
         val nullableAny = typeByFqName(StandardNames.FqNames.any, nullability = Nullability.Nullable)
-
-        val javaKlass = typeByFqName(FqNameUnsafe(CommonClassNames.JAVA_LANG_CLASS))
-        val kotlinClass = typeByFqName(StandardNames.FqNames.kClass)
     }
 
     fun fromPrimitiveType(primitiveType: JKJavaPrimitiveType) = when (primitiveType.jvmPrimitiveType) {
@@ -114,7 +111,9 @@ class JKTypeFactory(val symbolProvider: JKSymbolProvider) {
             fromPsiType(type.representative)
         is PsiLambdaParameterType -> // Probably, means that we have erroneous Java code
             JKNoType
-        else -> throw Exception("Invalid PSI ${type::class.java}")
+        is PsiLambdaExpressionType -> type.expression.functionalInterfaceType?.let(::createPsiType) ?: JKNoType
+        is PsiMethodReferenceType -> type.expression.functionalInterfaceType?.let(::createPsiType) ?: JKNoType
+        else -> JKNoType
     }
 
     private fun createKotlinType(type: KotlinType): JKType {

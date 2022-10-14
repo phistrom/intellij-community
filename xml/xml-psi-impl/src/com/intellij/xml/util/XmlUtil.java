@@ -1,18 +1,21 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.xml.util;
 
 import com.intellij.codeInsight.completion.CompletionUtilCore;
 import com.intellij.codeInsight.daemon.Validator;
+import com.intellij.injected.editor.DocumentWindow;
 import com.intellij.javaee.ExternalResourceManager;
 import com.intellij.javaee.ExternalResourceManagerEx;
 import com.intellij.javaee.UriUtil;
 import com.intellij.lang.ASTNode;
 import com.intellij.lang.Language;
 import com.intellij.lang.html.HTMLLanguage;
+import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.lang.xhtml.XHTMLLanguage;
 import com.intellij.lang.xml.XMLLanguage;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
@@ -50,7 +53,6 @@ import com.intellij.xml.index.IndexedRelevantResource;
 import com.intellij.xml.index.XmlNamespaceIndex;
 import com.intellij.xml.index.XsdNamespaceBuilder;
 import com.intellij.xml.psi.XmlPsiBundle;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -85,12 +87,26 @@ public final class XmlUtil {
   @NonNls public static final String[] JSTL_CORE_URIS = {JSTL_CORE_URI, JSTL_CORE_URI2, JSTL_CORE_URI3, JSTL_CORE_URI_JAVAEE_7};
   @NonNls public static final String JSF_HTML_URI = "http://java.sun.com/jsf/html";
   @NonNls public static final String JSF_HTML_URI_JAVAEE_7 = "http://xmlns.jcp.org/jsf/html";
-  @NonNls public static final String[] JSF_HTML_URIS = {JSF_HTML_URI, JSF_HTML_URI_JAVAEE_7};
+
+  @NonNls public static final String JSF_HTML_URI_JAKARTA_10 = "jakarta.faces.html";
+  @NonNls public static final String[] JSF_HTML_URIS = {JSF_HTML_URI, JSF_HTML_URI_JAVAEE_7,JSF_HTML_URI_JAKARTA_10};
   @NonNls public static final String JSF_CORE_URI = "http://java.sun.com/jsf/core";
   @NonNls public static final String JSF_CORE_URI_JAVAEE_7 = "http://xmlns.jcp.org/jsf/core";
-  @NonNls public static final String[] JSF_CORE_URIS = {JSF_CORE_URI, JSF_CORE_URI_JAVAEE_7};
+
+  @NonNls public static final String JSF_CORE_URI_JAKARTA_10 = "jakarta.faces.core";
+  @NonNls public static final String[] JSF_CORE_URIS = {JSF_CORE_URI, JSF_CORE_URI_JAVAEE_7, JSF_CORE_URI_JAKARTA_10};
   @NonNls public static final String JSF_PASS_THROUGH_ATTR_URI_JAVAEE7 = "http://xmlns.jcp.org/jsf";
   @NonNls public static final String JSF_PASSTHROUGH_URI = "http://xmlns.jcp.org/jsf/passthrough";
+
+  @NonNls public static final String JSF_PASSTHROUGH_URI_JAKARTA_10 = "jakarta.faces.passthrough";
+
+  @NonNls public static final String JSF_JAKARTA_TAGLIB_10 = "jakarta.faces";
+
+  @NonNls public static final String JSF_JAKARTA_FACELETS_10 = "jakarta.faces.facelets";
+
+  @NonNls public static final String JSF_JAKARTA_TAGS_TAGLIB_10 = "jakarta.tags.core";
+  @NonNls public static final String JSF_JAKARTA_FUNCTIONS_TAGLIB_10 = "jakarta.tags.functions";
+  @NonNls public static final String JSF_PASSTHROUGH_ATTR_URI_JAKARTA_10 = "jakarta.faces.passthrough";
   @NonNls public static final String JSTL_FORMAT_URI = "http://java.sun.com/jsp/jstl/fmt";
   @NonNls public static final String JSTL_FORMAT_URI2 = "http://java.sun.com/jstl/fmt";
   @NonNls public static final String SPRING_URI = "http://www.springframework.org/tags";
@@ -111,7 +127,9 @@ public final class XmlUtil {
       "http://java.sun.com/j2ee/dtds/web-app_2_2.dtd"};
   @NonNls public static final String FACELETS_URI = "http://java.sun.com/jsf/facelets";
   @NonNls public static final String FACELETS_URI_JAVAEE_7 = "http://xmlns.jcp.org/jsf/facelets";
-  @NonNls public static final String[] FACELETS_URIS = {FACELETS_URI, FACELETS_URI_JAVAEE_7};
+
+  @NonNls public static final String FACELETS_URI_JAKARTA_10 = "jakarta.faces.facelets";
+  @NonNls public static final String[] FACELETS_URIS = {FACELETS_URI, FACELETS_URI_JAVAEE_7, FACELETS_URI_JAKARTA_10};
   @NonNls public static final String JSTL_FUNCTIONS_URI = "http://java.sun.com/jsp/jstl/functions";
   @NonNls public static final String JSTL_FUNCTIONS_URI2 = "http://java.sun.com/jstl/functions";
   @NonNls public static final String JSTL_FUNCTIONS_JAVAEE_7 = "http://xmlns.jcp.org/jsp/jstl/functions";
@@ -450,8 +468,7 @@ public final class XmlUtil {
   /**
    * @deprecated use {@link XmlComment#getCommentText()}
    */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @Deprecated(forRemoval = true)
   @NotNull
   public static String getCommentText(XmlComment comment) {
     return comment.getCommentText();
@@ -691,7 +708,7 @@ public final class XmlUtil {
     }
     else {
       final XmlAttribute[] attributes = tag.getAttributes().clone();
-      ContainerUtil.sort(list);
+      list.sort(null);
       Arrays.sort(attributes, Comparator.comparing(XmlAttribute::getName));
 
       final Iterator<MyAttributeInfo> iter = list.iterator();
@@ -879,7 +896,7 @@ public final class XmlUtil {
         if (enforceNamespacesDeep) {
           retTag.acceptChildren(new XmlRecursiveElementVisitor() {
             @Override
-            public void visitXmlTag(XmlTag tag) {
+            public void visitXmlTag(@NotNull XmlTag tag) {
               final String namespacePrefix = tag.getNamespacePrefix();
               if (namespacePrefix.isEmpty()) {
                 String qname;
@@ -1247,6 +1264,17 @@ public final class XmlUtil {
       }
     }
     return (XmlComment)curElement;
+  }
+
+  public static boolean hasNonEditableInjectionFragmentAt(@NotNull XmlAttribute attribute, int offset) {
+    InjectedLanguageManager manager = InjectedLanguageManager.getInstance(attribute.getProject());
+    PsiElement host = manager.getInjectionHost(attribute);
+    if (host == null) return false;
+    Document doc = PsiDocumentManager.getInstance(attribute.getProject()).getDocument(attribute.getContainingFile());
+    if (!(doc instanceof DocumentWindow)) return false;
+    return ContainerUtil.exists(manager.getNonEditableFragments((DocumentWindow)doc), range -> {
+      return range.getStartOffset() <= offset && offset <= (range.getEndOffset() + 1);
+    });
   }
 
   public interface DuplicationInfoProvider<T extends PsiElement> {

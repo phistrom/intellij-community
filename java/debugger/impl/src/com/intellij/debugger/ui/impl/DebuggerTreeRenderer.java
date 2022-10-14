@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.debugger.ui.impl;
 
 import com.intellij.debugger.engine.evaluation.EvaluateException;
@@ -6,7 +6,6 @@ import com.intellij.debugger.impl.DebuggerContextImpl;
 import com.intellij.debugger.impl.DebuggerUtilsEx;
 import com.intellij.debugger.ui.impl.watch.*;
 import com.intellij.debugger.ui.tree.NodeDescriptor;
-import com.intellij.debugger.ui.tree.ValueDescriptor;
 import com.intellij.debugger.ui.tree.render.EnumerationChildrenRenderer;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.highlighter.JavaHighlightingColors;
@@ -22,7 +21,6 @@ import com.intellij.xdebugger.impl.XDebugSessionImpl;
 import com.intellij.xdebugger.impl.ui.DebuggerUIUtil;
 import com.intellij.xdebugger.impl.ui.XDebugSessionTab;
 import com.intellij.xdebugger.impl.ui.XDebuggerUIConstants;
-import com.intellij.xdebugger.impl.ui.tree.ValueMarkup;
 import com.sun.jdi.ObjectReference;
 import com.sun.jdi.Value;
 import org.jetbrains.annotations.NotNull;
@@ -31,7 +29,7 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.awt.*;
 
-public class DebuggerTreeRenderer extends ColoredTreeCellRenderer {
+public final class DebuggerTreeRenderer extends ColoredTreeCellRenderer {
 
   private static final SimpleTextAttributes DEFAULT_ATTRIBUTES = new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, null);
   private static final SimpleTextAttributes SPECIAL_NODE_ATTRIBUTES = new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, new JBColor(Color.lightGray, Gray._130));
@@ -90,7 +88,7 @@ public class DebuggerTreeRenderer extends ColoredTreeCellRenderer {
     Icon nodeIcon;
     if (valueDescriptor instanceof FieldDescriptorImpl) {
       FieldDescriptorImpl fieldDescriptor = (FieldDescriptorImpl)valueDescriptor;
-      nodeIcon = PlatformIcons.FIELD_ICON;
+      nodeIcon = IconManager.getInstance().getPlatformIcon(com.intellij.ui.PlatformIcons.Field);
       if (parentDescriptor != null) {
         Value value = valueDescriptor.getValue();
         if (value instanceof ObjectReference && value.equals(parentDescriptor.getValue())) {
@@ -98,10 +96,10 @@ public class DebuggerTreeRenderer extends ColoredTreeCellRenderer {
         }
       }
       if (fieldDescriptor.getField().isFinal()) {
-        nodeIcon = new LayeredIcon(nodeIcon, AllIcons.Nodes.FinalMark);
+        nodeIcon = new LayeredIcon(nodeIcon, IconManager.getInstance().getPlatformIcon(com.intellij.ui.PlatformIcons.FinalMark));
       }
       if (fieldDescriptor.isStatic()) {
-        nodeIcon = new LayeredIcon(nodeIcon, AllIcons.Nodes.StaticMark);
+        nodeIcon = new LayeredIcon(nodeIcon, IconManager.getInstance().getPlatformIcon(com.intellij.ui.PlatformIcons.StaticMark));
       }
     }
     else if (valueDescriptor instanceof ThrownExceptionValueDescriptorImpl) {
@@ -111,7 +109,7 @@ public class DebuggerTreeRenderer extends ColoredTreeCellRenderer {
       nodeIcon = AllIcons.Debugger.WatchLastReturnValue;
     }
     else if (isParameter(valueDescriptor)) {
-      nodeIcon = PlatformIcons.PARAMETER_ICON;
+      nodeIcon = IconManager.getInstance().getPlatformIcon(com.intellij.ui.PlatformIcons.Parameter);
     }
     else if (valueDescriptor.isEnumConstant()) {
       nodeIcon = PlatformIcons.ENUM_ICON;
@@ -202,13 +200,6 @@ public class DebuggerTreeRenderer extends ColoredTreeCellRenderer {
     if(text.equals(XDebuggerUIConstants.getCollectingDataMessage())) {
       descriptorText.append(XDebuggerUIConstants.getCollectingDataMessage(), XDebuggerUIConstants.COLLECTING_DATA_HIGHLIGHT_ATTRIBUTES);
       return descriptorText;
-    }
-
-    if (descriptor instanceof ValueDescriptor) {
-      final ValueMarkup markup = ((ValueDescriptor)descriptor).getMarkup(debuggerContext.getDebugProcess());
-      if (markup != null) {
-        descriptorText.append("[" + markup.getText() + "] ", new SimpleTextAttributes(SimpleTextAttributes.STYLE_BOLD, markup.getColor()));
-      }
     }
 
     String[] strings = breakString(text, nodeName);

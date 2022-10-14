@@ -8,6 +8,7 @@ import com.intellij.diff.tools.util.base.HighlightPolicy;
 import com.intellij.diff.tools.util.base.IgnorePolicy;
 import com.intellij.diff.tools.util.base.TextDiffSettingsHolder.TextDiffSettings;
 import com.intellij.diff.util.*;
+import com.intellij.diff.util.MergeConflictType.Type;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.util.containers.ContainerUtil;
@@ -76,17 +77,14 @@ public class SimpleThreesideTextDiffProvider extends TextDiffProviderBase {
                                             @NotNull List<CharSequence> sequences,
                                             @NotNull List<LineOffsets> lineOffsets,
                                             @NotNull MergeLineFragment fragment) {
-    switch (myColorsMode) {
-      case MERGE_CONFLICT:
-        return DiffUtil.getLineThreeWayDiffType(fragment, sequences, lineOffsets, comparisonPolicy);
-      case MERGE_RESULT:
-        MergeConflictType conflictType = DiffUtil.getLineThreeWayDiffType(fragment, sequences, lineOffsets, comparisonPolicy);
-        return invertConflictType(conflictType);
-      case LEFT_TO_RIGHT:
-        return DiffUtil.getLineLeftToRightThreeSideDiffType(fragment, sequences, lineOffsets, comparisonPolicy);
-      default:
-        throw new IllegalStateException(myColorsMode.name());
-    }
+    return switch (myColorsMode) {
+      case MERGE_CONFLICT -> MergeRangeUtil.getLineThreeWayDiffType(fragment, sequences, lineOffsets, comparisonPolicy);
+      case MERGE_RESULT -> {
+        MergeConflictType conflictType = MergeRangeUtil.getLineThreeWayDiffType(fragment, sequences, lineOffsets, comparisonPolicy);
+        yield invertConflictType(conflictType);
+      }
+      case LEFT_TO_RIGHT -> MergeRangeUtil.getLineLeftToRightThreeSideDiffType(fragment, sequences, lineOffsets, comparisonPolicy);
+    };
   }
 
   @NotNull
@@ -101,19 +99,19 @@ public class SimpleThreesideTextDiffProvider extends TextDiffProviderBase {
       int endLine = fragment.getEndLine(side);
       if (startLine == endLine) return null;
 
-      return DiffUtil.getLinesContent(side.select(sequences), side.select(lineOffsets), startLine, endLine);
+      return DiffRangeUtil.getLinesContent(side.select(sequences), side.select(lineOffsets), startLine, endLine);
     });
   }
 
   @NotNull
   private static MergeConflictType invertConflictType(@NotNull MergeConflictType oldConflictType) {
-    TextDiffType oldDiffType = oldConflictType.getDiffType();
+    Type oldDiffType = oldConflictType.getType();
 
-    if (oldDiffType != TextDiffType.INSERTED && oldDiffType != TextDiffType.DELETED) {
+    if (oldDiffType != Type.INSERTED && oldDiffType != Type.DELETED) {
       return oldConflictType;
     }
 
-    return new MergeConflictType(oldDiffType == TextDiffType.DELETED ? TextDiffType.INSERTED : TextDiffType.DELETED,
+    return new MergeConflictType(oldDiffType == Type.DELETED ? Type.INSERTED : Type.DELETED,
                                  oldConflictType.isChange(Side.LEFT), oldConflictType.isChange(Side.RIGHT),
                                  oldConflictType.canBeResolved());
   }

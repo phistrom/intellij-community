@@ -5,9 +5,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.impl.EditorComponentImpl;
-import com.intellij.openapi.fileEditor.FileDocumentManager;
-import com.intellij.openapi.fileEditor.FileEditorManager;
-import com.intellij.openapi.fileEditor.FileEditorManagerListener;
+import com.intellij.openapi.fileEditor.*;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -17,14 +15,12 @@ import com.intellij.openapi.wm.StatusBarWidget;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.ui.EditorTextField;
 import com.intellij.util.messages.MessageBusConnection;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.awt.*;
 
 public abstract class EditorBasedWidget implements StatusBarWidget, FileEditorManagerListener {
-  @NonNls public static final String SWING_FOCUS_OWNER_PROPERTY = "focusOwner";
 
   protected final @NotNull Project myProject;
 
@@ -45,7 +41,8 @@ public abstract class EditorBasedWidget implements StatusBarWidget, FileEditorMa
     if (ApplicationManager.getApplication().isUnitTestMode()) {
       return FileEditorManager.getInstance(myProject).getSelectedTextEditor();
     }
-    return null;
+    FileEditor fileEditor = StatusBarUtil.getCurrentFileEditor(myStatusBar);
+    return fileEditor instanceof TextEditor ? ((TextEditor)fileEditor).getEditor() : null;
   }
 
   public boolean isOurEditor(Editor editor) {

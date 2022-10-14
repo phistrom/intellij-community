@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.vcs.log.ui.filter;
 
 import com.intellij.openapi.actionSystem.*;
@@ -128,7 +128,7 @@ public class StructureFilterPopupComponent
                                     @NotNull NotNullFunction<? super F, @Nls String> getText,
                                     boolean full) {
     if (full) {
-      return ALL.get();
+      return ALL_ACTION_TEXT.get();
     }
     else if (files.isEmpty()) {
       return categoryText;
@@ -330,6 +330,11 @@ public class StructureFilterPopupComponent
     }
 
     @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
+    }
+
+    @Override
     public boolean isSelected(@NotNull AnActionEvent e) {
       return isVisible(myRoot);
     }
@@ -430,6 +435,11 @@ public class StructureFilterPopupComponent
     }
 
     @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.BGT;
+    }
+
+    @Override
     public void update(@NotNull AnActionEvent e) {
       e.getPresentation().setEnabledAndVisible(e.getProject() != null);
     }
@@ -455,11 +465,20 @@ public class StructureFilterPopupComponent
         public void onClosed(@NotNull LightweightWindowEvent event) {
           if (event.isOk()) {
             List<FilePath> selectedPaths = ContainerUtil.map(popupBuilder.getSelectedValues(), path -> text2Path(path));
-            setStructureFilter(VcsLogFilterObject.fromPaths(selectedPaths));
+            if (selectedPaths.isEmpty()) {
+              myFilterModel.setFilter(null);
+            } else {
+              setStructureFilter(VcsLogFilterObject.fromPaths(selectedPaths));
+            }
           }
         }
       });
       popup.showUnderneathOf(StructureFilterPopupComponent.this);
+    }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.BGT;
     }
 
     @Override
@@ -499,6 +518,11 @@ public class StructureFilterPopupComponent
     @Override
     public void setSelected(@NotNull AnActionEvent e, boolean state) {
       myFilterModel.setFilter(new FilterPair<>(myFilter, null));
+    }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
     }
 
     @Override

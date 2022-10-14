@@ -2,7 +2,9 @@
 package com.intellij.ui.tabs.impl
 
 import com.intellij.openapi.util.registry.Registry
+import com.intellij.ui.ExperimentalUI
 import com.intellij.ui.tabs.JBTabPainter
+import com.intellij.ui.tabs.JBTabsPosition
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.Rectangle
@@ -17,18 +19,24 @@ class EditorTabPainterAdapter : TabPainterAdapter {
   override fun paintBackground(label: TabLabel, g: Graphics, tabs: JBTabsImpl) {
     val info = label.info
     val isSelected = info == tabs.selectedInfo
+    val isHovered = tabs.isHoveredTab(label)
 
     val rect = Rectangle(0, 0, label.width, label.height)
 
     val g2d = g as Graphics2D
     if (isSelected) {
-      painter
-        .paintSelectedTab(tabs.position, g2d, rect, tabs.borderThickness, info.tabColor, tabs.isActiveTabs(info),
-                          tabs.isHoveredTab(label))
+      painter.paintSelectedTab(tabs.position, g2d, rect,
+                               tabs.borderThickness, info.tabColor,
+                               tabs.isActiveTabs(info), isHovered)
       paintBorders(g2d, label, tabs)
     }
     else {
-      painter.paintTab(tabs.position, g2d, rect, tabs.borderThickness, info.tabColor, tabs.isActiveTabs(info), tabs.isHoveredTab(label))
+      if (ExperimentalUI.isNewUI() && isHovered
+          && tabs.tabsPosition == JBTabsPosition.top
+          && (tabs as JBEditorTabs).shouldPaintBottomBorder()) {
+        rect.height -= 1
+      }
+      painter.paintTab(tabs.position, g2d, rect, tabs.borderThickness, info.tabColor, tabs.isActiveTabs(info), isHovered)
       paintBorders(g2d, label, tabs)
     }
   }

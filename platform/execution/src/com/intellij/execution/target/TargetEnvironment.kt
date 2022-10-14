@@ -2,6 +2,7 @@
 package com.intellij.execution.target
 
 import com.intellij.execution.ExecutionException
+import com.intellij.openapi.progress.EmptyProgressIndicator
 import com.intellij.openapi.progress.ProgressIndicator
 import org.jetbrains.annotations.ApiStatus
 import java.io.IOException
@@ -26,17 +27,58 @@ abstract class TargetEnvironment(
     /**
      * Request for any not used random path.
      */
-    data class Temporary @JvmOverloads constructor(
+    class Temporary @JvmOverloads constructor(
       /** Any string. An environment implementation may reuse previously created directories for the same hint. */
       val hint: String? = null,
 
+      /** Prefix for the randomly generated directory name */
+      val prefix: String? = null,
+
       /** If null, use `/tmp` or something similar, autodetected. */
       val parentDirectory: String? = null
-    ) : TargetPath()
+    ) : TargetPath() {
+      override fun toString(): String = "Temporary(hint=$hint, prefix=$prefix, parentDirectory=$parentDirectory)"
+      override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as Temporary
+
+        // instance with null hint considered unique thus differs from any other instance
+        if (hint == null) return false
+        if (hint != other.hint) return false
+        if (prefix != other.prefix) return false
+        if (parentDirectory != other.parentDirectory) return false
+
+        return true
+      }
+
+      override fun hashCode(): Int {
+        // instance with null hint considered unique
+        if (hint == null) return super.hashCode()
+        var result = hint.hashCode()
+        result = 31 * result + (prefix?.hashCode() ?: 0)
+        result = 31 * result + (parentDirectory?.hashCode() ?: 0)
+        return result
+      }
+    }
   }
 
+  /**
+   * Mapping of localPath -> Something
+   */
+  interface MappingWithLocalPath {
+    val localRootPath: Path
+  }
+
+  /**
+   * Unonditional map between local and remote root.
+   * Targets API do not create this mapping, it just exists
+   */
+  data class SynchronizedVolume(override val localRootPath: Path, val targetPath: String): MappingWithLocalPath
+
   data class UploadRoot @JvmOverloads constructor(
-    val localRootPath: Path,
+    override val localRootPath: Path,
 
     val targetRootPath: TargetPath,
 
@@ -45,7 +87,7 @@ abstract class TargetEnvironment(
      * TODO maybe get rid of it? It causes a race between two environments using the same upload root.
      */
     val removeAtShutdown: Boolean = false
-  ) {
+  ): MappingWithLocalPath {
     var volumeData: TargetEnvironmentType.TargetSpecificVolumeData? = null  // excluded from equals / hashcode
   }
 
@@ -134,7 +176,7 @@ abstract class TargetEnvironment(
   //     Therefore, to indicate the disposable nature of environments, the method might be moved to the `TargetEnvironmentFactory`.
   @Throws(ExecutionException::class)
   abstract fun createProcess(commandLine: TargetedCommandLine,
-                             indicator: ProgressIndicator): Process
+                             indicator: ProgressIndicator = EmptyProgressIndicator()): Process
 
   abstract val targetPlatform: TargetPlatform
 
@@ -147,9 +189,5 @@ abstract class TargetEnvironment(
     @Throws(IOException::class)
     fun runBatchUpload(uploads: List<Pair<UploadableVolume, String>>,
                        targetProgressIndicator: TargetProgressIndicator)
-  }
-
-  interface PtyTargetEnvironment {
-    fun isWithPty(): Boolean
   }
 }

@@ -5,6 +5,7 @@ import com.intellij.ide.IdeBundle;
 import com.intellij.ide.actions.OpenInRightSplitAction;
 import com.intellij.ide.browsers.*;
 import com.intellij.openapi.actionSystem.ActionPlaces;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.fileEditor.FileEditorManager;
@@ -18,13 +19,10 @@ import com.intellij.ui.AppUIUtil;
 import com.intellij.ui.scale.ScaleContext;
 import com.intellij.util.BitUtil;
 import com.intellij.util.Url;
-import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 
 import java.awt.event.InputEvent;
 import java.util.Collection;
-import java.util.List;
-import java.util.stream.Collectors;
 
 import static com.intellij.ide.browsers.OpenInBrowserRequestKt.createOpenInBrowserRequest;
 
@@ -46,7 +44,7 @@ class OpenHtmlInEmbeddedBrowserAction extends DumbAwareAction {
     try {
       OpenInBrowserRequest browserRequest = createOpenInBrowserRequest(psiFile, false);
       if (browserRequest == null) return;
-      browserRequest.setReloadMode(ReloadMode.RELOAD_ON_SAVE);
+      browserRequest.setReloadMode(WebBrowserManager.getInstance().getWebPreviewReloadMode());
       Collection<Url> urls = WebBrowserService.getInstance().getUrlsToOpen(browserRequest, preferLocalFileUrl);
       if (!urls.isEmpty()) {
         BaseOpenInBrowserActionKt.chooseUrl(urls).onSuccess((url) -> {
@@ -84,5 +82,10 @@ class OpenHtmlInEmbeddedBrowserAction extends DumbAwareAction {
       text += " (" + IdeBundle.message("browser.shortcut") + ")";
       e.getPresentation().setText(text);
     }
+  }
+
+  @Override
+  public @NotNull ActionUpdateThread getActionUpdateThread() {
+    return ActionUpdateThread.BGT;
   }
 }

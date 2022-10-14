@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.xdebugger.impl.actions;
 
 import com.intellij.execution.ExecutionException;
@@ -7,6 +7,7 @@ import com.intellij.execution.runners.ExecutionUtil;
 import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationType;
 import com.intellij.notification.Notifications;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
@@ -20,6 +21,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.*;
 import com.intellij.openapi.ui.popup.util.BaseListPopupStep;
 import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.ui.popup.async.AsyncPopupStep;
@@ -29,7 +31,7 @@ import com.intellij.util.containers.MultiMap;
 import com.intellij.util.ui.StatusText;
 import com.intellij.xdebugger.XDebuggerBundle;
 import com.intellij.xdebugger.attach.*;
-import org.intellij.lang.annotations.MagicConstant;
+import com.intellij.xdebugger.impl.ui.attach.dialog.AttachToProcessDialogFactory;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -38,9 +40,9 @@ import org.jetbrains.annotations.TestOnly;
 import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
-import java.awt.event.InputEvent;
 import java.util.*;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 public abstract class AttachToProcessActionBase extends AnAction implements DumbAware {
   private static final Key<Map<XAttachHost, LinkedHashSet<RecentItem>>> RECENT_ITEMS_KEY =
@@ -51,19 +53,15 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
   private final Supplier<? extends List<XAttachDebuggerProvider>> myAttachProvidersSupplier;
   @NotNull
   private final @NlsContexts.PopupTitle String myAttachActionsListTitle;
-  @NotNull
-  private final Supplier<? extends List<XAttachHostProvider>> myAttachHostProviderSupplier;
 
   public AttachToProcessActionBase(@Nullable @NlsActions.ActionText String text,
                                    @Nullable @NlsActions.ActionDescription String description,
                                    @Nullable Icon icon,
                                    @NotNull Supplier<? extends List<XAttachDebuggerProvider>> attachProvidersSupplier,
-                                   @NotNull Supplier<? extends List<XAttachHostProvider>> attachHostProviderSupplier,
                                    @NotNull @NlsContexts.PopupTitle String attachActionsListTitle) {
     super(text, description, icon);
     myAttachProvidersSupplier = attachProvidersSupplier;
     myAttachActionsListTitle = attachActionsListTitle;
-    myAttachHostProviderSupplier = attachHostProviderSupplier;
   }
 
   @Override
@@ -75,12 +73,23 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
     e.getPresentation().setEnabledAndVisible(enabled);
   }
 
+  @Override
+  public @NotNull ActionUpdateThread getActionUpdateThread() {
+    return ActionUpdateThread.BGT;
+  }
 
   @Override
   public void actionPerformed(@NotNull AnActionEvent e) {
     final Project project = getEventProject(e);
     if (project == null) return;
 
+    if (Registry.is("debugger.attach.dialog.enabled")) {
+      project.getService(AttachToProcessDialogFactory.class).showDialog(
+        myAttachProvidersSupplier.get(),
+        getAvailableHosts(),
+        e.getDataContext());
+      return;
+    }
 
     new Task.Backgroundable(project,
                             XDebuggerBundle.message("xdebugger.attach.action.collectingItems"), true,
@@ -99,7 +108,7 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
           ListSelectionListener listener = event -> {
             if (event.getValueIsAdjusting()) return;
 
-            Object item = ((JList)event.getSource()).getSelectedValue();
+            Object item = ((JList<?>)event.getSource()).getSelectedValue();
 
             // if a sub-list is closed, fallback to the selected value from the main list
             if (item == null) {
@@ -129,6 +138,11 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
     }.queue();
   }
 
+  protected List<XAttachHostProvider<XAttachHost>> getAvailableHosts() {
+    return XAttachHostProvider.EP.getExtensionList().stream().map(provider -> (XAttachHostProvider<XAttachHost>) provider).collect(
+      Collectors.toList());
+  }
+
   @NotNull
   protected List<? extends AttachItem> getTopLevelItems(@NotNull ProgressIndicator indicator, @NotNull Project project) {
     List<AttachItem> attachHostItems = collectAttachHostsItems(project, indicator);
@@ -145,14 +159,14 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
   }
 
   private static void doUpdateFirstInGroup(@NotNull List<? extends AttachItem> items) {
-    if(items.isEmpty()) {
+    if (items.isEmpty()) {
       return;
     }
 
     items.get(0).makeFirstInGroup();
 
-    for(int i = 1; i < items.size(); i++) {
-      if(items.get(i).getGroup() != items.get(i - 1).getGroup()) {
+    for (int i = 1; i < items.size(); i++) {
+      if (items.get(i).getGroup() != items.get(i - 1).getGroup()) {
         items.get(i).makeFirstInGroup();
       }
     }
@@ -166,7 +180,7 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
 
     UserDataHolderBase dataHolder = new UserDataHolderBase();
 
-    for (XAttachHostProvider hostProvider : myAttachHostProviderSupplier.get()) {
+    for (XAttachHostProvider hostProvider : getAvailableHosts()) {
       indicator.checkCanceled();
       //noinspection unchecked
       Set<XAttachHost> hosts = new HashSet<>(hostProvider.getAvailableHosts(project));
@@ -185,7 +199,7 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
   }
 
   @NotNull
-  private static List<AttachToProcessItem> getRecentItems(@NotNull List<? extends AttachToProcessItem> currentItems,
+  public static List<AttachToProcessItem> getRecentItems(@NotNull List<? extends AttachToProcessItem> currentItems,
                                                           @NotNull XAttachHost host,
                                                           @NotNull Project project,
                                                           @NotNull UserDataHolder dataHolder) {
@@ -197,7 +211,7 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
       for (AttachToProcessItem currentItem : currentItems) {
         boolean isSuitableItem = recentItem.getGroup().equals(currentItem.getGroup()) &&
                                  recentItem.getProcessInfo().getCommandLine()
-                                           .equals(currentItem.getProcessInfo().getCommandLine());
+                                   .equals(currentItem.getProcessInfo().getCommandLine());
 
         if (!isSuitableItem) continue;
 
@@ -225,11 +239,12 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
       return host.getProcessList();
     }
     catch (ExecutionException e) {
-      Notifications.Bus.notify(new Notification("Attach to Process action",
-                                                XDebuggerBundle.message("xdebugger.attach.action.items.error.title"),
-                                                XDebuggerBundle.message("xdebugger.attach.action.items.error.message"),
-                                                NotificationType.WARNING));
-      LOG.warn("Error while getting attach items", e);
+      Notifications.Bus.notify(new Notification(
+        "Attach to Process action",
+        XDebuggerBundle.message("xdebugger.attach.action.items.error.title"),
+        XDebuggerBundle.message("xdebugger.attach.action.items.error.message"),
+        NotificationType.WARNING));
+      LOG.warn("Error getting process list from the host " + host + ": " + e.getMessage());
 
       return Collections.emptyList();
     }
@@ -242,8 +257,8 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
 
   @NotNull
   public List<AttachToProcessItem> collectAttachProcessItems(@NotNull final Project project,
-                                                               @NotNull XAttachHost host,
-                                                               @NotNull ProgressIndicator indicator) {
+                                                             @NotNull XAttachHost host,
+                                                             @NotNull ProgressIndicator indicator) {
     return doCollectAttachProcessItems(project, host, getProcessInfos(host), indicator, getProvidersApplicableForHost(host));
   }
 
@@ -265,7 +280,7 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
         indicator.checkCanceled();
 
         groupsWithDebuggers.putValues(provider.getPresentationGroup(),
-                                        provider.getAvailableDebuggers(project, host, process, dataHolder));
+                                      provider.getAvailableDebuggers(project, host, process, dataHolder));
       }
 
       for (XAttachPresentationGroup<ProcessInfo> group : groupsWithDebuggers.keySet()) {
@@ -297,7 +312,7 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
 
     LinkedHashSet<RecentItem> hostRecentItems = recentItems.get(host);
 
-    if(hostRecentItems == null) {
+    if (hostRecentItems == null) {
       recentItems.put(host, new LinkedHashSet<>());
       hostRecentItems = recentItems.get(host);
     }
@@ -319,7 +334,7 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
     Map<XAttachHost, LinkedHashSet<RecentItem>> recentItems = project.getUserData(RECENT_ITEMS_KEY);
     return recentItems == null || !recentItems.containsKey(host)
            ? Collections.emptyList()
-           : Collections.unmodifiableList(new ArrayList<>(recentItems.get(host)));
+           : List.copyOf(recentItems.get(host));
   }
 
   public static class RecentItem {
@@ -344,7 +359,10 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
     }
 
     @TestOnly
-    public static RecentItem createRecentItem(@NotNull XAttachHost host, @NotNull ProcessInfo info, @NotNull XAttachPresentationGroup group, @NotNull String debuggerName) {
+    public static RecentItem createRecentItem(@NotNull XAttachHost host,
+                                              @NotNull ProcessInfo info,
+                                              @NotNull XAttachPresentationGroup group,
+                                              @NotNull String debuggerName) {
       return new RecentItem(host, info, group, debuggerName);
     }
 
@@ -425,6 +443,11 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
       return myIsFirstInGroup ? myGroupName : null;
     }
 
+    @NotNull
+    public UserDataHolder getDataHolder() {
+      return myDataHolder;
+    }
+
     @Nullable
     protected Icon getIcon(@NotNull Project project) {
       return myGroup.getItemIcon(project, myInfo, myDataHolder);
@@ -444,7 +467,7 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
     public int compareTo(AttachItem<T> compareItem) {
       int groupDifference = myGroup.getOrder() - compareItem.getGroup().getOrder();
 
-      if(groupDifference != 0) {
+      if (groupDifference != 0) {
         return groupDifference;
       }
 
@@ -455,10 +478,10 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
   private class AttachHostItem extends AttachItem<XAttachHost> {
 
     AttachHostItem(@NotNull XAttachPresentationGroup<XAttachHost> group,
-                          boolean isFirstInGroup,
-                          @NotNull XAttachHost host,
-                          @NotNull Project project,
-                          @NotNull UserDataHolder dataHolder) {
+                   boolean isFirstInGroup,
+                   @NotNull XAttachHost host,
+                   @NotNull Project project,
+                   @NotNull UserDataHolder dataHolder) {
       super(group, isFirstInGroup, group.getGroupName(), host, project, dataHolder);
     }
 
@@ -475,7 +498,7 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
 
     @Override
     @Nullable
-    public String getTooltipText(@NotNull Project project)  {
+    public String getTooltipText(@NotNull Project project) {
       return myGroup.getItemDescription(project, myInfo, myDataHolder);
     }
 
@@ -521,7 +544,8 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
       if (debuggers.size() > 1) {
         mySubItems = ContainerUtil
           .map(debuggers,
-               debugger -> new AttachToProcessItem(myGroup, false, myHost, myInfo, Collections.singletonList(debugger), myProject, dataHolder));
+               debugger -> new AttachToProcessItem(myGroup, false, myHost, myInfo, Collections.singletonList(debugger), myProject,
+                                                   dataHolder));
       }
       else {
         mySubItems = Collections.emptyList();
@@ -529,10 +553,10 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
     }
 
     static AttachToProcessItem createRecentAttachItem(AttachToProcessItem item,
-                                                             boolean isFirstInGroup,
-                                                             List<XAttachDebugger> debuggers,
-                                                             int selectedDebugger,
-                                                             Project project, UserDataHolder dataHolder) {
+                                                      boolean isFirstInGroup,
+                                                      List<XAttachDebugger> debuggers,
+                                                      int selectedDebugger,
+                                                      Project project, UserDataHolder dataHolder) {
       return new AttachToProcessItem(item.getGroup(), isFirstInGroup, XDebuggerBundle.message("xdebugger.attach.toLocal.popup.recent"),
                                      item.getHost(), item.getProcessInfo(), debuggers, selectedDebugger, project, dataHolder);
     }
@@ -554,7 +578,7 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
 
     @Override
     @Nullable
-    public String getTooltipText(@NotNull Project project)  {
+    public String getTooltipText(@NotNull Project project) {
       return myGroup.getItemDescription(project, myInfo, myDataHolder);
     }
 
@@ -599,8 +623,8 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
     @NotNull final Project myProject;
 
     MyBasePopupStep(@NotNull Project project,
-                           @Nullable @NlsContexts.PopupTitle String title,
-                           List<T> values) {
+                    @Nullable @NlsContexts.PopupTitle String title,
+                    List<T> values) {
       super(title, values);
       myProject = project;
     }
@@ -694,13 +718,6 @@ public abstract class AttachToProcessActionBase extends AnAction implements Dumb
     @Override
     public boolean isFinal(AttachItem value) {
       return value instanceof AttachToProcessItem;
-    }
-
-    @Override
-    public PopupStep onChosen(AttachItem selectedValue,
-                              boolean finalChoice,
-                              @MagicConstant(flagsFromClass = InputEvent.class) int eventModifiers) {
-      return onChosen(selectedValue, finalChoice);
     }
 
     private class ActionListStep extends MyBasePopupStep<AttachToProcessItem> {

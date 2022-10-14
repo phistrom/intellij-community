@@ -784,7 +784,7 @@ public final class EditorPainter implements TextDrawingCallback {
           else if (c == '\t') {
             double strokeWidth = Math.max(scale, PaintUtil.devPixel(myGraphics));
             switch (AdvancedSettings.getEnum(EDITOR_TAB_PAINTING, TabCharacterPaintMode.class)) {
-              case LONG_ARROW: {
+              case LONG_ARROW -> {
                 int tabEndX = endX - (int)(myView.getPlainSpaceWidth() / 4);
                 int height = myView.getCharHeight();
                 Color tabColor = color == null ? null : ColorUtil.mix(myBackgroundColor, color, 0.7);
@@ -797,9 +797,8 @@ public final class EditorPainter implements TextDrawingCallback {
                   LinePainter2D.paint(g, tabEndX, yToUse, tabEndX, yTop, LinePainter2D.StrokeType.INSIDE, strokeWidth);
                   g.fillPolygon(new int[]{tabEndX - halfHeight, tabEndX - halfHeight, tabEndX}, new int[]{yToUse, yTop, yMid}, 3);
                 });
-                break;
               }
-              case ARROW: {
+              case ARROW -> {
                 int tabLineHeight = calcFeatureSize(4, scale);
                 int tabLineWidth = Math.min(endX - startX, calcFeatureSize(3, scale));
                 int xToUse = Math.min(endX - tabLineWidth, startX + tabLineWidth);
@@ -813,9 +812,8 @@ public final class EditorPainter implements TextDrawingCallback {
                   g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, oldHint);
                 });
                 restoreStroke = true;
-                break;
               }
-              default: {
+              default -> {
                 int yMid = yToUse - myView.getCharHeight() / 2;
                 int tabEndX = Math.max(startX + 1, endX - getTabGap(scale));
                 myTextDrawingTasks.add(g -> {
@@ -987,8 +985,7 @@ public final class EditorPainter implements TextDrawingCallback {
       else {
         FloatList leadingRanges = adjustedLogicalRangeToVisualRanges(
           startOffset, myView.visualPositionToOffset(new VisualPosition(startVisualLine, Integer.MAX_VALUE, true)));
-        FloatList trailingRanges = adjustedLogicalRangeToVisualRanges(
-          myView.visualPositionToOffset(new VisualPosition(endVisualLine, 0)), endOffset);
+        FloatList trailingRanges = adjustedLogicalRangeToVisualRanges(myView.visualLineToOffset(endVisualLine), endOffset);
         if (!leadingRanges.isEmpty() && !trailingRanges.isEmpty()) {
           int minX = Math.min(myCorrector.minX(startVisualLine, endVisualLine), (int)leadingRanges.getFloat(0));
           int maxX = Math.max(myCorrector.maxX(startVisualLine, endVisualLine), (int)trailingRanges.getFloat(trailingRanges.size() - 1));
@@ -1314,7 +1311,7 @@ public final class EditorPainter implements TextDrawingCallback {
 
         CaretVisualAttributes.Shape shape = attr.getShape();
         switch (shape) {
-          case DEFAULT:
+          case DEFAULT -> {
             if (myEditor.isInsertMode() != settings.isBlockCursor()) {
               int lineWidth = JBUIScale.scale(attr.getWidth(settings.getLineCursorWidth()));
               // fully cover extra character's pixel which can appear due to antialiasing
@@ -1326,12 +1323,12 @@ public final class EditorPainter implements TextDrawingCallback {
               paintCaretBlock(g, startX, y, width, nominalLineHeight);
               paintCaretText(g, caret, caretColor, startX, y, topOverhang, isRtl);
             }
-            break;
-          case BLOCK:
+          }
+          case BLOCK -> {
             paintCaretBlock(g, startX, y, width, nominalLineHeight);
             paintCaretText(g, caret, caretColor, startX, y, topOverhang, isRtl);
-            break;
-          case BAR:
+          }
+          case BAR -> {
             // Don't draw if thickness is zero. This allows a plugin to "hide" carets, e.g. to visually emulate a block selection as a
             // selection rather than as multiple carets with discrete selections
             if (attr.getThickness() > 0) {
@@ -1343,8 +1340,8 @@ public final class EditorPainter implements TextDrawingCallback {
               paintCaretText(g, caret, caretColor, startX, y, topOverhang, isRtl);
               g.setClip(savedClip);
             }
-            break;
-          case UNDERSCORE:
+          }
+          case UNDERSCORE -> {
             if (attr.getThickness() > 0) {
               int underscoreHeight = Math.max((int)(nominalLineHeight * attr.getThickness()), 1);
               paintCaretUnderscore(g, startX, y + nominalLineHeight - underscoreHeight, width, underscoreHeight);
@@ -1353,10 +1350,8 @@ public final class EditorPainter implements TextDrawingCallback {
               paintCaretText(g, caret, caretColor, startX, y, topOverhang, isRtl);
               g.setClip(oldClip);
             }
-            break;
-          case BOX:
-            paintCaretBox(g, startX, y, width, nominalLineHeight);
-            break;
+          }
+          case BOX -> paintCaretBox(g, startX, y, width, nominalLineHeight);
         }
       }
     }
@@ -1540,8 +1535,8 @@ public final class EditorPainter implements TextDrawingCallback {
                                 visualLineEndOffset == offset ? visualLineEndOffset
                                                               : DocumentUtil.getPreviousCodePointOffset(myDocument, visualLineEndOffset),
                                 visualLineEndOffset,
-                                !visLineIterator.isCustomFoldRegionLine() || Registry.is("highlight.caret.line.at.custom.fold")
-                                ? myCaretData : null,
+                                IterationState.CaretData.copyOf(myCaretData, visLineIterator.isCustomFoldRegionLine() &&
+                                                                             !Registry.is("highlight.caret.line.at.custom.fold")),
                                 false, false, false, false);
       }
       if (!it.atEnd()) {

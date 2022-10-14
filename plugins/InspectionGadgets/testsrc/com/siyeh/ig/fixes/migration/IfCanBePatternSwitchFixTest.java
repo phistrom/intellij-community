@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.siyeh.ig.fixes.migration;
 
 import com.intellij.codeInspection.CommonQuickFixBundle;
@@ -39,4 +39,10 @@ public class IfCanBePatternSwitchFixTest extends IGQuickFixesTestCase {
   public void testPatternToSwitchExpression() { doTest(); }
   public void testTotalPattern(){ doTest(); }
   public void testStringConstantsWithNull() { doTest(); }
+  public void testCastsReplacedWithPattern() { doTest(); }
+  public void testMultipleCastedVariables() { doTest(); }
+  public void testMutableCastedVariable() { doTest(); }
+  public void testPatternGuard() {
+    IdeaTestUtil.withLevel(myFixture.getModule(), LanguageLevel.JDK_19_PREVIEW, () -> doTest());
+  }
 }

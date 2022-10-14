@@ -5,6 +5,7 @@ import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.codeInsight.Nullability;
 import com.intellij.codeInsight.NullabilityAnnotationInfo;
 import com.intellij.codeInsight.NullableNotNullManager;
+import com.intellij.codeInsight.intention.preview.IntentionPreviewUtils;
 import com.intellij.codeInspection.dataFlow.*;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.roots.FileIndexFacade;
@@ -229,7 +230,8 @@ public final class JavaSourceInference {
    * @return inferred parameter nullability; {@link Nullability#UNKNOWN} if cannot be inferred or non-applicable
    */
   public static Nullability inferNullability(@NotNull PsiParameter parameter) {
-    if (!parameter.isPhysical() || parameter.getType() instanceof PsiPrimitiveType) return Nullability.UNKNOWN;
+    if ((!parameter.isPhysical() && !IntentionPreviewUtils.isPreviewElement(parameter))
+        || parameter.getType() instanceof PsiPrimitiveType) return Nullability.UNKNOWN;
     PsiParameterList parent = ObjectUtils.tryCast(parameter.getParent(), PsiParameterList.class);
     if (parent == null) return Nullability.UNKNOWN;
     PsiMethodImpl method = ObjectUtils.tryCast(parent.getParent(), PsiMethodImpl.class);
@@ -321,8 +323,9 @@ public final class JavaSourceInference {
       return false;
     }
 
-    if (containingClass.getParent() instanceof PsiNewExpression &&
-        containingClass.getParent().getParent() instanceof PsiVariable &&
+    PsiElement parent = containingClass.getParent();
+    if (parent instanceof PsiNewExpression &&
+        PsiUtil.skipParenthesizedExprUp(parent.getParent()) instanceof PsiVariable &&
         !method.getHierarchicalMethodSignature().getSuperSignatures().isEmpty()) {
       // references outside anonymous class can still resolve to this method, see com.intellij.psi.scope.util.PsiScopesUtil.setupAndRunProcessor()
       return false;

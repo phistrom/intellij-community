@@ -17,11 +17,6 @@ import org.jetbrains.plugins.groovy.lang.psi.impl.statements.expressions.TypesUt
 
 public class GrCharConverter extends GrTypeConverter {
 
-  @Override
-  public boolean isApplicableTo(@NotNull Position position) {
-    return position == Position.ASSIGNMENT || position == Position.RETURN_VALUE;
-  }
-
   @Nullable
   @Override
   public ConversionResult isConvertible(@NotNull PsiType lType,
@@ -62,13 +57,10 @@ public class GrCharConverter extends GrTypeConverter {
     }
 
     if (PsiType.BOOLEAN.equals(TypesUtil.unboxPrimitiveTypeWrapper(rType))) {
-      switch (position) {
-        case ASSIGNMENT:
-        case RETURN_VALUE:
-          return ConversionResult.WARNING;
-        default:
-          return null;
-      }
+      return switch (position) {
+        case ASSIGNMENT, RETURN_VALUE -> ConversionResult.WARNING;
+        default -> null;
+      };
     }
 
     // one-symbol string-to-char conversion doesn't work with return value

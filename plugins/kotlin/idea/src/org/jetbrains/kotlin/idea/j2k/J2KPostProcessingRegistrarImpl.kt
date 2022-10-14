@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.j2k
 
@@ -10,7 +10,10 @@ import org.jetbrains.kotlin.diagnostics.Diagnostic
 import org.jetbrains.kotlin.diagnostics.DiagnosticFactory
 import org.jetbrains.kotlin.diagnostics.Errors
 import org.jetbrains.kotlin.idea.caches.resolve.analyze
-import org.jetbrains.kotlin.idea.core.replaced
+import org.jetbrains.kotlin.idea.base.psi.replaced
+import org.jetbrains.kotlin.idea.codeinsight.api.classic.inspections.AbstractApplicabilityBasedInspection
+import org.jetbrains.kotlin.idea.codeinsight.api.classic.intentions.SelfTargetingRangeIntention
+import org.jetbrains.kotlin.idea.codeinsights.impl.base.KotlinInspectionFacade
 import org.jetbrains.kotlin.idea.core.setVisibility
 import org.jetbrains.kotlin.idea.inspections.*
 import org.jetbrains.kotlin.idea.inspections.branchedTransformations.IfThenToElvisInspection
@@ -20,8 +23,9 @@ import org.jetbrains.kotlin.idea.intentions.*
 import org.jetbrains.kotlin.idea.intentions.branchedTransformations.intentions.FoldIfToReturnAsymmetricallyIntention
 import org.jetbrains.kotlin.idea.intentions.branchedTransformations.intentions.FoldIfToReturnIntention
 import org.jetbrains.kotlin.idea.intentions.branchedTransformations.isTrivialStatementBody
-import org.jetbrains.kotlin.idea.quickfix.RemoveModifierFix
+import org.jetbrains.kotlin.idea.quickfix.RemoveModifierFixBase
 import org.jetbrains.kotlin.idea.quickfix.RemoveUselessCastFix
+import org.jetbrains.kotlin.idea.quickfix.asKotlinIntentionActionsFactory
 import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.*
@@ -30,7 +34,7 @@ import org.jetbrains.kotlin.psi.psiUtil.getParentOfType
 import org.jetbrains.kotlin.psi.psiUtil.isAncestor
 import org.jetbrains.kotlin.psi.psiUtil.visibilityModifierType
 import org.jetbrains.kotlin.resolve.BindingContext
-import org.jetbrains.kotlin.resolve.calls.callUtil.getType
+import org.jetbrains.kotlin.resolve.calls.util.getType
 import org.jetbrains.kotlin.resolve.diagnostics.Diagnostics
 import org.jetbrains.kotlin.resolve.lazy.BodyResolveMode
 import org.jetbrains.kotlin.utils.mapToIndex
@@ -73,7 +77,7 @@ object J2KPostProcessingRegistrarImpl : J2KPostProcessingRegistrar {
 
         registerInspectionBasedProcessing(IfThenToSafeAccessInspection())
         registerInspectionBasedProcessing(IfThenToElvisInspection(true))
-        registerInspectionBasedProcessing(SimplifyNegatedBinaryExpressionInspection())
+        registerInspectionBasedProcessing(KotlinInspectionFacade.instance.simplifyNegatedBinaryExpression)
         registerInspectionBasedProcessing(ReplaceGetOrSetInspection())
         registerInspectionBasedProcessing(AddOperatorModifierInspection())
         registerIntentionBasedProcessing(ObjectLiteralToLambdaIntention())
@@ -100,7 +104,9 @@ object J2KPostProcessingRegistrarImpl : J2KPostProcessingRegistrar {
         }
 
         registerDiagnosticBasedProcessing<KtTypeProjection>(Errors.REDUNDANT_PROJECTION) { _, diagnostic ->
-            val fix = RemoveModifierFix.createRemoveProjectionFactory(true).createActions(diagnostic).single() as RemoveModifierFix
+            val fix = RemoveModifierFixBase.createRemoveProjectionFactory(true)
+                .asKotlinIntentionActionsFactory()
+                .createActions(diagnostic).single() as RemoveModifierFixBase
             fix.invoke()
         }
 

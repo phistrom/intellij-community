@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vfs.impl.local;
 
 import com.intellij.openapi.Disposable;
@@ -172,7 +172,7 @@ final class WatchRootsManager {
       String watchRoot = prepareWatchRoot(root);
       if (watchRoot == null) continue;
 
-      List<WatchRequest> requests = roots.computeIfAbsent(watchRoot, (key) -> new SmartList<>());
+      List<WatchRequest> requests = roots.computeIfAbsent(watchRoot, __ -> new SmartList<>());
       boolean foundSameRequest = false;
       if (!requestsToRemove.isEmpty()) {
         for (WatchRequest currentRequest : requests) {
@@ -260,7 +260,7 @@ final class WatchRootsManager {
   private void addWatchSymlinkRequest(@NotNull WatchSymlinkRequest request) {
     String watchRoot = request.getRootPath();
     Map<String, List<WatchRequest>> roots = request.isToWatchRecursively() ? myRecursiveWatchRoots : myFlatWatchRoots;
-    List<WatchRequest> requests = roots.computeIfAbsent(watchRoot, (key) -> new SmartList<>());
+    List<WatchRequest> requests = roots.computeIfAbsent(watchRoot, __ -> new SmartList<>());
     requests.add(request);
     if (requests.size() == 1 && !WatchRootsUtil.isCoveredRecursively(myOptimizedRecursiveWatchRoots, watchRoot)) {
       if (request.isToWatchRecursively()) {

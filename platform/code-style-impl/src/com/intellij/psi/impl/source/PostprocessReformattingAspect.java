@@ -2,6 +2,8 @@
 package com.intellij.psi.impl.source;
 
 import com.intellij.application.options.CodeStyle;
+import com.intellij.codeInsight.intention.preview.IntentionPreviewInfo;
+import com.intellij.codeInsight.intention.preview.IntentionPreviewUtils;
 import com.intellij.formatting.FormatTextRanges;
 import com.intellij.formatting.service.ExternalFormatProcessorAdapter;
 import com.intellij.formatting.service.FormattingService;
@@ -176,7 +178,8 @@ public final class PostprocessReformattingAspect implements PomModelAspect {
     PsiFile containingFile = InjectedLanguageManager.getInstance(psiElement.getProject()).getTopLevelFile(psiElement);
     final FileViewProvider viewProvider = containingFile.getViewProvider();
 
-    if (!viewProvider.isEventSystemEnabled() && ModelBranch.getPsiBranch(containingFile) == null) return;
+    if (!viewProvider.isEventSystemEnabled() && ModelBranch.getPsiBranch(containingFile) == null &&
+        !IntentionPreviewUtils.isPreviewElement(containingFile)) return;
     getContext().myUpdatedProviders.putValue(viewProvider, (FileElement)containingFile.getNode());
     for (final ASTNode node : changeSet.getChangedElements()) {
       final TreeChange treeChange = changeSet.getChangesByElement(node);
@@ -190,11 +193,8 @@ public final class PostprocessReformattingAspect implements PomModelAspect {
 
         final ChangeInfo childChange = treeChange.getChangeByChild(affectedChild);
         switch (childChange.getChangeType()) {
-          case ChangeInfo.ADD:
-          case ChangeInfo.REPLACE:
-            postponeFormatting(viewProvider, affectedChild);
-            break;
-          case ChangeInfo.CONTENTS_CHANGED:
+          case ChangeInfo.ADD, ChangeInfo.REPLACE -> postponeFormatting(viewProvider, affectedChild);
+          case ChangeInfo.CONTENTS_CHANGED -> {
             if (!CodeEditUtil.isNodeGenerated(affectedChild)) {
               ((TreeElement)affectedChild).acceptTree(new RecursiveTreeElementWalkingVisitor() {
                 @Override
@@ -207,7 +207,7 @@ public final class PostprocessReformattingAspect implements PomModelAspect {
                 }
               });
             }
-            break;
+          }
         }
       }
     }

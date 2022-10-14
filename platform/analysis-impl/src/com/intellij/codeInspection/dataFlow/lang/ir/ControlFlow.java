@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package com.intellij.codeInspection.dataFlow.lang.ir;
 
@@ -16,9 +16,9 @@ import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 /**
  * Represents code block IR (list of instructions)
@@ -52,7 +52,13 @@ public final class ControlFlow {
     myElementToEndOffsetMap = flow.myElementToEndOffsetMap;
     myElementToStartOffsetMap = flow.myElementToStartOffsetMap;
     myLoopNumbers = flow.myLoopNumbers;
-    myInstructions = StreamEx.of(flow.myInstructions).map(instruction -> instruction.bindToFactory(factory)).toImmutableList();
+    myInstructions = StreamEx.of(flow.myInstructions).map(instruction -> {
+      Instruction updated = instruction.bindToFactory(factory);
+      if (updated.getIndex() == -1) {
+        updated.setIndex(instruction.getIndex());
+      }
+      return updated;
+    }).toImmutableList();
   }
 
   public @NotNull PsiElement getPsiAnchor() {
@@ -144,7 +150,24 @@ public final class ControlFlow {
   }
 
   /**
-   * Checks whether supplied variable is a temporary variable created previously via {@link ControlFlow#createTempVariable(DfType)}
+   * @param reached set of reached instructions
+   * @return elements that were not reached (no instruction between element start and end was reached)
+   */
+  public @NotNull Set<PsiElement> computeUnreachable(@NotNull BitSet reached) {
+    Set<PsiElement> result = new HashSet<>();
+    myElementToStartOffsetMap.forEach((element, start) -> {
+      int end = myElementToEndOffsetMap.getOrDefault(element, -1);
+      if (end == -1) return;
+      int nextReached = reached.nextSetBit(start);
+      if (nextReached == -1 || nextReached >= end) {
+        result.add(element);
+      }
+    });
+    return result;
+  }
+
+  /**
+   * Checks whether supplied variable is a temporary variable created previously via {@link #createTempVariable(DfType)}
    *
    * @param variable to check
    * @return true if supplied variable is a temp variable.
@@ -170,12 +193,60 @@ public final class ControlFlow {
       if (value instanceof DfaVariableValue) {
         DfaVariableValue var = (DfaVariableValue)value;
         VariableDescriptor descriptor = var.getDescriptor();
-        if (descriptor instanceof Synthetic && ((Synthetic)descriptor).getLocation() >= startOffset) {
+        if (descriptor instanceof Synthetic && ((Synthetic)descriptor).myLocation >= startOffset) {
           synthetics.add(var);
         }
       }
     }
     return synthetics;
+  }
+
+  public abstract static class ControlFlowOffset {
+    public abstract int getInstructionOffset();
+
+    @Override
+    public String toString() {
+      return String.valueOf(getInstructionOffset());
+    }
+  }
+
+  public static class FixedOffset extends ControlFlowOffset {
+    private final int myOffset;
+
+    public FixedOffset(int offset) {
+      myOffset = offset;
+    }
+
+    @Override
+    public int getInstructionOffset() {
+      return myOffset;
+    }
+  }
+
+  public static class DeferredOffset extends ControlFlowOffset {
+    private int myOffset = -1;
+
+    @Override
+    public int getInstructionOffset() {
+      if (myOffset == -1) {
+        throw new IllegalStateException("Not set");
+      }
+      return myOffset;
+    }
+
+    public void setOffset(int offset) {
+      if (myOffset != -1) {
+        throw new IllegalStateException("Already set");
+      }
+      else {
+        myOffset = offset;
+      }
+    }
+
+    @Override
+    public String toString() {
+      return myOffset == -1 ? "<not set>" : super.toString();
+    }
   }
 
   private static class FromMapOffset extends ControlFlowOffset {
@@ -190,6 +261,31 @@ public final class ControlFlow {
     @Override
     public int getInstructionOffset() {
       return myElementMap.getInt(myElement);
+    }
+  }
+
+  public static final class Synthetic implements VariableDescriptor {
+    private final int myLocation;
+    private final DfType myType;
+
+    private Synthetic(int location, DfType type) {
+      myLocation = location;
+      myType = type;
+    }
+
+    @Override
+    public @NotNull String toString() {
+      return "tmp$" + myLocation;
+    }
+
+    @Override
+    public @NotNull DfType getDfType(@Nullable DfaVariableValue qualifier) {
+      return myType;
+    }
+
+    @Override
+    public boolean isStable() {
+      return true;
     }
   }
 }

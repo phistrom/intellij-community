@@ -15,7 +15,6 @@
  */
 package com.intellij.codeInsight.daemon.impl.quickfix;
 
-import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.daemon.QuickFixBundle;
 import com.intellij.codeInsight.generation.ClassMember;
 import com.intellij.codeInsight.generation.RecordConstructorMember;
@@ -23,10 +22,11 @@ import com.intellij.codeInsight.hint.HintManager;
 import com.intellij.codeInsight.intention.LowPriorityAction;
 import com.intellij.codeInsight.intention.PsiElementBaseIntentionAction;
 import com.intellij.codeInsight.intention.impl.ParameterClassMember;
+import com.intellij.codeInsight.intention.preview.IntentionPreviewInfo;
+import com.intellij.codeInsight.intention.preview.IntentionPreviewUtils;
 import com.intellij.codeInsight.template.Template;
 import com.intellij.codeInsight.template.TemplateBuilderImpl;
 import com.intellij.codeInsight.template.impl.TextExpression;
-import com.intellij.icons.AllIcons;
 import com.intellij.ide.util.MemberChooser;
 import com.intellij.java.JavaBundle;
 import com.intellij.lang.java.JavaLanguage;
@@ -35,7 +35,6 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.RangeMarker;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Iconable;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleManager;
@@ -43,20 +42,20 @@ import com.intellij.psi.util.JavaElementKind;
 import com.intellij.psi.util.JavaPsiRecordUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
-import com.intellij.refactoring.util.RefactoringUtil;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.CommonJavaRefactoringUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.ContainerUtil;
+import com.siyeh.ig.psiutils.TypeUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 
-public class DefineParamsDefaultValueAction extends PsiElementBaseIntentionAction implements Iconable, LowPriorityAction {
+public class DefineParamsDefaultValueAction extends PsiElementBaseIntentionAction implements LowPriorityAction {
   private static final Logger LOG = Logger.getInstance(DefineParamsDefaultValueAction.class);
 
   @Override
@@ -70,10 +69,6 @@ public class DefineParamsDefaultValueAction extends PsiElementBaseIntentionActio
     return QuickFixBundle.message("generate.overloaded.method.with.default.parameter.values");
   }
 
-  @Override
-  public Icon getIcon(int flags) {
-    return AllIcons.Actions.RefactoringBulb;
-  }
 
   @Override
   public boolean isAvailable(@NotNull Project project, Editor editor, @NotNull PsiElement element) {
@@ -93,6 +88,10 @@ public class DefineParamsDefaultValueAction extends PsiElementBaseIntentionActio
     if (containingClass == null || (containingClass.isInterface() && !PsiUtil.isLanguageLevel8OrHigher(method))) {
       return false;
     }
+    if (containingClass.isAnnotationType()) {
+      // Method with parameters in annotation is a compilation error; there's no sense to create overload
+      return false;
+    }
     setText(QuickFixBundle.message("generate.overloaded.method.or.constructor.with.default.parameter.values",
                                    JavaElementKind.fromElement(method).lessDescriptive().object()));
     return true;
@@ -110,23 +109,25 @@ public class DefineParamsDefaultValueAction extends PsiElementBaseIntentionActio
     if (containingClass == null) return;
     final PsiMethod existingMethod = containingClass.findMethodBySignature(methodPrototype, false);
     if (existingMethod != null) {
-      editor.getCaretModel().moveToOffset(existingMethod.getTextOffset());
-      HintManager.getInstance().showErrorHint(editor,
-                                              JavaBundle.message("default.param.value.warning", existingMethod.isConstructor() ? 0 : 1));
+      if (containingClass.isPhysical()) {
+        editor.getCaretModel().moveToOffset(existingMethod.getTextOffset());
+        HintManager.getInstance().showErrorHint(editor,
+                                                JavaBundle.message("default.param.value.warning", existingMethod.isConstructor() ? 0 : 1));
+      }
       return;
     }
 
-    if (!FileModificationService.getInstance().preparePsiElementForWrite(element)) return;
+    if (!IntentionPreviewUtils.prepareElementForWrite(element)) return;
 
     Runnable runnable = () -> {
       final PsiMethod prototype = (PsiMethod)containingClass.addBefore(methodPrototype, method);
-      RefactoringUtil.fixJavadocsForParams(prototype, ContainerUtil.set(prototype.getParameterList().getParameters()));
+      CommonJavaRefactoringUtil.fixJavadocsForParams(prototype, ContainerUtil.set(prototype.getParameterList().getParameters()));
 
 
       PsiCodeBlock body = prototype.getBody();
       final String callArgs =
         "(" + StringUtil.join(parameterList.getParameters(), psiParameter -> {
-          if (ArrayUtil.find(parameters, psiParameter) > -1) return "IntelliJIDEARulezzz";
+          if (ArrayUtil.find(parameters, psiParameter) > -1) return TypeUtils.getDefaultValue(psiParameter.getType());
           return psiParameter.getName();
         }, ",") + ");";
       final String methodCall;
@@ -156,11 +157,19 @@ public class DefineParamsDefaultValueAction extends PsiElementBaseIntentionActio
         startTemplate(project, editor, toDefaults, prototype);
       }
     };
-    if (startInWriteAction()) {
+    if (startInWriteAction() || !containingClass.isPhysical()) {
       runnable.run();
     } else {
       ApplicationManager.getApplication().runWriteAction(runnable);
     }
+  }
+
+  @Override
+  public @NotNull IntentionPreviewInfo generatePreview(@NotNull Project project,
+                                                       @NotNull Editor editor,
+                                                       @NotNull PsiFile file) {
+    invoke(project, editor, file);
+    return IntentionPreviewInfo.DIFF;
   }
 
   public static void startTemplate(@NotNull Project project,
@@ -170,7 +179,7 @@ public class DefineParamsDefaultValueAction extends PsiElementBaseIntentionActio
     TemplateBuilderImpl builder = new TemplateBuilderImpl(delegateMethod);
     RangeMarker rangeMarker = editor.getDocument().createRangeMarker(delegateMethod.getTextRange());
     for (final PsiExpression exprToBeDefault  : argsToBeDelegated) {
-      builder.replaceElement(exprToBeDefault, new TextExpression(""));
+      builder.replaceElement(exprToBeDefault, new TextExpression(exprToBeDefault.getText()));
     }
     Template template = builder.buildTemplate();
     editor.getCaretModel().moveToOffset(rangeMarker.getStartOffset());
@@ -185,7 +194,7 @@ public class DefineParamsDefaultValueAction extends PsiElementBaseIntentionActio
 
   private static PsiParameter @Nullable [] getParams(@NotNull PsiElement element, @NotNull PsiParameterList parameterList) {
     final PsiParameter[] parameters = parameterList.getParameters();
-    if (parameters.length == 1) {
+    if (parameters.length == 1 || !parameterList.isPhysical()) {
       return parameters;
     }
     final ParameterClassMember[] members = new ParameterClassMember[parameters.length];

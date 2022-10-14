@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInspection.actions;
 
 import com.intellij.CommonBundle;
@@ -19,6 +19,8 @@ import com.intellij.ide.IdeBundle;
 import com.intellij.ide.actions.GotoActionBase;
 import com.intellij.ide.util.gotoByName.ChooseByNameFilter;
 import com.intellij.ide.util.gotoByName.ChooseByNamePopup;
+import com.intellij.lang.InjectableLanguage;
+import com.intellij.lang.Language;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataProvider;
@@ -39,6 +41,7 @@ import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.ui.TitledSeparator;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.ui.JBInsets;
 import com.intellij.util.ui.JBUI;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
@@ -114,7 +117,7 @@ public class RunInspectionAction extends GotoActionBase implements DataProvider 
 
   public static void runInspection(@NotNull Project project,
                                    @NotNull String shortName,
-                                   VirtualFile @NotNull [] virtualFiles,
+                                   @NotNull VirtualFile @NotNull [] virtualFiles,
                                    @Nullable PsiElement psiElement,
                                    @Nullable PsiFile psiFile) {
     final PsiElement element = psiFile == null ? psiElement : psiFile;
@@ -164,7 +167,7 @@ public class RunInspectionAction extends GotoActionBase implements DataProvider 
         final boolean hasOptionsPanel = toolWrapper.getTool().createOptionsPanel() != null;
         var constraints = new GridBagConstraints(0, 0, 1, 1, 1, hasOptionsPanel ? 0 : 1,
                                                  GridBagConstraints.NORTH, GridBagConstraints.BOTH,
-                                                 JBUI.emptyInsets(),
+                                                 JBInsets.emptyInsets(),
                                                  0, 0);
 
         panel.add(fileFilterPanel.getPanel(), constraints);
@@ -177,11 +180,13 @@ public class RunInspectionAction extends GotoActionBase implements DataProvider 
           final var separator = new TitledSeparator(IdeBundle.message("goto.inspection.action.choose.inherit.settings.from"));
           separator.setBorder(JBUI.Borders.empty());
           constraints.gridy++;
+          constraints.insets.top = JBUI.scale(20);
           panel.add(separator, constraints);
 
           optionsPanel.setBorder(InspectionUiUtilKt.getBordersForOptions(optionsPanel));
           constraints.gridy++;
           constraints.weighty = 1;
+          constraints.insets.top = 0;
           panel.add(InspectionUiUtilKt.addScrollPaneIfNecessary(optionsPanel), constraints);
         }
         return panel;
@@ -244,7 +249,8 @@ public class RunInspectionAction extends GotoActionBase implements DataProvider 
       }
     };
 
-    dialog.setShowInspectInjectedCode(true);
+    //don't show if called for regexp inspection which makes no sense without injection
+    dialog.setShowInspectInjectedCode(!(Language.findLanguageByID(toolWrapper.getLanguage()) instanceof InjectableLanguage));
     dialog.showAndGet();
   }
 

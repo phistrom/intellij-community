@@ -26,9 +26,6 @@ import org.jetbrains.annotations.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * @author peter
- */
 public class GenericDomValueReference<T> extends PsiReferenceBase<XmlElement> implements EmptyResolveMessageProvider, ResolvingHint {
   private final GenericDomValue<T> myGenericValue;
 
@@ -207,6 +204,6 @@ public class GenericDomValueReference<T> extends PsiReferenceBase<XmlElement> im
   @Override
   public boolean canResolveTo(Class<? extends PsiElement> elementClass) {
     Converter<T> converter = getConverter();
-    return !(converter instanceof ResolvingConverter) || ((ResolvingConverter)converter).canResolveTo(elementClass);
+    return !(converter instanceof ResolvingConverter) || ((ResolvingConverter<?>)converter).canResolveTo(elementClass);
   }
 }

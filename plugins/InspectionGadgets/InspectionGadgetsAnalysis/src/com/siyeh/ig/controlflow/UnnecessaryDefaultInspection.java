@@ -32,13 +32,13 @@ import com.siyeh.ig.BaseInspectionVisitor;
 import com.siyeh.ig.InspectionGadgetsFix;
 import com.siyeh.ig.psiutils.ControlFlowUtils;
 import com.siyeh.ig.psiutils.SwitchUtils;
-import gnu.trove.THashSet;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.Set;
 
 import static com.intellij.codeInsight.daemon.impl.analysis.SwitchBlockHighlightingModel.PatternsInSwitchBlockHighlightingModel.CompletenessResult.COMPLETE_WITHOUT_TOTAL;
@@ -69,7 +69,7 @@ public class UnnecessaryDefaultInspection extends BaseInspection {
     return new DeleteDefaultFix();
   }
 
-  private static class DeleteDefaultFix extends InspectionGadgetsFix {
+  public static class DeleteDefaultFix extends InspectionGadgetsFix {
     @Nls(capitalization = Nls.Capitalization.Sentence)
     @NotNull
     @Override
@@ -80,9 +80,11 @@ public class UnnecessaryDefaultInspection extends BaseInspection {
     @Override
     protected void doFix(Project project, ProblemDescriptor descriptor) {
       final PsiElement element = descriptor.getPsiElement().getParent();
-      // todo reuse the quick-fix for DefaultCaseLabelElement
       if (element instanceof PsiSwitchLabelStatementBase) {
         DeleteSwitchLabelFix.deleteLabel((PsiSwitchLabelStatementBase)element);
+      }
+      else if (element instanceof PsiDefaultCaseLabelElement) {
+        DeleteSwitchLabelFix.deleteLabelElement((PsiDefaultCaseLabelElement)element);
       }
     }
   }
@@ -100,7 +102,7 @@ public class UnnecessaryDefaultInspection extends BaseInspection {
   private class UnnecessaryDefaultVisitor extends BaseInspectionVisitor {
 
     @Override
-    public void visitSwitchExpression(PsiSwitchExpression expression) {
+    public void visitSwitchExpression(@NotNull PsiSwitchExpression expression) {
       super.visitSwitchExpression(expression);
       checkSwitchBlock(expression);
     }
@@ -118,7 +120,7 @@ public class UnnecessaryDefaultInspection extends BaseInspection {
       }
       PsiSwitchLabeledRuleStatement ruleStatement = null;
       if (defaultStatement instanceof PsiSwitchLabeledRuleStatement) {
-        ruleStatement = ((PsiSwitchLabeledRuleStatement)defaultStatement);
+        ruleStatement = (PsiSwitchLabeledRuleStatement)defaultStatement;
       }
       else if (defaultStatement instanceof PsiDefaultCaseLabelElement) {
         PsiSwitchLabelStatementBase pDefaultStatement = PsiTreeUtil.getParentOfType(defaultStatement, PsiSwitchLabelStatementBase.class);
@@ -174,7 +176,7 @@ public class UnnecessaryDefaultInspection extends BaseInspection {
 
   private static boolean isDefaultNeededForInitializationOfVariable(PsiSwitchBlock switchBlock) {
     final Collection<PsiReferenceExpression> expressions = PsiTreeUtil.findChildrenOfType(switchBlock, PsiReferenceExpression.class);
-    final Set<PsiElement> checked = new THashSet<>();
+    final Set<PsiElement> checked = new HashSet<>();
     for (PsiReferenceExpression expression : expressions) {
       final PsiElement parent = PsiTreeUtil.skipParentsOfType(expression, PsiParenthesizedExpression.class);
       if (!(parent instanceof PsiAssignmentExpression)) {

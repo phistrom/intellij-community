@@ -1,5 +1,5 @@
-// "Add ''Parcelable'' supertype" "true"
-// WITH_RUNTIME
+// "Add 'Parcelable' supertype" "true"
+// WITH_STDLIB
 
 package com.myapp.activity
 

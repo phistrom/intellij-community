@@ -11,6 +11,7 @@ import com.intellij.openapi.application.ApplicationBundle;
 import com.intellij.openapi.application.ApplicationInfo;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.RoamingType;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.diagnostic.Logger;
@@ -49,7 +50,7 @@ import java.util.List;
 import java.util.Objects;
 
 @SuppressWarnings("SameParameterValue")
-@State(name = "LightEdit", storages =  @Storage("lightEdit.xml"))
+@State(name = "LightEdit", storages =  @Storage(value = "lightEdit.xml", roamingType = RoamingType.DISABLED))
 public final class LightEditServiceImpl implements LightEditService,
                                                    Disposable,
                                                    LightEditorListener,
@@ -198,12 +199,9 @@ public final class LightEditServiceImpl implements LightEditService,
     dialog.show();
     if (dialog.isDontAsk()) {
       switch (dialog.getExitCode()) {
-        case LightEditConfirmationDialog.STAY_IN_LIGHT_EDIT:
+        case LightEditConfirmationDialog.STAY_IN_LIGHT_EDIT ->
           myConfiguration.preferredMode = LightEditConfiguration.PreferredMode.LightEdit;
-          break;
-        case LightEditConfirmationDialog.PROCEED_TO_PROJECT:
-          myConfiguration.preferredMode = LightEditConfiguration.PreferredMode.Project;
-          break;
+        case LightEditConfirmationDialog.PROCEED_TO_PROJECT -> myConfiguration.preferredMode = LightEditConfiguration.PreferredMode.Project;
       }
     }
     if (dialog.getExitCode() == LightEditConfirmationDialog.PROCEED_TO_PROJECT) {
@@ -222,14 +220,16 @@ public final class LightEditServiceImpl implements LightEditService,
 
   private void logStartupTime() {
     if (!ApplicationManager.getApplication().isUnitTestMode()) {
-      ObjectUtils.consumeIfNotNull(
-        getEditPanel().getTabs().getSelectedInfo(),
-        tabInfo ->
-          UiNotifyConnector
-            .doWhenFirstShown(tabInfo.getComponent(), () -> ApplicationManager.getApplication().invokeLater(() -> {
-              LOG.info("Startup took: " + ManagementFactory.getRuntimeMXBean().getUptime() + " ms");
-            }))
-      );
+      if (myFrameWrapper != null) {
+        ObjectUtils.consumeIfNotNull(
+          getEditPanel().getTabs().getSelectedInfo(),
+          tabInfo ->
+            UiNotifyConnector
+              .doWhenFirstShown(tabInfo.getComponent(), () -> ApplicationManager.getApplication().invokeLater(() -> {
+                LOG.info("Startup took: " + ManagementFactory.getRuntimeMXBean().getUptime() + " ms");
+              }))
+        );
+      }
     }
   }
 
@@ -554,5 +554,20 @@ public final class LightEditServiceImpl implements LightEditService,
   public boolean isPreferProjectMode() {
     return myConfiguration.preferredMode != null &&
            LightEditConfiguration.PreferredMode.Project.equals(myConfiguration.preferredMode);
+  }
+
+  @Override
+  public boolean isLightEditEnabled() {
+    return LightEditUtil.isLightEditEnabled();
+  }
+
+  @Override
+  public @Nullable Project openFile(@NotNull Path path, boolean suggestSwitchToProject) {
+    return LightEditUtil.openFile(path, suggestSwitchToProject);
+  }
+
+  @Override
+  public boolean isForceOpenInLightEditMode() {
+    return LightEditUtil.isForceOpenInLightEditMode();
   }
 }

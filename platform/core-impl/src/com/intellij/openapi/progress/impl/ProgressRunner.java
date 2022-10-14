@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.progress.impl;
 
 import com.intellij.codeWithMe.ClientId;
@@ -16,6 +16,7 @@ import com.intellij.openapi.wm.ex.ProgressIndicatorEx;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.ui.EDT;
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -59,8 +60,10 @@ public final class ProgressRunner<R> {
     FJ
   }
 
+  private static final Logger LOG = Logger.getInstance(ProgressRunner.class);
+
   @NotNull
-  private final Function<@NotNull ? super ProgressIndicator, ? extends R> myComputation;
+  private final Function<? super @NotNull ProgressIndicator, ? extends R> myComputation;
 
   private final boolean isSync;
 
@@ -109,28 +112,30 @@ public final class ProgressRunner<R> {
    *
    * @param computation runnable to be executed under progress
    */
-  public ProgressRunner(@NotNull Function<@NotNull ? super ProgressIndicator, ? extends R> computation) {
+  public ProgressRunner(@NotNull Function<? super @NotNull ProgressIndicator, ? extends R> computation) {
     this(computation, false, false, ThreadToUse.POOLED, CompletableFuture.completedFuture(new EmptyProgressIndicator()));
   }
 
-  private ProgressRunner(@NotNull Function<@NotNull ? super ProgressIndicator, ? extends R> computation,
+  private ProgressRunner(@NotNull Function<? super @NotNull ProgressIndicator, ? extends R> computation,
                          boolean sync,
                          boolean modal,
-                         @NotNull ThreadToUse use,
+                         @NotNull ThreadToUse threadToUse,
                          @NotNull CompletableFuture<? extends @NotNull ProgressIndicator> progressIndicatorFuture) {
     myComputation = ClientId.decorateFunction(computation);
     isSync = sync;
     isModal = modal;
-    myThreadToUse = use;
+    myThreadToUse = threadToUse;
     myProgressIndicatorFuture = progressIndicatorFuture;
   }
 
   @NotNull
+  @Contract(pure = true) // to avoid abandoning the result
   public ProgressRunner<R> sync() {
     return isSync ? this : new ProgressRunner<>(myComputation, true, isModal, myThreadToUse, myProgressIndicatorFuture);
   }
 
   @NotNull
+  @Contract(pure = true) // to avoid abandoning the result
   public ProgressRunner<R> modal() {
     return isModal ? this : new ProgressRunner<>(myComputation, isSync, true, myThreadToUse, myProgressIndicatorFuture);
   }
@@ -141,6 +146,7 @@ public final class ProgressRunner<R> {
    * @param thread thread to execute computation
    */
   @NotNull
+  @Contract(pure = true) // to avoid abandoning the result
   public ProgressRunner<R> onThread(@NotNull ThreadToUse thread) {
     return thread == myThreadToUse ? this : new ProgressRunner<>(myComputation, isSync, isModal, thread, myProgressIndicatorFuture);
   }
@@ -151,6 +157,7 @@ public final class ProgressRunner<R> {
    * @param progressIndicator progress indicator instance
    */
   @NotNull
+  @Contract(pure = true) // to avoid abandoning the result
   public ProgressRunner<R> withProgress(@NotNull ProgressIndicator progressIndicator) {
     ProgressIndicator myIndicator;
     try {
@@ -159,7 +166,9 @@ public final class ProgressRunner<R> {
     catch (InterruptedException | ExecutionException e) {
       myIndicator = null;
     }
-    return progressIndicator.equals(myIndicator) ? this : new ProgressRunner<>(myComputation, isSync, isModal, myThreadToUse, CompletableFuture.completedFuture(progressIndicator));
+    return progressIndicator.equals(myIndicator)
+           ? this
+           : new ProgressRunner<>(myComputation, isSync, isModal, myThreadToUse, CompletableFuture.completedFuture(progressIndicator));
   }
 
   /**
@@ -169,6 +178,7 @@ public final class ProgressRunner<R> {
    * @param progressIndicatorFuture future with progress indicator
    */
   @NotNull
+  @Contract(pure = true) // to avoid abandoning the result
   public ProgressRunner<R> withProgress(@NotNull CompletableFuture<? extends @NotNull ProgressIndicator> progressIndicatorFuture) {
     return myProgressIndicatorFuture == progressIndicatorFuture ? this : new ProgressRunner<>(myComputation, isSync, isModal, myThreadToUse, progressIndicatorFuture);
   }
@@ -235,7 +245,6 @@ public final class ProgressRunner<R> {
       catch (Throwable e) {
         throw new RuntimeException("Can't get progress", e);
       }
-      //noinspection ConstantConditions
       if (progressIndicator == null) {
         throw new IllegalStateException("Expected not-null progress indicator but got null from "+myProgressIndicatorFuture);
       }
@@ -263,6 +272,15 @@ public final class ProgressRunner<R> {
 
     return resultFuture.handle((result, e) -> {
       Throwable throwable = unwrap(e);
+      if (LOG.isDebugEnabled()) {
+        if (throwable != null) {
+          LOG.debug("ProgressRunner: task completed with throwable", throwable);
+        }
+
+        if (isCanceled(progressFuture)) {
+          LOG.debug("ProgressRunner: task cancelled");
+        }
+      }
       return new ProgressResult<>(result, throwable instanceof ProcessCanceledException || isCanceled(progressFuture), throwable);
     });
   }
@@ -314,7 +332,8 @@ public final class ProgressRunner<R> {
           Logger.getInstance(ProgressRunner.class).warn("Can't go modal without BlockingProgressIndicator");
           modalityEntered.up();
         }
-      }).exceptionally(throwable -> {
+      });
+      blockingRunFuture.exceptionally(throwable -> {
         taskFuture.completeExceptionally(throwable);
         return null;
       });
@@ -327,11 +346,13 @@ public final class ProgressRunner<R> {
     }
 
     if (isSync) {
-      try {
-        resultFuture.get();
-      }
-      catch (Throwable ignore) {
-        // ignore possible exceptions, as they will be handled by the subsequent get/whenComplete calls.
+      // At first here was a blocking resultFuture.get() call,
+      // which lead to deadlocks when `BlockingProgressIndicator.startBlocking` already exited,
+      // and nobody was dispatching EDT events because the current thread (EDT) was blocked on this future,
+      // so instead of blocking, we assert that the future should be done at this point,
+      // otherwise, `startBlocking` should continue pumping the events to give cancelled tasks a chance to complete.
+      if (!resultFuture.isDone()) {
+        throw new IllegalStateException("Result future must be done at this point");
       }
     }
     return resultFuture;

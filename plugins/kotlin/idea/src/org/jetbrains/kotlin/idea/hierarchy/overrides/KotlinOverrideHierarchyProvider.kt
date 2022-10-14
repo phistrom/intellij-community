@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.hierarchy.overrides
 
@@ -25,7 +25,7 @@ class KotlinOverrideHierarchyProvider : HierarchyProvider {
         KotlinOverrideHierarchyBrowser(target.project, target)
 
     override fun browserActivated(hierarchyBrowser: HierarchyBrowser) {
-        (hierarchyBrowser as HierarchyBrowserBaseEx).changeView(MethodHierarchyBrowserBase.METHOD_TYPE)
+        (hierarchyBrowser as HierarchyBrowserBaseEx).changeView(MethodHierarchyBrowserBase.getMethodType())
     }
 
     private fun getOverrideHierarchyElement(element: PsiElement?): PsiElement? =

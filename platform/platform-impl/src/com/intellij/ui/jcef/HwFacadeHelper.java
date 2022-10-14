@@ -3,6 +3,7 @@ package com.intellij.ui.jcef;
 
 import com.intellij.jdkEx.JdkEx;
 import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.util.FieldAccessor;
 import org.cef.CefApp;
 import org.cef.CefClient;
@@ -36,7 +37,7 @@ public class HwFacadeHelper {
   @SuppressWarnings("UseJBColor")
   public static final Color TRANSPARENT_COLOR = new Color(1, 1, 1, 0);
 
-  private final JComponent myTarget;
+  private final @NotNull JComponent myTarget;
   private JWindow myHwFacade;
   private ComponentAdapter myOwnerListener;
   private ComponentAdapter myTargetListener;
@@ -44,7 +45,7 @@ public class HwFacadeHelper {
 
   @NotNull Consumer<? super JBCefBrowser> myOnBrowserMoveResizeCallback =
     browser -> {
-      if (!isActive()) activateIfNeeded(Collections.singletonList(browser.getCefBrowser()));
+      if (!browser.isOffScreenRendering()) activateIfNeeded(Collections.singletonList(browser.getCefBrowser()));
     };
 
   // [tav] todo: export visible browser bounds from jcef instead
@@ -70,7 +71,7 @@ public class HwFacadeHelper {
       Set<CefClient> clients = clientsField.get(ourCefApp);
       if (clients == null) return list;
       for (CefClient client : clients) {
-        HashMap<?, CefBrowser> browsers = browsersField.get(client);
+        Map<?, CefBrowser> browsers = browsersField.get(client);
         if (browsers == null) return list;
         for (CefBrowser browser : browsers.values()) {
           JBCefBrowserBase jbCefBrowser = JBCefBrowserBase.getJBCefBrowser(browser);
@@ -83,12 +84,36 @@ public class HwFacadeHelper {
     }
   }
 
-  public HwFacadeHelper(JComponent target) {
+  public static HwFacadeHelper create(@NotNull JComponent target) {
+    return JBCefApp.isSupported() ?
+      new HwFacadeHelper(target) :
+      // do not provoke any JBCef* class loading
+      new HwFacadeHelper(target) {
+        @Override
+        public void addNotify() {
+        }
+        @Override
+        public void show() {
+        }
+        @Override
+        public void removeNotify() {
+        }
+        @Override
+        public void hide() {
+        }
+        @Override
+        public void paint(@NotNull Graphics g, @NotNull Consumer<? super Graphics> targetPaint) {
+          targetPaint.accept(g);
+        }
+      };
+  }
+
+  private HwFacadeHelper(@NotNull JComponent target) {
     myTarget = target;
   }
 
   private boolean isActive() {
-    return myHwFacade != null;
+    return Registry.is("ide.browser.jcef.hwfacade.enabled") && myHwFacade != null;
   }
 
   private static boolean isCefAppActive() {
@@ -126,7 +151,9 @@ public class HwFacadeHelper {
   }
 
   private void activateIfNeeded(@NotNull List<CefBrowser> browsers) {
-    if (SystemInfo.isLinux || !isCefAppActive() || !myTarget.isShowing()) return;
+    if (isActive() || !Registry.is("ide.browser.jcef.hwfacade.enabled") || !isCefAppActive() || !myTarget.isShowing() || SystemInfo.isLinux) {
+      return;
+    }
 
     Rectangle targetBounds = new Rectangle(myTarget.getLocationOnScreen(), myTarget.getSize());
     boolean overlaps = false;
@@ -167,7 +194,7 @@ public class HwFacadeHelper {
       JdkEx.setIgnoreMouseEvents(myHwFacade, true);
       myHwFacade.setBounds(targetBounds);
       myHwFacade.setFocusableWindowState(false);
-      myHwFacade.setBackground(TRANSPARENT_COLOR);
+      JdkEx.setTransparent(myHwFacade);
       myHwFacade.setVisible(true);
     }
   }
@@ -211,7 +238,7 @@ public class HwFacadeHelper {
     }
   }
 
-  public void paint(Graphics g, Consumer<? super Graphics> targetPaint) {
+  public void paint(@NotNull Graphics g, @NotNull Consumer<? super Graphics> targetPaint) {
     if (isActive()) {
       Dimension size = myTarget.getSize();
       if (myBackBuffer == null || myBackBuffer.getWidth() != size.width || myBackBuffer.getHeight() != size.height) {

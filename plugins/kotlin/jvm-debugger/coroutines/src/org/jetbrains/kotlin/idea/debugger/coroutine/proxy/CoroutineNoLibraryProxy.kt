@@ -1,26 +1,29 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.debugger.coroutine.proxy
 
 import com.intellij.openapi.util.registry.Registry
 import com.sun.jdi.Field
 import com.sun.jdi.ObjectReference
-import org.jetbrains.kotlin.idea.debugger.coroutine.data.CoroutineInfoData
+import org.jetbrains.kotlin.idea.debugger.coroutine.data.CompleteCoroutineInfoData
 import org.jetbrains.kotlin.idea.debugger.coroutine.proxy.mirror.CancellableContinuationImpl
 import org.jetbrains.kotlin.idea.debugger.coroutine.util.findCancellableContinuationImplReferenceType
 import org.jetbrains.kotlin.idea.debugger.coroutine.util.findCoroutineMetadataType
 import org.jetbrains.kotlin.idea.debugger.coroutine.util.findDispatchedContinuationReferenceType
 import org.jetbrains.kotlin.idea.debugger.coroutine.util.logger
-import org.jetbrains.kotlin.idea.debugger.evaluate.DefaultExecutionContext
+import org.jetbrains.kotlin.idea.debugger.base.util.evaluate.DefaultExecutionContext
 
 class CoroutineNoLibraryProxy(private val executionContext: DefaultExecutionContext) : CoroutineInfoProvider {
-    private val log by logger
+    companion object {
+        private val log by logger
+    }
+
     private val debugMetadataKtType = executionContext.findCoroutineMetadataType()
     private val holder = ContinuationHolder.instance(executionContext)
 
-    override fun dumpCoroutinesInfo(): List<CoroutineInfoData> {
+    override fun dumpCoroutinesInfo(): List<CompleteCoroutineInfoData> {
         val vm = executionContext.vm
-        val resultList = mutableListOf<CoroutineInfoData>()
+        val resultList = mutableListOf<CompleteCoroutineInfoData>()
         if (vm.virtualMachine.canGetInstanceInfo()) {
             when (coroutineSwitch()) {
                 "DISPATCHED_CONTINUATION" -> dispatchedContinuation(resultList)
@@ -32,7 +35,7 @@ class CoroutineNoLibraryProxy(private val executionContext: DefaultExecutionCont
         return resultList
     }
 
-    private fun cancellableContinuation(resultList: MutableList<CoroutineInfoData>): Boolean {
+    private fun cancellableContinuation(resultList: MutableList<CompleteCoroutineInfoData>): Boolean {
         val dcClassTypeList = executionContext.findCancellableContinuationImplReferenceType()
         if (dcClassTypeList?.size == 1) {
             val dcClassType = dcClassTypeList.first()
@@ -50,13 +53,13 @@ class CoroutineNoLibraryProxy(private val executionContext: DefaultExecutionCont
     private fun extractCancellableContinuation(
         dispatchedContinuation: ObjectReference,
         ccMirrorProvider: CancellableContinuationImpl
-    ): CoroutineInfoData? {
+    ): CompleteCoroutineInfoData? {
         val mirror = ccMirrorProvider.mirror(dispatchedContinuation, executionContext) ?: return null
         val continuation = mirror.delegate?.continuation ?: return null
         return holder.extractCoroutineInfoData(continuation)
     }
 
-    private fun dispatchedContinuation(resultList: MutableList<CoroutineInfoData>): Boolean {
+    private fun dispatchedContinuation(resultList: MutableList<CompleteCoroutineInfoData>): Boolean {
         val dcClassTypeList = executionContext.findDispatchedContinuationReferenceType()
         if (dcClassTypeList?.size == 1) {
             val dcClassType = dcClassTypeList.first()
@@ -70,7 +73,7 @@ class CoroutineNoLibraryProxy(private val executionContext: DefaultExecutionCont
         return false
     }
 
-    private fun extractDispatchedContinuation(dispatchedContinuation: ObjectReference, continuation: Field): CoroutineInfoData? {
+    private fun extractDispatchedContinuation(dispatchedContinuation: ObjectReference, continuation: Field): CompleteCoroutineInfoData? {
         debugMetadataKtType ?: return null
         val initialContinuation = dispatchedContinuation.getValue(continuation) as ObjectReference
         return holder.extractCoroutineInfoData(initialContinuation)

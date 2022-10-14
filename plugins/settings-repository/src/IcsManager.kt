@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.settingsRepository
 
 import com.intellij.configurationStore.StreamProvider
@@ -131,10 +131,6 @@ class IcsManager @JvmOverloads constructor(dir: Path,
       }
     })
     messageBusConnection.subscribe(ProjectManager.TOPIC, object : ProjectManagerListener {
-      override fun projectOpened(project: Project) {
-        autoSyncManager.registerListeners(project)
-      }
-
       override fun projectClosed(project: Project) {
         if (!ApplicationManagerEx.getApplicationEx().isExitInProgress) {
           autoSyncManager.autoSync()
@@ -168,17 +164,18 @@ class IcsManager @JvmOverloads constructor(dir: Path,
       return true
     }
 
-    override fun write(fileSpec: String, content: ByteArray, size: Int, roamingType: RoamingType) {
+    override fun write(fileSpec: String, content: ByteArray, roamingType: RoamingType) {
       if (syncManager.writeAndDeleteProhibited) {
         throw IllegalStateException("Save is prohibited now")
       }
 
-      if (doSave(fileSpec, content, size, roamingType)) {
+      if (doSave(fileSpec, content, roamingType)) {
         scheduleCommit()
       }
     }
 
-    fun doSave(fileSpec: String, content: ByteArray, size: Int, roamingType: RoamingType): Boolean = repositoryManager.write(toRepositoryPath(fileSpec, roamingType), content, size)
+    fun doSave(fileSpec: String, content: ByteArray, roamingType: RoamingType): Boolean =
+      repositoryManager.write(toRepositoryPath(fileSpec, roamingType), content)
 
     override fun read(fileSpec: String, roamingType: RoamingType, consumer: (InputStream?) -> Unit): Boolean {
       if (!isRepositoryActive) {

@@ -1,8 +1,9 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.java.propertyBased;
 
 import com.intellij.codeInsight.intention.impl.SealClassAction;
 import com.intellij.codeInsight.intention.impl.ShowIntentionActionsHandler;
+import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
@@ -34,9 +35,9 @@ public class MakeClassSealedPropertyTest extends BaseUnivocityTest {
   @Override
   public void setUp() throws Exception {
     super.setUp();
-    WriteAction.run(() -> LanguageLevelProjectExtension.getInstance(myProject).setLanguageLevel(LanguageLevel.JDK_15_PREVIEW));
+    WriteAction.run(() -> LanguageLevelProjectExtension.getInstance(myProject).setLanguageLevel(LanguageLevel.JDK_17));
     ((PsiDocumentManagerImpl)PsiDocumentManager.getInstance(myProject)).disableBackgroundCommit(getTestRootDisposable());
-    MadTestingUtil.enableAllInspections(myProject);
+    MadTestingUtil.enableAllInspections(myProject, JavaLanguage.INSTANCE);
   }
 
   public void testMakeClassSealed() {

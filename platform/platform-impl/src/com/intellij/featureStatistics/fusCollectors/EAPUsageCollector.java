@@ -1,10 +1,11 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.featureStatistics.fusCollectors;
 
-import com.intellij.idea.Main;
+import com.intellij.idea.AppMode;
 import com.intellij.internal.statistic.beans.MetricEvent;
 import com.intellij.internal.statistic.eventLog.EventLogGroup;
 import com.intellij.internal.statistic.eventLog.events.*;
+import com.intellij.internal.statistic.service.fus.collectors.AllowedDuringStartupCollector;
 import com.intellij.internal.statistic.service.fus.collectors.ApplicationUsagesCollector;
 import com.intellij.openapi.application.ex.ApplicationInfoEx;
 import com.intellij.openapi.util.text.StringUtil;
@@ -16,7 +17,7 @@ import java.util.*;
 /**
  * @author Eugene Zhuravlev
  */
-public class EAPUsageCollector extends ApplicationUsagesCollector {
+public class EAPUsageCollector extends ApplicationUsagesCollector implements AllowedDuringStartupCollector {
   private static final EventLogGroup GROUP = new EventLogGroup("user.advanced.info", 4);
   private static final EventId1<BuildType> BUILD = GROUP.registerEvent("build", EventFields.Enum("value", BuildType.class));
   private static final EnumEventField<LicenceType> LICENSE_VALUE = EventFields.Enum("value", LicenceType.class);
@@ -38,7 +39,7 @@ public class EAPUsageCollector extends ApplicationUsagesCollector {
   @NotNull
   private static Set<MetricEvent> collectMetrics() {
     try {
-      if (!Main.isHeadless()) {
+      if (!AppMode.isHeadless()) {
         final Set<MetricEvent> result = new HashSet<>();
         if (ApplicationInfoEx.getInstanceEx().isEAP()) {
           result.add(BUILD.metric(BuildType.eap));

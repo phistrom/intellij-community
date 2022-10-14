@@ -45,7 +45,7 @@ class PyLiteralType private constructor(cls: PyClass, val expression: PyExpressi
      * Tries to construct literal type or collection of literal types for a value that could be downcasted to `typing.Literal[...] type
      * or its collection.
      */
-    fun fromLiteralValue(expression: PyExpression, context: TypeEvalContext): PyType? {
+    private fun fromLiteralValue(expression: PyExpression, context: TypeEvalContext): PyType? {
       val value =
         when (expression) {
           is PyKeywordArgument -> expression.valueExpression
@@ -92,11 +92,16 @@ class PyLiteralType private constructor(cls: PyClass, val expression: PyExpressi
      * then tries to infer `typing.Literal[...]` for [expression],
      * otherwise returns type inferred by [context].
      */
-    fun promoteToLiteral(expression: PyExpression, expected: PyType?, context: TypeEvalContext): PyType? {
+    fun promoteToLiteral(expression: PyExpression,
+                         expected: PyType?,
+                         context: TypeEvalContext,
+                         substitutions: PyTypeChecker.GenericSubstitutions?): PyType? {
       if (expected is PyTypedDictType) {
         return null
       }
-      if (PyTypeUtil.toStream(if (expected is PyGenericType) expected.bound else expected).any { containsLiteral(it) }) {
+      val substitution = substitutions?.let { PyTypeChecker.substitute(expected, it, context) }
+                         ?: if (expected is PyGenericType) expected.bound else expected
+      if (containsLiteral(substitution)) {
         return fromLiteralValue(expression, context)
       }
       return null

@@ -1,10 +1,9 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.refactoring.move.moveFilesOrDirectories
 
 import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.actionSystem.LangDataKeys
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
 import com.intellij.psi.*
@@ -13,10 +12,10 @@ import com.intellij.refactoring.move.MoveHandler
 import com.intellij.refactoring.move.moveFilesOrDirectories.MoveFilesOrDirectoriesHandler
 import com.intellij.refactoring.move.moveFilesOrDirectories.MoveFilesOrDirectoriesUtil
 import org.jetbrains.kotlin.asJava.classes.KtLightClassForFacade
-import org.jetbrains.kotlin.idea.refactoring.move.logFusForMoveRefactoring
 import org.jetbrains.kotlin.idea.refactoring.move.moveDeclarations.ui.KotlinAwareMoveFilesOrDirectoriesDialog
 import org.jetbrains.kotlin.idea.refactoring.move.moveDeclarations.ui.KotlinAwareMoveFilesOrDirectoriesModel
 import org.jetbrains.kotlin.idea.util.application.executeCommand
+import org.jetbrains.kotlin.idea.util.application.isUnitTestMode
 import org.jetbrains.kotlin.psi.KtClassOrObject
 import org.jetbrains.kotlin.psi.KtFile
 
@@ -58,7 +57,7 @@ class KotlinMoveFilesOrDirectoriesHandler : MoveFilesOrDirectoriesHandler() {
 
         val initialTargetDirectory = MoveFilesOrDirectoriesUtil.getInitialTargetDirectory(targetDirectory, elements)
 
-        val isTestUnitMode = ApplicationManager.getApplication().isUnitTestMode
+        val isTestUnitMode = isUnitTestMode()
         if (isTestUnitMode && initialTargetDirectory !== null) {
             KotlinAwareMoveFilesOrDirectoriesModel(
                 project,
@@ -70,17 +69,7 @@ class KotlinMoveFilesOrDirectoriesHandler : MoveFilesOrDirectoriesHandler() {
             ).run {
                 project.executeCommand(MoveHandler.getRefactoringName()) {
                     with(computeModelResult()) {
-                        if (!isTestUnitMode) {
-                            logFusForMoveRefactoring(
-                                elementsCount,
-                                entityToMove,
-                                destination,
-                                true,
-                                processor
-                            )
-                        } else {
-                            processor.run()
-                        }
+                        processor.run()
                     }
                 }
             }

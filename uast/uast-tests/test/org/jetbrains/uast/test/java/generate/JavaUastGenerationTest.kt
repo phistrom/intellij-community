@@ -2,7 +2,9 @@
 package org.jetbrains.uast.test.java.generate
 
 import com.intellij.lang.java.JavaLanguage
+import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.psi.*
+import com.intellij.psi.util.parentOfType
 import junit.framework.TestCase
 import org.jetbrains.uast.*
 import org.jetbrains.uast.generate.UParameterInfo
@@ -353,6 +355,14 @@ class JavaUastGenerationTest : AbstractJavaUastLightTest() {
     TestCase.assertEquals("a.<Integer>method()", callExpression.sourcePsi?.text)
   }
 
+  fun `test callable reference generation with receiver`() {
+    val receiver = uastElementFactory.createQualifiedReference("java.util.Arrays", myFixture.file)
+                   ?: fail("failed to create receiver")
+    val methodReference = uastElementFactory.createCallableReferenceExpression(receiver, "asList", myFixture.file)
+                          ?: fail("failed to create method reference")
+    TestCase.assertEquals(methodReference.sourcePsi?.text, "java.util.Arrays::asList")
+  }
+
   fun `test removing unnecessary type parameters while replace`() {
     val newClass = myFixture.addClass("""
       class A {
@@ -398,5 +408,150 @@ class JavaUastGenerationTest : AbstractJavaUastLightTest() {
   fun `test qualified reference`() {
     val reference = uastElementFactory.createQualifiedReference("java.util.List", myFixture.file)
     TestCase.assertEquals("java.util.List", reference?.sourcePsi?.text)
+  }
+
+  fun `test create call expression with saved whitespace after`() {
+    myFixture.configureByText("MyFile.java", """
+      class A {
+        void a() {
+          a
+            .b()
+            .c<caret>()
+            .d()
+        }
+      }
+    """.trimIndent())
+
+    val receiver = myFixture.file.findElementAt(myFixture.caretOffset)?.parentOfType<PsiCallExpression>().toUElementOfType<UCallExpression>()
+                   ?: fail("Cannot find call expression")
+
+    val callExpression = uastElementFactory.createCallExpression(
+      receiver,
+      "e",
+      listOf(),
+      null,
+      UastCallKind.METHOD_CALL
+    ) ?: fail("Cannot create call expression")
+
+    TestCase.assertEquals("""
+      a
+            .b()
+            .c()
+            .e()
+    """.trimIndent(), callExpression.sourcePsi?.text)
+  }
+
+  fun `test create call expression with saved whitespace and dot after`() {
+    myFixture.configureByText("MyFile.java", """
+      class A {
+        void a() {
+          a.
+            b().
+            c<caret>().
+            d()
+        }
+      }
+    """.trimIndent())
+
+    val receiver = myFixture.file.findElementAt(myFixture.caretOffset)?.parentOfType<PsiCallExpression>().toUElementOfType<UCallExpression>()
+                   ?: fail("Cannot find call expression")
+
+    val callExpression = uastElementFactory.createCallExpression(
+      receiver,
+      "e",
+      listOf(),
+      null,
+      UastCallKind.METHOD_CALL
+    ) ?: fail("Cannot create call expression")
+
+    TestCase.assertEquals("""
+      a.
+            b().
+            c().
+            e()
+    """.trimIndent(), callExpression.sourcePsi?.text)
+  }
+
+  fun `test create call expression with saved whitespace and dot after with receiver from expression with field`() {
+    myFixture.configureByText("MyFile.java", """
+      class A {
+        void a() {
+          a.
+            b().
+            c<caret>().
+            d
+        }
+      }
+    """.trimIndent())
+
+    val receiver = myFixture.file.findElementAt(myFixture.caretOffset)?.parentOfType<PsiCallExpression>().toUElementOfType<UCallExpression>()
+                   ?: fail("Cannot find call expression")
+
+    val callExpression = uastElementFactory.createCallExpression(
+      receiver,
+      "e",
+      listOf(),
+      null,
+      UastCallKind.METHOD_CALL
+    ) ?: fail("Cannot create call expression")
+
+    TestCase.assertEquals("""
+      a.
+            b().
+            c().
+            e()
+    """.trimIndent(), callExpression.sourcePsi?.text)
+  }
+
+  fun `test initialize field`() {
+    val psiFile = myFixture.configureByText("MyClass.java", """
+      class My<caret>Class {
+        String field;
+        void method(String value) {
+        }
+      }
+    """.trimIndent())
+
+    val uClass =
+      myFixture.file.findElementAt(myFixture.caretOffset)?.parentOfType<PsiClass>().toUElementOfType<UClass>()
+      ?: fail("Cannot find UClass")
+    val uField = uClass.fields.firstOrNull() ?: fail("Cannot find field")
+    val uParameter = uClass.methods.find { it.name == "method"}?.uastParameters?.firstOrNull() ?: fail("Cannot find parameter")
+
+    WriteCommandAction.runWriteCommandAction(project) { generatePlugin.initializeField(uField, uParameter) }
+    TestCase.assertEquals("""
+      class MyClass {
+        String field;
+        void method(String value) {
+            field = value;
+        }
+      }
+    """.trimIndent(), psiFile.text)
+  }
+
+  fun `test initialize field with same name`() {
+    val psiFile = myFixture.configureByText("MyClass.java", """
+      class My<caret>Class {
+        String field;
+        void method(String field) {
+        }
+      }
+    """.trimIndent())
+
+    val uClass =
+      myFixture.file.findElementAt(myFixture.caretOffset)?.parentOfType<PsiClass>().toUElementOfType<UClass>()
+      ?: fail("Cannot find UClass")
+    val uField = uClass.fields.firstOrNull() ?: fail("Cannot find field")
+    val uParameter = uClass.methods.find { it.name == "method"}?.uastParameters?.firstOrNull() ?: fail("Cannot find parameter")
+
+    WriteCommandAction.runWriteCommandAction(project) { generatePlugin.initializeField(uField, uParameter) }
+    TestCase.assertEquals("""
+      class MyClass {
+        String field;
+        void method(String field) {
+            this.field = field;
+        }
+      }
+    """.trimIndent(), psiFile.text)
   }
 }

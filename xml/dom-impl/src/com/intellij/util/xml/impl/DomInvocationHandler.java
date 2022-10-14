@@ -20,7 +20,6 @@ import com.intellij.psi.xml.XmlAttribute;
 import com.intellij.psi.xml.XmlElement;
 import com.intellij.psi.xml.XmlFile;
 import com.intellij.psi.xml.XmlTag;
-import com.intellij.testFramework.FlakyTestLogger;
 import com.intellij.util.*;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xml.*;
@@ -45,9 +44,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * @author peter
- */
 public abstract class DomInvocationHandler extends UserDataHolderBase implements InvocationHandler, DomElement {
   private static final Logger LOG = Logger.getInstance(DomInvocationHandler.class);
   public static final Method ACCEPT_METHOD = ReflectionUtil.getMethod(DomElement.class, "accept", DomElementVisitor.class);
@@ -656,17 +652,7 @@ public abstract class DomInvocationHandler extends UserDataHolderBase implements
   @Nullable
   public final Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
     try {
-      Invocation invocation = findInvocation(method);
-      Object r = invocation.invoke(this, args);
-      FlakyTestLogger log = FlakyTestLogger.get();
-      if (log != null && method.getName().equals("exists")) {
-        log.append("Invocation: for '" + method + "' is '" + invocation + " of " + invocation.getClass() + "' handler = '" + this +
-                   " of " + this.getClass() + "' r = " + r + " of " + ObjectUtils.doIfNotNull(r, Object::getClass));
-        if (this instanceof IndexedElementInvocationHandler) {
-          log.append(((IndexedElementInvocationHandler)this).created);
-        }
-      }
-      return r;
+      return findInvocation(method).invoke(this, args);
     }
     catch (InvocationTargetException ex) {
       throw ex.getTargetException();

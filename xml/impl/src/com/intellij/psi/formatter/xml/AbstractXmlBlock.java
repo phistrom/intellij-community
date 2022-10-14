@@ -24,7 +24,6 @@ import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.tree.TokenSet;
 import com.intellij.psi.xml.*;
 import com.intellij.util.containers.JBIterable;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -291,20 +290,8 @@ public abstract class AbstractXmlBlock extends AbstractBlock {
     }
   }
 
-  /** @deprecated use and override {@code createSimpleChild } overload with {@code range } provided */
-  @SuppressWarnings("DeprecatedIsStillUsed")
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2020.3")
-  protected XmlBlock createSimpleChild(final ASTNode child, final Indent indent, final Wrap wrap, final Alignment alignment) {
-    return null;
-  }
-
   protected @NotNull XmlBlock createSimpleChild(@NotNull ASTNode child, @Nullable Indent indent,
                                                 @Nullable Wrap wrap, @Nullable Alignment alignment, @Nullable TextRange range) {
-    XmlBlock blockFromDeprecatedCall = createSimpleChild(child, indent, wrap, alignment);
-    if (blockFromDeprecatedCall != null) {
-      return blockFromDeprecatedCall;
-    }
     return new XmlBlock(child, wrap, alignment, myXmlFormattingPolicy, indent, range, isPreserveSpace());
   }
 

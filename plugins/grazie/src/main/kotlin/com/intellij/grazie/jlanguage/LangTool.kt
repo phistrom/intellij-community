@@ -3,46 +3,79 @@ package com.intellij.grazie.jlanguage
 
 import com.intellij.grazie.GrazieConfig
 import com.intellij.grazie.GrazieDynamic
+import com.intellij.grazie.detection.LangDetector
 import com.intellij.grazie.ide.msg.GrazieStateLifecycle
 import com.intellij.grazie.jlanguage.broker.GrazieDynamicDataBroker
 import com.intellij.grazie.jlanguage.filters.UppercaseMatchFilter
+import com.intellij.grazie.jlanguage.hunspell.LuceneHunspellDictionary
 import com.intellij.grazie.utils.text
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.PreloadingActivity
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.util.containers.ContainerUtil
+import kotlinx.coroutines.*
 import org.apache.commons.text.similarity.LevenshteinDistance
 import org.languagetool.JLanguageTool
 import org.languagetool.ResultCache
 import org.languagetool.Tag
 import org.languagetool.rules.CategoryId
 import org.languagetool.rules.IncorrectExample
-import java.net.Authenticator
+import org.languagetool.rules.Rule
+import org.languagetool.rules.patterns.AbstractPatternRule
+import org.languagetool.rules.patterns.PatternToken
+import org.languagetool.rules.spelling.hunspell.Hunspell
+import java.util.*
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
-internal object LangTool : GrazieStateLifecycle {
-  private val langs: MutableMap<Lang, JLanguageTool> = ContainerUtil.createConcurrentSoftValueMap()
-  private val rulesEnabledByDefault: MutableMap<Lang, Set<String>> = ConcurrentHashMap()
+object LangTool : GrazieStateLifecycle {
+  private val langs: MutableMap<Lang, JLanguageTool> = Collections.synchronizedMap(ContainerUtil.createSoftValueMap())
+  private val rulesEnabledByDefault = ConcurrentHashMap<Lang, Set<String>>()
+  private val isInitialized = AtomicBoolean()
 
   init {
+    JLanguageTool.useCustomPasswordAuthenticator(false)
     JLanguageTool.setDataBroker(GrazieDynamicDataBroker)
     JLanguageTool.setClassBrokerBroker { qualifiedName ->
       GrazieDynamic.loadClass(qualifiedName) ?: throw ClassNotFoundException(qualifiedName)
     }
+
+    Hunspell.setHunspellDictionaryFactory(::LuceneHunspellDictionary)
   }
 
   internal fun globalIdPrefix(lang: Lang): String = "LanguageTool." + lang.remote.iso.name + "."
 
-  /**
-   * @param state this should always be the current state in [GrazieConfig].
-   * It's a parameter for internal reasons, to avoid cyclic service initialization.
-   */
-  fun getTool(lang: Lang, state: GrazieConfig.State = GrazieConfig.get()): JLanguageTool {
-    return langs.computeIfAbsent(lang) { createTool(lang, state) }
+  @Suppress("UNUSED_PARAMETER", "DeprecatedCallableAddReplaceWith")
+  @Deprecated("use the other overload")
+  fun getTool(lang: Lang, state: GrazieConfig.State): JLanguageTool {
+    return getTool(lang)
   }
 
-  private fun createTool(lang: Lang, state: GrazieConfig.State): JLanguageTool {
+  fun getTool(lang: Lang): JLanguageTool {
+    // this is equivalent to computeIfAbsent, but allows multiple threads to create tools concurrently,
+    // so that threads can be interrupted (with checkCanceled on their own indicator) instead of waiting on a lock
+    while (true) {
+      var tool = langs[lang]
+      if (tool != null) return tool
+
+      val state = GrazieConfig.get()
+      tool = createTool(lang, state)
+      synchronized(langs) {
+        if (state === GrazieConfig.get()) {
+          val alreadyComputed = langs[lang]
+          if (alreadyComputed != null) return alreadyComputed
+
+          langs[lang] = tool
+          return tool
+        }
+      }
+    }
+  }
+
+  internal fun createTool(lang: Lang, state: GrazieConfig.State): JLanguageTool {
     val jLanguage = lang.jLanguage
     require(jLanguage != null) { "Trying to get LangTool for not available language" }
-    return JLanguageTool(jLanguage, null, ResultCache(1_000)).apply {
+    return JLanguageTool(jLanguage, null, ResultCache(10_000)).apply {
       setCheckCancelledCallback { ProgressManager.checkCanceled(); false }
       addMatchFilter(UppercaseMatchFilter())
 
@@ -95,15 +128,36 @@ internal object LangTool : GrazieStateLifecycle {
       }
 
       for (rule in allRules) {
+        ProgressManager.checkCanceled()
         rule.correctExamples = emptyList()
         rule.errorTriggeringExamples = emptyList()
         rule.incorrectExamples = removeVerySimilarExamples(rule.incorrectExamples)
+        if (Lang.shouldDisableChunker(jLanguage)) {
+          prepareForNoChunkTags(rule)
+        }
       }
 
-      //Fix problem with Authenticator installed by LT
       this.language.disambiguator
-      Authenticator.setDefault(null)
     }
+  }
+
+  private fun prepareForNoChunkTags(rule: Rule) {
+    @Suppress("TestOnlyProblems")
+    fun relaxChunkConditions(token: PatternToken, positive: Boolean) {
+      if (token.negation == positive && token.chunkTag != null) {
+        token.chunkTag = null
+      }
+
+      token.andGroup.forEach { relaxChunkConditions(it, positive) }
+      token.orGroup.forEach { relaxChunkConditions(it, positive) }
+      (token.exceptionList ?: emptyList()).forEach { relaxChunkConditions(it, !positive) }
+    }
+
+    if (rule is AbstractPatternRule) {
+      rule.patternTokens?.forEach { relaxChunkConditions(it, positive = true) }
+    }
+
+    rule.antiPatterns.forEach { it.patternTokens?.forEach { token -> relaxChunkConditions(token, positive = false) } }
   }
 
   private fun removeVerySimilarExamples(examples: List<IncorrectExample>): List<IncorrectExample> {
@@ -132,11 +186,6 @@ internal object LangTool : GrazieStateLifecycle {
     return activeIds.contains(ruleId)
   }
 
-  override fun init(state: GrazieConfig.State) {
-    // Creating LanguageTool for each language
-    state.availableLanguages.forEach { getTool(it, state) }
-  }
-
   override fun update(prevState: GrazieConfig.State, newState: GrazieConfig.State) {
     if (
       prevState.availableLanguages == newState.availableLanguages
@@ -147,6 +196,21 @@ internal object LangTool : GrazieStateLifecycle {
     langs.clear()
     rulesEnabledByDefault.clear()
 
-    init(newState)
+    if (isInitialized.compareAndSet(false, true)) {
+      ApplicationManager.getApplication().coroutineScope.launch { preloadLang() }
+    }
+  }
+
+  private fun preloadLang() {
+    LangDetector.getLanguage("Hello")
+    GrazieConfig.get().availableLanguages.forEach(::getTool)
+  }
+
+  internal class Preloader : PreloadingActivity() {
+    override suspend fun execute() {
+      if (isInitialized.compareAndSet(false, true)) {
+        preloadLang()
+      }
+    }
   }
 }

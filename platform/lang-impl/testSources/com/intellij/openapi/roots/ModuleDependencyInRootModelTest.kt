@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.roots
 
 import com.intellij.openapi.application.runReadAction
@@ -107,6 +107,29 @@ class ModuleDependencyInRootModelTest {
       assertThat(committedEntry.scope).isEqualTo(DependencyScope.RUNTIME)
       assertThat(committedEntry.module).isEqualTo(depModule)
     }
+  }
+
+  @Test
+  fun `add multiple dependencies at once`() {
+    val dep1 = projectModel.createModule("dep1")
+    val dep2 = projectModel.createModule("dep2")
+    val model = createModifiableModel(mainModule)
+    model.addModuleEntries(listOf(dep1, dep2), DependencyScope.RUNTIME, true)
+    fun checkEntry(entry: ModuleOrderEntry) {
+      assertThat(entry.isExported).isTrue
+      assertThat(entry.scope).isEqualTo(DependencyScope.RUNTIME)
+    }
+
+    val (entry1, entry2) = dropModuleSourceEntry(model, 2)
+    assertThat((entry1 as ModuleOrderEntry).module).isEqualTo(dep1)
+    checkEntry(entry1)
+    assertThat((entry2 as ModuleOrderEntry).module).isEqualTo(dep2)
+    checkEntry(entry2)
+    val (committedEntry1, committedEntry2) = dropModuleSourceEntry(commitModifiableRootModel(model), 2)
+    assertThat((committedEntry1 as ModuleOrderEntry).module).isEqualTo(dep1)
+    checkEntry(committedEntry1)
+    assertThat((committedEntry2 as ModuleOrderEntry).module).isEqualTo(dep2)
+    checkEntry(committedEntry2)
   }
 
   @Test
@@ -237,7 +260,7 @@ class ModuleDependencyInRootModelTest {
     val a = projectModel.createModule("a")
     val model = createModifiableModel(mainModule)
     model.addModuleOrderEntry(a)
-    val moduleModel = runReadAction { projectModel.moduleManager.modifiableModel }
+    val moduleModel = runReadAction { projectModel.moduleManager.getModifiableModel() }
     moduleModel.renameModule(a, "b")
     val entry = dropModuleSourceEntry(model, 1).single() as ModuleOrderEntry
     assertThat(entry.module).isEqualTo(a)
@@ -277,7 +300,7 @@ class ModuleDependencyInRootModelTest {
 
   @Test
   fun `add not yet committed module`() {
-    val moduleModel = runReadAction { projectModel.moduleManager.modifiableModel }
+    val moduleModel = runReadAction { projectModel.moduleManager.getModifiableModel() }
     val a = projectModel.createModule("a", moduleModel)
     run {
       val model = createModifiableModel(mainModule)
@@ -296,7 +319,7 @@ class ModuleDependencyInRootModelTest {
 
   @Test
   fun `add not yet committed module and do not commit it`() {
-    val moduleModel = runReadAction { projectModel.moduleManager.modifiableModel }
+    val moduleModel = runReadAction { projectModel.moduleManager.getModifiableModel() }
     val a = projectModel.createModule("a", moduleModel)
     run {
       val model = createModifiableModel(mainModule)
@@ -316,7 +339,7 @@ class ModuleDependencyInRootModelTest {
 
   @Test
   fun `add not yet committed module with configuration accessor`() {
-    val moduleModel = runReadAction { projectModel.moduleManager.modifiableModel }
+    val moduleModel = runReadAction { projectModel.moduleManager.getModifiableModel() }
     val a = projectModel.createModule("a", moduleModel)
     run {
       val model = createModifiableModel(mainModule, object : RootConfigurationAccessor() {

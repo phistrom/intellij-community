@@ -49,6 +49,8 @@ public interface IPopupChooserBuilder<T> {
 
   IPopupChooserBuilder<T> setNamerForFiltering(Function<? super T, String> namer);
 
+  IPopupChooserBuilder<T> setFilterAlwaysVisible(boolean state);
+
   IPopupChooserBuilder<T> setAutoPackHeightOnFiltering(boolean autoPackHeightOnFiltering);
 
   IPopupChooserBuilder<T> setModalContext(boolean modalContext);
@@ -72,6 +74,8 @@ public interface IPopupChooserBuilder<T> {
   IPopupChooserBuilder<T> setAdText(@PopupAdvertisement String ad);
 
   IPopupChooserBuilder<T> setAdText(@PopupAdvertisement String ad, int alignment);
+
+  IPopupChooserBuilder<T> setAdvertiser(@Nullable JComponent advertiser);
 
   IPopupChooserBuilder<T> setCancelOnWindowDeactivation(boolean cancelOnWindowDeactivation);
 

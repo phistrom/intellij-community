@@ -89,12 +89,14 @@ public class FontEditorPreview implements PreviewPanel{
     myTopPanel = new JPanel(new BorderLayout());
     myTopPanel.add(myEditor.getComponent(), BorderLayout.CENTER);
 
-    JLabel previewLabel = new JLabel(ApplicationBundle.message("settings.editor.font.preview.hint"));
-    previewLabel.setFont(JBUI.Fonts.smallFont());
-    previewLabel.setForeground(UIUtil.getContextHelpForeground());
-    previewLabel.setBorder(JBUI.Borders.empty(10, 15, 10, 0));
-    previewLabel.setBackground(myEditor.getBackgroundColor());
-    myTopPanel.add(previewLabel, BorderLayout.SOUTH);
+    if (editable) {
+      JLabel previewLabel = new JLabel(ApplicationBundle.message("settings.editor.font.preview.hint"));
+      previewLabel.setFont(JBUI.Fonts.smallFont());
+      previewLabel.setForeground(UIUtil.getContextHelpForeground());
+      previewLabel.setBorder(JBUI.Borders.empty(10, 15, 10, 0));
+      previewLabel.setBackground(myEditor.getBackgroundColor());
+      myTopPanel.add(previewLabel, BorderLayout.SOUTH);
+    }
     myTopPanel.setBackground(myEditor.getBackgroundColor());
     myTopPanel.setBorder(getBorder());
 
@@ -214,7 +216,7 @@ public class FontEditorPreview implements PreviewPanel{
 
   @Override
   public void disposeUIResources() {
-    if (myTextModel.isDefault()) {
+    if (myTextModel.isDefault() || myTextModel.getRawText().isEmpty()) {
       PropertiesComponent.getInstance().unsetValue(PREVIEW_TEXT_KEY);
     }
     else {
@@ -233,9 +235,14 @@ public class FontEditorPreview implements PreviewPanel{
   public static class RestorePreviewTextAction extends DumbAwareAction {
 
     @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
+    }
+
+    @Override
     public void update(@NotNull AnActionEvent e) {
       Editor editor = e.getData(CommonDataKeys.EDITOR);
-      PreviewTextModel textModel = ObjectUtils.doIfNotNull(editor, it->it.getUserData(TEXT_MODEL_KEY));
+      PreviewTextModel textModel = ObjectUtils.doIfNotNull(editor, it -> it.getUserData(TEXT_MODEL_KEY));
       e.getPresentation().setEnabledAndVisible(editor != null &&
                                                textModel != null &&
                                                !textModel.isDefault());
@@ -260,9 +267,14 @@ public class FontEditorPreview implements PreviewPanel{
   public static class ToggleBoldFontAction extends DumbAwareAction {
 
     @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
+    }
+
+    @Override
     public void update(@NotNull AnActionEvent e) {
       Editor editor = e.getData(CommonDataKeys.EDITOR);
-      PreviewTextModel textModel = ObjectUtils.doIfNotNull(editor, it->it.getUserData(TEXT_MODEL_KEY));
+      PreviewTextModel textModel = ObjectUtils.doIfNotNull(editor, it -> it.getUserData(TEXT_MODEL_KEY));
       e.getPresentation().setEnabledAndVisible(textModel != null &&
                                                editor.getSelectionModel().hasSelection());
     }

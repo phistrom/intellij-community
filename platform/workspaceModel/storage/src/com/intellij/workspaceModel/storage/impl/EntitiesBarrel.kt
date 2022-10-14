@@ -2,6 +2,7 @@
 package com.intellij.workspaceModel.storage.impl
 
 import com.intellij.openapi.diagnostic.thisLogger
+import com.intellij.workspaceModel.storage.GeneratedCodeCompatibilityChecker
 import com.intellij.workspaceModel.storage.PersistentEntityId
 import com.intellij.workspaceModel.storage.WorkspaceEntity
 import com.intellij.workspaceModel.storage.WorkspaceEntityWithPersistentId
@@ -27,21 +28,28 @@ internal class MutableEntitiesBarrel private constructor(
     return getMutableEntityFamily(id.clazz).getEntityDataForModification(id.arrayId)
   }
 
+  fun getEntityDataForModificationOrNull(id: EntityId): WorkspaceEntityData<*>? {
+    return getMutableEntityFamily(id.clazz).getEntityDataForModificationOrNull(id.arrayId)
+  }
+
+  @Suppress("UNCHECKED_CAST")
   fun <T : WorkspaceEntity> add(newEntity: WorkspaceEntityData<T>, clazz: Int) {
     (getMutableEntityFamily(clazz) as MutableEntityFamily<T>).add(newEntity)
   }
 
   fun book(clazz: Int): EntityId {
     val arrayId = getMutableEntityFamily(clazz).book()
-    return EntityId(arrayId, clazz)
+    return createEntityId(arrayId, clazz)
   }
 
+  @Suppress("UNCHECKED_CAST")
   fun <T : WorkspaceEntity> cloneAndAdd(newEntity: WorkspaceEntityData<T>, clazz: Int): WorkspaceEntityData<T> {
     val cloned = newEntity.clone()
     (getMutableEntityFamily(clazz) as MutableEntityFamily<T>).add(cloned)
     return cloned
   }
 
+  @Suppress("UNCHECKED_CAST")
   fun <T : WorkspaceEntity> cloneAndAddAt(newEntity: WorkspaceEntityData<T>, entityId: EntityId): WorkspaceEntityData<T> {
     val cloned = newEntity.clone()
     cloned.id = entityId.arrayId
@@ -49,6 +57,7 @@ internal class MutableEntitiesBarrel private constructor(
     return cloned
   }
 
+  @Suppress("UNCHECKED_CAST")
   fun <T : WorkspaceEntity> replaceById(newEntity: WorkspaceEntityData<T>, clazz: Int) {
     val family = getMutableEntityFamily(clazz) as MutableEntityFamily<T>
     if (!family.exists(newEntity.id)) {
@@ -73,6 +82,7 @@ internal class MutableEntitiesBarrel private constructor(
     fillEmptyFamilies(unmodifiableEntityId)
 
     val entityFamily = entityFamilies[unmodifiableEntityId] ?: run {
+      GeneratedCodeCompatibilityChecker.checkCode(unmodifiableEntityId.findWorkspaceEntity())
       val emptyEntityFamily = MutableEntityFamily.createEmptyMutable<WorkspaceEntity>()
       entityFamilies[unmodifiableEntityId] = emptyEntityFamily
       emptyEntityFamily
@@ -100,6 +110,10 @@ internal class MutableEntitiesBarrel private constructor(
 internal sealed class EntitiesBarrel {
   internal abstract val entityFamilies: List<EntityFamily<out WorkspaceEntity>?>
 
+  fun exists(entityId: EntityId): Boolean {
+    return get(entityId.clazz)?.exists(entityId.arrayId) ?: false
+  }
+
   open operator fun get(clazz: Int): EntityFamily<out WorkspaceEntity>? = entityFamilies.getOrNull(clazz)
 
   fun size() = entityFamilies.size
@@ -107,21 +121,22 @@ internal sealed class EntitiesBarrel {
   fun assertConsistency(abstractEntityStorage: AbstractEntityStorage) {
     val persistentIds = HashSet<PersistentEntityId<*>>()
     entityFamilies.forEachIndexed { i, family ->
+      if (family == null) return@forEachIndexed
       val clazz = i.findEntityClass<WorkspaceEntity>()
       val hasPersistentId = WorkspaceEntityWithPersistentId::class.java.isAssignableFrom(clazz)
-      family?.assertConsistency { entityData ->
+      family.assertConsistency { entityData ->
         // Assert correctness of the class
-        val immutableClass = ClassConversion.entityDataToEntity(entityData.javaClass)
+        val immutableClass = entityData.getEntityInterface()
         assert(clazz == immutableClass) {
           """EntityFamily contains entity data of wrong type:
-            | - EntityFamily class:   $clazz
-            | - entityData class:     $immutableClass
-          """.trimMargin()
+                | - EntityFamily class:   $clazz
+                | - entityData class:     $immutableClass
+              """.trimMargin()
         }
 
         // Assert unique of persistent id
         if (hasPersistentId) {
-          val persistentId = entityData.persistentId(WorkspaceEntityStorageImpl.EMPTY)
+          val persistentId = entityData.persistentId()
           assert(persistentId != null) { "Persistent id expected for $clazz" }
           assert(persistentId !in persistentIds) { "Duplicated persistent ids: $persistentId" }
           persistentIds.add(persistentId!!)

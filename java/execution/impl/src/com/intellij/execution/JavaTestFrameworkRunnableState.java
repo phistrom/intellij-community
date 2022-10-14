@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution;
 
 import com.intellij.codeInsight.daemon.impl.analysis.JavaModuleGraphUtil;
@@ -23,6 +23,7 @@ import com.intellij.execution.testframework.sm.runner.SMTRunnerConsoleProperties
 import com.intellij.execution.testframework.sm.runner.ui.SMTRunnerConsoleView;
 import com.intellij.execution.testframework.sm.runner.ui.SMTestRunnerResultsForm;
 import com.intellij.execution.testframework.ui.BaseTestsOutputConsoleView;
+import com.intellij.execution.ui.ConsoleView;
 import com.intellij.execution.util.JavaParametersUtil;
 import com.intellij.execution.util.ProgramParametersConfigurator;
 import com.intellij.execution.util.ProgramParametersUtil;
@@ -58,6 +59,7 @@ import com.intellij.psi.PsiPackage;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.GlobalSearchScopesCore;
 import com.intellij.util.PathUtil;
+import com.intellij.util.indexing.DumbModeAccessType;
 import com.intellij.util.net.NetUtils;
 import com.intellij.util.ui.UIUtil;
 import org.jdom.Element;
@@ -87,6 +89,14 @@ public abstract class JavaTestFrameworkRunnableState<T extends
 
   public static ParamsGroup getJigsawOptions(JavaParameters parameters) {
     return parameters.getVMParametersList().getParamsGroup(JIGSAW_OPTIONS);
+  }
+  public static ParamsGroup getOrCreateJigsawOptions(JavaParameters parameters) {
+    ParamsGroup group = getJigsawOptions(parameters);
+    if (group != null) {
+      return group;
+    }
+    
+    return parameters.getVMParametersList().addParamsGroup(JIGSAW_OPTIONS);
   }
 
   private @Nullable TargetBoundServerSocket myTargetBoundServerSocket;
@@ -142,10 +152,7 @@ public abstract class JavaTestFrameworkRunnableState<T extends
   protected abstract String getForkMode();
 
   @NotNull
-  private OSProcessHandler createHandler(Executor executor, SMTestRunnerResultsForm viewer) throws ExecutionException {
-    appendForkInfo(executor);
-    appendRepeatMode();
-
+  private OSProcessHandler createHandler(SMTestRunnerResultsForm viewer) throws ExecutionException {
     TargetEnvironment remoteEnvironment = getEnvironment().getPreparedTargetEnvironment(this, TargetProgressIndicator.EMPTY);
     TargetedCommandLineBuilder targetedCommandLineBuilder = getTargetedCommandLine();
     TargetedCommandLine targetedCommandLine = targetedCommandLineBuilder.build();
@@ -173,6 +180,11 @@ public abstract class JavaTestFrameworkRunnableState<T extends
     return processHandler;
   }
 
+  /**
+   * Should start without explicit read lock so modal or bg progress to download additional dependencies may work normally
+   */
+  public void downloadAdditionalDependencies(JavaParameters javaParameters) throws ExecutionException { }
+
   @Override
   public TargetEnvironmentRequest createCustomTargetEnvironmentRequest() {
     // Don't call getJavaParameters() because it will perform too much initialization
@@ -189,8 +201,7 @@ public abstract class JavaTestFrameworkRunnableState<T extends
   /**
    * @deprecated Use {@link #createSearchingForTestsTask(TargetEnvironment)} instead
    */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @Deprecated(forRemoval = true)
   public @Nullable SearchForTestsTask createSearchingForTestsTask() throws ExecutionException {
     return null;
   }
@@ -234,6 +245,11 @@ public abstract class JavaTestFrameworkRunnableState<T extends
   @Override
   protected TargetedCommandLineBuilder createTargetedCommandLine(@NotNull TargetEnvironmentRequest request)
     throws ExecutionException {
+
+    downloadAdditionalDependencies(getJavaParameters());
+    appendForkInfo(getEnvironment().getExecutor());
+    appendRepeatMode();
+
     TargetedCommandLineBuilder commandLineBuilder = super.createTargetedCommandLine(request);
     File inputFile = InputRedirectAware.getInputFile(getConfiguration());
     if (inputFile != null) {
@@ -253,13 +269,21 @@ public abstract class JavaTestFrameworkRunnableState<T extends
 
     final SMTRunnerConsoleProperties testConsoleProperties = getConfiguration().createTestConsoleProperties(executor);
     testConsoleProperties.setIfUndefined(TestConsoleProperties.HIDE_PASSED_TESTS, false);
+    testConsoleProperties.setIdBasedTestTree(isIdBasedTestTree());
 
-    final BaseTestsOutputConsoleView consoleView =
+    final BaseTestsOutputConsoleView testConsole =
       UIUtil.invokeAndWaitIfNeeded(() -> SMTestRunnerConnectionUtil.createConsole(getFrameworkName(), testConsoleProperties));
-    final SMTestRunnerResultsForm viewer = ((SMTRunnerConsoleView)consoleView).getResultsViewer();
+    final SMTestRunnerResultsForm viewer = ((SMTRunnerConsoleView)testConsole).getResultsViewer();
+
+    final ConsoleView consoleView = JavaRunConfigurationExtensionManager.getInstance().decorateExecutionConsole(
+      getConfiguration(),
+      getRunnerSettings(),
+      testConsole,
+      executor
+    );
     Disposer.register(getConfiguration().getProject(), consoleView);
 
-    OSProcessHandler handler = createHandler(executor, viewer);
+    OSProcessHandler handler = createHandler(viewer);
 
     for (ArgumentFileFilter filter : myArgumentFileFilters) {
       consoleView.addMessageFilter(filter);
@@ -291,7 +315,7 @@ public abstract class JavaTestFrameworkRunnableState<T extends
       }
     });
 
-    AbstractRerunFailedTestsAction rerunFailedTestsAction = testConsoleProperties.createRerunFailedTestsAction(consoleView);
+    AbstractRerunFailedTestsAction rerunFailedTestsAction = testConsoleProperties.createRerunFailedTestsAction(testConsole);
     LOG.assertTrue(rerunFailedTestsAction != null);
     rerunFailedTestsAction.setModelProvider(() -> viewer);
 
@@ -336,16 +360,18 @@ public abstract class JavaTestFrameworkRunnableState<T extends
     finally {
       getConfiguration().setProgramParameters(parameters);
     }
-    configureClasspath(javaParameters);
-    javaParameters.getClassPath().addFirst(JavaSdkUtil.getIdeaRtJarPath());
-    javaParameters.setShortenCommandLine(getConfiguration().getShortenCommandLine(), project);
+    ReadAction.run(() -> {
+      configureClasspath(javaParameters);
+      javaParameters.getClassPath().addFirst(JavaSdkUtil.getIdeaRtJarPath());
+      javaParameters.setShortenCommandLine(getConfiguration().getShortenCommandLine(), project);
 
-    for (JUnitPatcher patcher : JUNIT_PATCHER_EP.getExtensionList()) {
-      patcher.patchJavaParameters(project, module, javaParameters);
-    }
+      for (JUnitPatcher patcher : JUNIT_PATCHER_EP.getExtensionList()) {
+        patcher.patchJavaParameters(project, module, javaParameters);
+      }
 
-    JavaRunConfigurationExtensionManager.getInstance()
-      .updateJavaParameters(getConfiguration(), javaParameters, getRunnerSettings(), getEnvironment().getExecutor());
+      JavaRunConfigurationExtensionManager.getInstance()
+        .updateJavaParameters(getConfiguration(), javaParameters, getRunnerSettings(), getEnvironment().getExecutor());
+    });
 
     if (!StringUtil.isEmptyOrSpaces(parameters)) {
       javaParameters.getProgramParametersList().addAll(getNamedParams(parameters));
@@ -356,6 +382,11 @@ public abstract class JavaTestFrameworkRunnableState<T extends
     }
 
     return javaParameters;
+  }
+
+  @Override
+  protected boolean isReadActionRequired() {
+    return false;
   }
 
   protected List<String> getNamedParams(String parameters) {
@@ -482,30 +513,32 @@ public abstract class JavaTestFrameworkRunnableState<T extends
 
   protected static PsiJavaModule findJavaModule(Module module, boolean inTests) {
     return DumbService.getInstance(module.getProject())
-      .computeWithAlternativeResolveEnabled(() -> JavaModuleGraphUtil.findDescriptorByModule(module, inTests));
+      .computeWithAlternativeResolveEnabled(() -> JavaModuleGraphUtil.findNonAutomaticDescriptorByModule(module, inTests));
   }
 
   private void configureModulePath(JavaParameters javaParameters, @NotNull Module module) {
     if (!useModulePath()) return;
-    PsiJavaModule testModule = findJavaModule(module, true);
-    if (testModule != null) {
-      //adding the test module explicitly as it is unreachable from `idea.rt`
-      ParametersList vmParametersList = javaParameters
-        .getVMParametersList()
-        .addParamsGroup(JIGSAW_OPTIONS)
-        .getParametersList();
+    DumbModeAccessType.RELIABLE_DATA_ONLY.ignoreDumbMode(() -> {
+      PsiJavaModule testModule = findJavaModule(module, true);
+      if (testModule != null) {
+        //adding the test module explicitly as it is unreachable from `idea.rt`
+        ParametersList vmParametersList = javaParameters
+          .getVMParametersList()
+          .addParamsGroup(JIGSAW_OPTIONS)
+          .getParametersList();
 
-      vmParametersList.add("--add-modules");
-      vmParametersList.add(testModule.getName());
-      //setup module path
-      JavaParametersUtil.putDependenciesOnModulePath(javaParameters, testModule, true);
-    }
-    else {
-      PsiJavaModule prodModule = findJavaModule(module, false);
-      if (prodModule != null) {
-        splitDepsBetweenModuleAndClasspath(javaParameters, module, prodModule);
+        vmParametersList.add("--add-modules");
+        vmParametersList.add(testModule.getName());
+        //setup module path
+        JavaParametersUtil.putDependenciesOnModulePath(javaParameters, testModule, true);
       }
-    }
+      else {
+        PsiJavaModule prodModule = findJavaModule(module, false);
+        if (prodModule != null) {
+          splitDepsBetweenModuleAndClasspath(javaParameters, module, prodModule);
+        }
+      }
+    });
   }
 
   /**
@@ -554,7 +587,7 @@ public abstract class JavaTestFrameworkRunnableState<T extends
   /**
    * called on EDT
    */
-  protected static void collectSubPackages(List<String> options, PsiPackage aPackage, GlobalSearchScope globalSearchScope) {
+  protected static void collectSubPackages(List<String> options, @NotNull PsiPackage aPackage, GlobalSearchScope globalSearchScope) {
     if (aPackage.getClasses(globalSearchScope).length > 0) {
       options.add(aPackage.getQualifiedName());
     }
@@ -684,7 +717,7 @@ public abstract class JavaTestFrameworkRunnableState<T extends
     }
   }
 
-  private static void writeClasspath(PrintWriter wWriter, JavaParameters parameters) {
+  private static void writeClasspath(PrintWriter wWriter, JavaParameters parameters) { //todo TargetValue expected
     wWriter.println(parameters.getClassPath().getPathsString());
     wWriter.println(parameters.getModulePath().getPathsString());
     ParamsGroup paramsGroup = getJigsawOptions(parameters);

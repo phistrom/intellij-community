@@ -24,10 +24,6 @@ import java.awt.*;
 import java.util.ArrayList;
 import java.util.Objects;
 
-/**
- * @author Anton Katilin
- * @author Vladimir Kondratyev
- */
 public class RadContainer extends RadComponent implements IContainer {
   private static final Logger LOG = Logger.getInstance(RadContainer.class);
 
@@ -324,7 +320,7 @@ public class RadContainer extends RadComponent implements IContainer {
 
   /**
    * @return border's type.
-   * @see com.intellij.uiDesigner.shared.BorderType
+   * @see BorderType
    */
   @Override
   @NotNull
@@ -336,7 +332,7 @@ public class RadContainer extends RadComponent implements IContainer {
    * @throws IllegalArgumentException
    *          if {@code type}
    *          is {@code null}
-   * @see com.intellij.uiDesigner.shared.BorderType
+   * @see BorderType
    */
   public final void setBorderType(@NotNull final BorderType type) {
     if (myBorderType == type) {

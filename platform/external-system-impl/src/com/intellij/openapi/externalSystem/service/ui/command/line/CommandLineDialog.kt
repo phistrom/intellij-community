@@ -1,21 +1,22 @@
 // Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.externalSystem.service.ui.command.line
 
-import com.intellij.ide.IdeBundle
+import com.intellij.ide.IdeCoreBundle
 import com.intellij.ide.ui.search.SearchUtil
 import com.intellij.openapi.externalSystem.service.ui.completion.TextCompletionInfo
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.openapi.ui.setEmptyState
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.RecursionManager
 import com.intellij.ui.ColoredTableCellRenderer
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.TableSpeedSearch
 import com.intellij.ui.layout.*
+import com.intellij.ui.scale.JBUIScale
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.ColumnInfo
 import com.intellij.util.ui.ListTableModel
-import org.jetbrains.annotations.Nls
 import java.util.concurrent.CopyOnWriteArrayList
 import javax.swing.Icon
 import javax.swing.JTable
@@ -41,7 +42,7 @@ class CommandLineDialog(
     }
   }
 
-  fun clearSelectionWhenSelected(tableToUpdate: JTable, tableToListen: JTable) {
+  private fun clearSelectionWhenSelected(tableToUpdate: JTable, tableToListen: JTable) {
     tableToListen.selectionModel.addListSelectionListener {
       selectRecursionGuard.doPreventingRecursion(this, false) {
         tableToUpdate.clearSelection()
@@ -78,7 +79,7 @@ class CommandLineDialog(
 
   init {
     title = commandLineInfo.dialogTitle
-    setOKButtonText(IdeBundle.message("button.insert"))
+    setOKButtonText(IdeCoreBundle.message("button.insert"))
     init()
   }
 
@@ -95,13 +96,8 @@ class CommandLineDialog(
         }
       }
 
-    private fun setEmptyText(@Nls text: String) {
-      getAccessibleContext().accessibleName = text
-      emptyText.text = text
-    }
-
     init {
-      setEmptyText(tableInfo.emptyState)
+      setEmptyState(tableInfo.emptyState)
     }
 
     init {
@@ -125,11 +121,16 @@ class CommandLineDialog(
     }
 
     init {
-      val search = TableSpeedSearch(this)
       val nameColumn = columnModel.getColumn(0)
-      nameColumn.cellRenderer = Renderer(search, tableInfo.dataColumnIcon)
       val descriptionColumn = columnModel.getColumn(1)
+
+      val search = TableSpeedSearch(this)
+      nameColumn.cellRenderer = Renderer(search, tableInfo.dataColumnIcon)
       descriptionColumn.cellRenderer = Renderer(search, tableInfo.descriptionColumnIcon)
+
+      visibleRowCount = 8
+      nameColumn.preferredWidth = JBUIScale.scale(250)
+      descriptionColumn.preferredWidth = JBUIScale.scale(500)
     }
   }
 

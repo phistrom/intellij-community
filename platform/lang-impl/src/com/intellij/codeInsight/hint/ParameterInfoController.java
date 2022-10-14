@@ -1,5 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
-
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.hint;
 
 import com.intellij.codeInsight.AutoPopupController;
@@ -26,7 +25,6 @@ import com.intellij.openapi.ui.popup.Balloon.Position;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.TextRange;
-import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
@@ -47,8 +45,7 @@ import java.util.List;
 
 import static com.intellij.codeInsight.hint.ParameterInfoTaskRunnerUtil.runTask;
 
-public class ParameterInfoController extends ParameterInfoControllerBase {
-
+public final class ParameterInfoController extends ParameterInfoControllerBase {
   private LightweightHint myHint;
   private final ParameterInfoComponent myComponent;
   private boolean myKeepOnHintHidden;
@@ -282,16 +279,12 @@ public class ParameterInfoController extends ParameterInfoControllerBase {
 
   @HintManager.PositionFlags
   private static short toShort(Position position) {
-    switch (position) {
-      case above:
-        return HintManager.ABOVE;
-      case atLeft:
-        return HintManager.LEFT;
-      case atRight:
-        return HintManager.RIGHT;
-      default:
-        return HintManager.UNDER;
-    }
+    return switch (position) {
+      case above -> HintManager.ABOVE;
+      case atLeft -> HintManager.LEFT;
+      case atRight -> HintManager.RIGHT;
+      default -> HintManager.UNDER;
+    };
   }
 
   @Override
@@ -321,7 +314,7 @@ public class ParameterInfoController extends ParameterInfoControllerBase {
       hostWhitespaceStart = ((EditorWindow)myEditor).getDocument().injectedToHost(hostWhitespaceStart);
       hostWhitespaceEnd = ((EditorWindow)myEditor).getDocument().injectedToHost(hostWhitespaceEnd);
     }
-    List<Inlay> inlays = ParameterHintsPresentationManager.getInstance().getParameterHintsInRange(hostEditor,
+    List<Inlay<?>> inlays = ParameterHintsPresentationManager.getInstance().getParameterHintsInRange(hostEditor,
                                                                                                   hostWhitespaceStart, hostWhitespaceEnd);
     for (Inlay inlay : inlays) {
       int inlayOffset = inlay.getOffset();
@@ -356,7 +349,7 @@ public class ParameterInfoController extends ParameterInfoControllerBase {
                                                    boolean showLookupHint) {
     if (ApplicationManager.getApplication().isUnitTestMode() ||
         ApplicationManager.getApplication().isHeadlessEnvironment()) {
-      return Pair.pair(new Point(), HintManager.DEFAULT);
+      return new Pair<>(new Point(), HintManager.DEFAULT);
     }
 
     HintManagerImpl hintManager = HintManagerImpl.getInstanceImpl();
@@ -501,6 +494,7 @@ public class ParameterInfoController extends ParameterInfoControllerBase {
 
       LookupImpl activeLookup = (LookupImpl)LookupManager.getActiveLookup(myEditor);
       Rectangle lookupBounds = !ApplicationManager.getApplication().isUnitTestMode()
+                               && !ApplicationManager.getApplication().isHeadlessEnvironment()
                                && activeLookup != null
                                && activeLookup.isShown()
                                ? activeLookup.getBounds()
@@ -515,17 +509,9 @@ public class ParameterInfoController extends ParameterInfoControllerBase {
         return Pair.create(previousBestPoint, previousBestPosition);
       }
 
-      boolean isMultiline = list != null && StringUtil.containsAnyChar(list.getText(), "\n\r");
       if (pos == null) pos = EditorUtil.inlayAwareOffsetToVisualPosition(myEditor, offset);
-      Pair<Point, Short> position;
+      Pair<Point, Short> position = chooseBestHintPosition(myEditor, pos, hint, activeLookup, preferredPosition, false);
 
-      if (!isMultiline) {
-        position = chooseBestHintPosition(myEditor, pos, hint, activeLookup, preferredPosition, false);
-      }
-      else {
-        Point p = HintManagerImpl.getHintPosition(hint, myEditor, pos, HintManager.ABOVE);
-        position = new Pair<>(p, HintManager.ABOVE);
-      }
       previousBestPoint = position.getFirst();
       previousBestPosition = position.getSecond();
       previousOffset = offset;

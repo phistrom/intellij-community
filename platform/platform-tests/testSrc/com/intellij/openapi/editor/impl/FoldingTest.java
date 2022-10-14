@@ -7,9 +7,9 @@ import com.intellij.openapi.diagnostic.DefaultLogger;
 import com.intellij.openapi.editor.*;
 import com.intellij.openapi.editor.ex.FoldingListener;
 import com.intellij.openapi.editor.ex.FoldingModelEx;
+import com.intellij.openapi.fileTypes.PlainTextFileType;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.TextRange;
-import com.intellij.testFramework.TestFileType;
 import com.intellij.util.DocumentUtil;
 import org.jetbrains.annotations.NotNull;
 import org.junit.Assert;
@@ -33,7 +33,7 @@ public class FoldingTest extends AbstractEditorTest {
       "When I use a word,\" Humpty Dumpty said, in a rather scornful tone, \"it means just what I choose it to mean -- neither more nor less." +
       "The question is,\" said Alice, \"whether you can make words mean so many different things." +
       "The question is,\" said Humpty Dumpty, \"which is to be master -- that's all.",
-         TestFileType.TEXT);
+         PlainTextFileType.INSTANCE);
     myModel = (FoldingModelEx)getEditor().getFoldingModel();
   }
 
@@ -435,29 +435,32 @@ public class FoldingTest extends AbstractEditorTest {
   }
 
   public void testExpandRegionDoesNotImpactOutsideCaret() {
-    initText("(\n" +
-             "  foo [\n" +
-             "    bar<caret>\n" +
-             "  ]\n" +
-             ")");
+    initText("""
+               (
+                 foo [
+                   bar<caret>
+                 ]
+               )""");
     foldOccurrences("(?s)\\(.*\\)", "...");
     foldOccurrences("(?s)\\[.*\\]", "...");
-    checkResultByText("<caret>(\n" +
-                      "  foo [\n" +
-                      "    bar\n" +
-                      "  ]\n" +
-                      ")");
+    checkResultByText("""
+                        <caret>(
+                          foo [
+                            bar
+                          ]
+                        )""");
 
     getEditor().getCaretModel().moveToOffset(getEditor().getDocument().getText().indexOf("foo"));
     verifyFoldingState("[FoldRegion -(0:23), placeholder='...', FoldRegion +(8:21), placeholder='...']");
 
     executeAction(IdeActions.ACTION_EXPAND_ALL_REGIONS);
 
-    checkResultByText("(\n" +
-                      "  <caret>foo [\n" +
-                      "    bar\n" +
-                      "  ]\n" +
-                      ")");
+    checkResultByText("""
+                        (
+                          <caret>foo [
+                            bar
+                          ]
+                        )""");
   }
 
   public void testDisposalListenerMethodCalledOnExplicitRemoval() {

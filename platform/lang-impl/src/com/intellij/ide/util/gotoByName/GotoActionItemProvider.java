@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.util.gotoByName;
 
 import com.intellij.ide.SearchTopHitProvider;
@@ -42,9 +42,6 @@ import java.util.stream.Stream;
 
 import static com.intellij.ide.util.gotoByName.GotoActionModel.*;
 
-/**
- * @author peter
- */
 public final class GotoActionItemProvider implements ChooseByNameWeightedItemProvider {
   private static final int BONUS_FOR_SPACE_IN_PATTERN = 100;
   private static final int SETTINGS_PENALTY = 100;
@@ -55,7 +52,7 @@ public final class GotoActionItemProvider implements ChooseByNameWeightedItemPro
 
   public GotoActionItemProvider(GotoActionModel model) {
     myModel = model;
-    myIntentions = ClearableLazyValue.create(() -> ReadAction.compute(() -> myModel.getAvailableIntentions()));
+    myIntentions = ClearableLazyValue.create(() -> ReadAction.nonBlocking(() -> myModel.getAvailableIntentions()).executeSynchronously());
   }
 
   @NotNull
@@ -109,7 +106,7 @@ public final class GotoActionItemProvider implements ChooseByNameWeightedItemPro
 
         ActionWrapper wrapper = wrapAnAction(action);
         int degree = matcher.matchingDegree(pattern);
-        return new MatchedValue(wrapper, pattern, degree, true) {
+        return new MatchedValue(wrapper, pattern, degree, MatchedValueType.ABBREVIATION) {
           @NotNull
           @Override
           public String getValueText() {
@@ -118,7 +115,7 @@ public final class GotoActionItemProvider implements ChooseByNameWeightedItemPro
         };
       })
       .filter(Objects::nonNull);
-    return processItems(pattern, wrappers, consumer);
+    return processItems(pattern, MatchedValueType.ABBREVIATION, wrappers, consumer);
   }
 
   private boolean processTopHits(String pattern, Predicate<? super MatchedValue> consumer) {
@@ -144,7 +141,7 @@ public final class GotoActionItemProvider implements ChooseByNameWeightedItemPro
     Collection<Object> result = collector.getResult();
     Stream<?> wrappers = result.stream()
       .map(object -> object instanceof AnAction ? wrapAnAction((AnAction)object) : object);
-    return processItems(pattern, wrappers, consumer);
+    return processItems(pattern, MatchedValueType.TOP_HIT, wrappers, consumer);
   }
 
   private boolean processOptions(String pattern, Predicate<? super MatchedValue> consumer) {
@@ -205,7 +202,7 @@ public final class GotoActionItemProvider implements ChooseByNameWeightedItemPro
         options.add(description);
       }
     }
-    return processItems(pattern, options.stream(), consumer);
+    return processItems(pattern, MatchedValueType.OPTION, options.stream(), consumer);
   }
 
   private boolean processActions(String pattern, Predicate<? super MatchedValue> consumer) {
@@ -232,7 +229,7 @@ public final class GotoActionItemProvider implements ChooseByNameWeightedItemPro
         return new ActionWrapper(action, myModel.getGroupMapping(action), mode, myModel);
       })
       .filter(Objects::nonNull);
-    return processItems(pattern, actionWrappers, consumer);
+    return processItems(pattern, MatchedValueType.ACTION, actionWrappers, consumer);
   }
 
   public void clearIntentions() {
@@ -257,7 +254,7 @@ public final class GotoActionItemProvider implements ChooseByNameWeightedItemPro
         return new ActionWrapper(intentionAction, groupMapping, MatchMode.INTENTION, myModel);
       })
       .filter(Objects::nonNull);
-    return processItems(pattern, intentions, consumer);
+    return processItems(pattern, MatchedValueType.INTENTION, intentions, consumer);
   }
 
   @NotNull
@@ -267,7 +264,8 @@ public final class GotoActionItemProvider implements ChooseByNameWeightedItemPro
 
   private static final Logger LOG = Logger.getInstance(GotoActionItemProvider.class);
 
-  private static boolean processItems(String pattern, @NotNull Stream<?> items, Predicate<? super MatchedValue> consumer) {
+  private static boolean processItems(String pattern, @NotNull MatchedValueType type,
+                                      @NotNull Stream<?> items, Predicate<? super MatchedValue> consumer) {
     MinusculeMatcher matcher = buildWeightMatcher(pattern);
     List<MatchedValue> matched = items.map(o -> {
       if (o instanceof MatchedValue) {
@@ -275,7 +273,7 @@ public final class GotoActionItemProvider implements ChooseByNameWeightedItemPro
       }
 
       Integer weight = calcElementWeight(o, pattern, matcher);
-      return weight == null ? new MatchedValue(o, pattern) : new MatchedValue(o, pattern, weight);
+      return weight == null ? new MatchedValue(o, pattern, type) : new MatchedValue(o, pattern, weight, type);
     }).collect(Collectors.toList());
 
     try {

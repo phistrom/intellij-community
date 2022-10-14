@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.dashboard;
 
 import com.google.common.collect.Sets;
@@ -14,10 +14,7 @@ import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.services.ServiceEventListener;
 import com.intellij.execution.services.ServiceViewManager;
 import com.intellij.execution.services.ServiceViewManagerImpl;
-import com.intellij.execution.ui.RunContentDescriptor;
-import com.intellij.execution.ui.RunContentManager;
-import com.intellij.execution.ui.RunContentManagerImpl;
-import com.intellij.execution.ui.RunnerLayoutUi;
+import com.intellij.execution.ui.*;
 import com.intellij.execution.ui.layout.impl.RunnerLayoutUiImpl;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.lightEdit.LightEdit;
@@ -38,7 +35,6 @@ import com.intellij.ui.content.*;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.messages.MessageBusConnection;
-import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -51,10 +47,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-@State(
-  name = "RunDashboard",
-  storages = @Storage(StoragePathMacros.WORKSPACE_FILE)
-)
+@State(name = "RunDashboard", storages = @Storage(StoragePathMacros.WORKSPACE_FILE))
 public final class RunDashboardManagerImpl implements RunDashboardManager, PersistentStateComponent<RunDashboardManagerImpl.State> {
   private static final ExtensionPointName<RunDashboardCustomizer> CUSTOMIZER_EP_NAME =
     ExtensionPointName.create("com.intellij.runDashboardCustomizer");
@@ -78,7 +71,7 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
 
   public RunDashboardManagerImpl(@NotNull Project project) {
     myProject = project;
-    ContentFactory contentFactory = ContentFactory.SERVICE.getInstance();
+    ContentFactory contentFactory = ContentFactory.getInstance();
     myContentManager = contentFactory.createContentManager(new PanelContentUI(), false, project);
     myServiceContentManagerListener = new ServiceContentManagerListener();
     myReuseCondition = this::canReuseContent;
@@ -110,20 +103,36 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
     CUSTOMIZER_EP_NAME.addExtensionPointListener(dashboardUpdater, myProject);
     GROUPING_RULE_EP_NAME.addExtensionPointListener(dashboardUpdater, myProject);
 
-    ExtensionPointListener typeUpdater = new ExtensionPointListener() {
+    DEFAULT_TYPES_PROVIDER_EP_NAME.addExtensionPointListener(new ExtensionPointListener<RunDashboardDefaultTypesProvider>() {
       @Override
-      public void extensionAdded(@NotNull Object extension, @NotNull PluginDescriptor pluginDescriptor) {
+      public void extensionAdded(RunDashboardDefaultTypesProvider extension, @NotNull PluginDescriptor pluginDescriptor) {
+        Set<String> types = new HashSet<>(getTypes());
+        types.addAll(extension.getDefaultTypeIds(myProject));
+        setTypes(types);
+      }
+
+      @Override
+      public void extensionRemoved(RunDashboardDefaultTypesProvider extension, @NotNull PluginDescriptor pluginDescriptor) {
+        Set<String> types = new HashSet<>(getTypes());
+        types.removeAll(extension.getDefaultTypeIds(myProject));
+        setTypes(types);
+        dashboardUpdater.extensionRemoved(extension, pluginDescriptor);
+      }
+    }, myProject);
+    ConfigurationType.CONFIGURATION_TYPE_EP.addExtensionPointListener(new ExtensionPointListener<ConfigurationType>() {
+      @Override
+      public void extensionAdded(ConfigurationType extension, @NotNull PluginDescriptor pluginDescriptor) {
         setTypes(new HashSet<>(getTypes()));
       }
 
       @Override
-      public void extensionRemoved(@NotNull Object extension, @NotNull PluginDescriptor pluginDescriptor) {
-        setTypes(new HashSet<>(getTypes()));
+      public void extensionRemoved(ConfigurationType extension, @NotNull PluginDescriptor pluginDescriptor) {
+        Set<String> types = new HashSet<>(getTypes());
+        types.remove(extension.getId());
+        setTypes(types);
         dashboardUpdater.extensionRemoved(extension, pluginDescriptor);
       }
-    };
-    DEFAULT_TYPES_PROVIDER_EP_NAME.addExtensionPointListener(typeUpdater, myProject);
-    ConfigurationType.CONFIGURATION_TYPE_EP.addExtensionPointListener(typeUpdater, myProject);
+    }, myProject);
   }
 
   private void initServiceContentListeners() {
@@ -301,7 +310,8 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
 
   private void moveAddedContent(Condition<? super RunnerAndConfigurationSettings> condition) {
     RunContentManagerImpl runContentManager = (RunContentManagerImpl)RunContentManager.getInstance(myProject);
-    List<RunContentDescriptor> descriptors = ((ExecutionManagerImpl)ExecutionManager.getInstance(myProject)).getRunningDescriptors(condition);
+    List<RunContentDescriptor> descriptors =
+      ((ExecutionManagerImpl)ExecutionManager.getInstance(myProject)).getRunningDescriptors(condition);
     for (RunContentDescriptor descriptor : descriptors) {
       Content content = descriptor.getAttachedContent();
       if (content == null) continue;
@@ -565,7 +575,12 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
     RunContentDescriptor descriptor = RunContentManagerImpl.getRunContentDescriptorByContent(content);
     RunnerLayoutUiImpl ui = getRunnerLayoutUi(descriptor);
     if (ui != null) {
-      ui.setLeftToolbarVisible(visible);
+      if (UIExperiment.isNewDebuggerUIEnabled()) {
+        ui.setTopLeftActionsVisible(visible);
+      }
+      else {
+        ui.setLeftToolbarVisible(visible);
+      }
       ui.setContentToolbarBefore(visible);
     }
     else {
@@ -643,7 +658,7 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
       if (myTypes.contains(type.getId())) {
         Set<String> configurations = myState.hiddenConfigurations.get(type.getId());
         if (configurations == null) {
-          configurations = new THashSet<>();
+          configurations = new HashSet<>();
           myState.hiddenConfigurations.put(type.getId(), configurations);
         }
         configurations.add(configuration.getName());
@@ -760,7 +775,8 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
       if (onAdd) {
         RunConfigurationNode node = createNode(content);
         if (node != null) {
-          ServiceViewManager.getInstance(myProject).select(node, RunDashboardServiceViewContributor.class, true, false);
+          var shouldActivate = node.getConfigurationSettings().isActivateToolWindowBeforeRun();
+          ServiceViewManager.getInstance(myProject).select(node, RunDashboardServiceViewContributor.class, shouldActivate, false);
         }
       }
     }

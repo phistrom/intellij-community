@@ -124,16 +124,12 @@ public class CoverageLineMarkerRenderer implements ActiveGutterRenderer, LineMar
   }
 
   private static TextAttributesKey getAttributesKey(LineData lineData) {
-    if (lineData != null) {
-      switch (lineData.getStatus()) {
-        case LineCoverage.FULL:
-          return CodeInsightColors.LINE_FULL_COVERAGE;
-        case LineCoverage.PARTIAL:
-          return CodeInsightColors.LINE_PARTIAL_COVERAGE;
-      }
-    }
-
-    return CodeInsightColors.LINE_NONE_COVERAGE;
+    int status = lineData == null ? LineCoverage.NONE : lineData.getStatus();
+    return switch (status) {
+      case LineCoverage.FULL -> CodeInsightColors.LINE_FULL_COVERAGE;
+      case LineCoverage.PARTIAL -> CodeInsightColors.LINE_PARTIAL_COVERAGE;
+      default -> CodeInsightColors.LINE_NONE_COVERAGE;
+    };
   }
 
   @Override
@@ -163,9 +159,11 @@ public class CoverageLineMarkerRenderer implements ActiveGutterRenderer, LineMar
 
     final LineData lineData = getLineData(lineNumber);
     final EditorImpl uEditor;
-    if (lineData != null && lineData.getStatus() != LineCoverage.NONE && !mySubCoverageActive) {
+    final String report;
+    if (lineData != null && lineData.getStatus() != LineCoverage.NONE && !mySubCoverageActive &&
+        (report = getReport(editor, lineNumber)) != null) {
       final EditorFactory factory = EditorFactory.getInstance();
-      final Document doc = factory.createDocument(getReport(editor, lineNumber));
+      final Document doc = factory.createDocument(report);
       doc.setReadOnly(true);
       uEditor = (EditorImpl)factory.createEditor(doc, editor.getProject());
       panel.add(EditorFragmentComponent.createEditorFragmentComponent(uEditor, 0, doc.getLineCount(), false, false), BorderLayout.CENTER);
@@ -198,6 +196,7 @@ public class CoverageLineMarkerRenderer implements ActiveGutterRenderer, LineMar
                                                      HintManager.HIDE_BY_ANY_KEY | HintManager.HIDE_BY_TEXT_CHANGE | HintManager.HIDE_BY_OTHER_HINT | HintManager.HIDE_BY_SCROLLING, -1, false, new HintHint(editor, point));
   }
 
+  @Nullable
   private String getReport(final Editor editor, final int lineNumber) {
     final LineData lineData = getLineData(lineNumber);
 
@@ -206,7 +205,7 @@ public class CoverageLineMarkerRenderer implements ActiveGutterRenderer, LineMar
     assert project != null;
 
     final PsiFile psiFile = PsiDocumentManager.getInstance(project).getPsiFile(document);
-    assert psiFile != null;
+    if (psiFile == null) return null;
 
     final int lineStartOffset = document.getLineStartOffset(lineNumber);
     final int lineEndOffset = document.getLineEndOffset(lineNumber);
@@ -379,14 +378,12 @@ public class CoverageLineMarkerRenderer implements ActiveGutterRenderer, LineMar
       if (entry != null) {
         final LineData lineData = getLineData(entry);
         if (lineData != null) {
-          switch (lineData.getStatus()) {
-            case LineCoverage.NONE:
-              return CoverageBundle.message("coverage.next.change.uncovered");
-            case LineCoverage.PARTIAL:
-              return CoverageBundle.message("coverage.next.change.partial.covered");
-            case LineCoverage.FULL:
-              return CoverageBundle.message("coverage.next.change.fully.covered");
-          }
+          return switch (lineData.getStatus()) {
+            case LineCoverage.NONE -> CoverageBundle.message("coverage.next.change.uncovered");
+            case LineCoverage.PARTIAL -> CoverageBundle.message("coverage.next.change.partial.covered");
+            case LineCoverage.FULL -> CoverageBundle.message("coverage.next.change.fully.covered");
+            default -> null;
+          };
         }
       }
       return null;
@@ -395,6 +392,11 @@ public class CoverageLineMarkerRenderer implements ActiveGutterRenderer, LineMar
     @Override
     public void update(@NotNull final AnActionEvent e) {
       e.getPresentation().setEnabled(getLineEntry() != null);
+    }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.BGT;
     }
   }
 
@@ -455,6 +457,11 @@ public class CoverageLineMarkerRenderer implements ActiveGutterRenderer, LineMar
         }
         colorAndFontOptions.disposeUIResources();
       }
+    }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.BGT;
     }
   }
 

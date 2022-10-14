@@ -20,12 +20,34 @@ public class AlignmentHelper {
     ALIGNMENT_PROCESSORS.put(Alignment.Anchor.RIGHT, new RightEdgeAlignmentProcessor());
   }
 
+  /**
+   * There is a possible case that we detect a 'cycled alignment' rules (see {@link #myBackwardShiftedAlignedBlocks}). We want
+   * just to skip processing for such alignments then.
+   * <p/>
+   * This container holds 'bad alignment' objects that should not be processed.
+   */
   private final Set<Alignment> myAlignmentsToSkip = new HashSet<>();
   private final Document myDocument;
   private final BlockIndentOptions myBlockIndentOptions;
 
   private final AlignmentCyclesDetector myCyclesDetector;
 
+  /**
+   * Remembers mappings between backward-shifted aligned block and blocks that cause that shift in order to detect
+   * infinite cycles that may occur when, for example following alignment is specified:
+   * <p/>
+   * <pre>
+   *     int i1     = 1;
+   *     int i2, i3 = 2;
+   * </pre>
+   * <p/>
+   * There is a possible case that <code>'i1'</code>, <code>'i2'</code> and <code>'i3'</code> blocks re-use
+   * the same alignment, hence, <code>'i1'</code> is shifted to right during <code>'i3'</code> processing but
+   * that causes <code>'i2'</code> to be shifted right as wll because it's aligned to <code>'i1'</code> that
+   * increases offset of <code>'i3'</code> that, in turn, causes backward shift of <code>'i1'</code> etc.
+   * <p/>
+   * This map remembers such backward shifts in order to be able to break such infinite cycles.
+   */
   private final Map<LeafBlockWrapper, Set<LeafBlockWrapper>> myBackwardShiftedAlignedBlocks = new HashMap<>();
   private final Map<AbstractBlockWrapper, Set<AbstractBlockWrapper>> myAlignmentMappings = new HashMap<>();
 
@@ -58,15 +80,15 @@ public class AlignmentHelper {
       myCyclesDetector.registerOffsetResponsibleBlock(offsetResponsibleBlock);
     }
     BlockAlignmentProcessor.Result result = alignmentProcessor.applyAlignment(context);
-    switch (result) {
-      case TARGET_BLOCK_PROCESSED_NOT_ALIGNED:
-        return null;
-      case TARGET_BLOCK_ALIGNED:
+    return switch (result) {
+      case TARGET_BLOCK_PROCESSED_NOT_ALIGNED -> null;
+      case TARGET_BLOCK_ALIGNED -> {
         storeAlignmentMapping(currentBlock);
-        return null;
-      case BACKWARD_BLOCK_ALIGNED:
+        yield null;
+      }
+      case BACKWARD_BLOCK_ALIGNED -> {
         if (offsetResponsibleBlock == null) {
-          return null;
+          yield null;
         }
         Set<LeafBlockWrapper> blocksCausedRealignment = new HashSet<>();
         myBackwardShiftedAlignedBlocks.clear();
@@ -75,19 +97,20 @@ public class AlignmentHelper {
         storeAlignmentMapping(currentBlock, offsetResponsibleBlock);
         if (myCyclesDetector.isCycleDetected()) {
           reportAlignmentProcessingError(context);
-          return null;
+          yield null;
         }
         myCyclesDetector.registerBlockRollback(currentBlock);
-        return offsetResponsibleBlock.getNextBlock();
-      case RECURSION_DETECTED:
+        yield offsetResponsibleBlock.getNextBlock();
+      }
+      case RECURSION_DETECTED -> {
         myAlignmentsToSkip.add(alignment);
-        return offsetResponsibleBlock; // Fall through to the 'register alignment to skip'.
-      case UNABLE_TO_ALIGN_BACKWARD_BLOCK:
+        yield offsetResponsibleBlock; // Fall through to the 'register alignment to skip'.
+      }
+      case UNABLE_TO_ALIGN_BACKWARD_BLOCK -> {
         myAlignmentsToSkip.add(alignment);
-        return null;
-      default:
-        return null;
-    }
+        yield null;
+      }
+    };
   }
 
   boolean shouldSkip(AlignmentImpl alignment) {

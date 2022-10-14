@@ -1,10 +1,10 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.structuralsearch.replace
 
-import org.jetbrains.kotlin.idea.structuralsearch.KotlinSSRReplaceTest
+import org.jetbrains.kotlin.idea.structuralsearch.KotlinStructuralReplaceTest
 
-class KotlinSSRFunctionReplaceTest : KotlinSSRReplaceTest() {
+class KotlinSSRFunctionReplaceTest : KotlinStructuralReplaceTest() {
     fun testVisibilityModifierCopy() {
         doTest(
             searchPattern = "fun '_ID('_PARAM*)",
@@ -115,6 +115,15 @@ class KotlinSSRFunctionReplaceTest : KotlinSSRReplaceTest() {
             result = """
                     fun Number.foo(): Int { return 0 }
                 """.trimIndent()
+        )
+    }
+
+    fun testTrailingComment() {
+        doTest(
+            searchPattern = "fun '_ID()",
+            replacePattern = "fun '_ID()",
+            match = "public fun foo() = Unit // comment",
+            result = "public fun foo() = Unit // comment"
         )
     }
 }

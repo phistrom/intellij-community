@@ -9,6 +9,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.vcs.VcsBundle;
 import com.intellij.util.ModalityUiUtil;
+import git4idea.GitNotificationIdsHolder;
 import git4idea.i18n.GitBundle;
 import org.jetbrains.annotations.CalledInAny;
 import org.jetbrains.annotations.Nls;
@@ -41,11 +42,11 @@ public final class GitExecutableProblemsNotifier {
   }
 
   static void notify(@NotNull Project project, @NotNull BadGitExecutableNotification notification) {
-    ModalityUiUtil.invokeLaterIfNeeded(() -> {
+    ModalityUiUtil.invokeLaterIfNeeded(ModalityState.defaultModalityState(), () -> {
       if (ensureSingularOfType(project, notification.getClass())) {
         notification.notify(project);
       }
-    }, ModalityState.defaultModalityState());
+    });
   }
 
   /**
@@ -89,6 +90,7 @@ public final class GitExecutableProblemsNotifier {
                                  @NotNull @NlsContexts.NotificationContent String content,
                                  @NotNull NotificationType type) {
       super(groupDisplayId, requireNonNullElse(title, ""), content, type);
+      setDisplayId(GitNotificationIdsHolder.BAD_EXECUTABLE);
     }
   }
 

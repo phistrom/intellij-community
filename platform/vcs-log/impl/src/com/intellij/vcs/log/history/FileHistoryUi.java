@@ -1,12 +1,15 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.vcs.log.history;
 
 import com.google.common.util.concurrent.SettableFuture;
+import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Conditions;
 import com.intellij.openapi.util.EmptyRunnable;
+import com.intellij.openapi.util.NamedRunnable;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.history.VcsFileRevision;
+import com.intellij.openapi.vcs.ui.VcsBalloonProblemNotifier;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.navigation.History;
@@ -33,16 +36,14 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
-import java.util.Collections;
-import java.util.Objects;
-import java.util.Set;
+import java.util.List;
+import java.util.*;
 
 import static com.intellij.ui.JBColor.namedColor;
 
 public class FileHistoryUi extends AbstractVcsLogUi {
   @NotNull @NonNls private static final String HELP_ID = "reference.versionControl.toolwindow.history";
   @NotNull private final FilePath myPath;
-  @NotNull private final VirtualFile myRoot;
   @Nullable private final Hash myRevision;
 
   @NotNull private final FileHistoryModel myFileHistoryModel;
@@ -57,18 +58,19 @@ public class FileHistoryUi extends AbstractVcsLogUi {
                        @NotNull VisiblePackRefresher refresher,
                        @NotNull FilePath path,
                        @Nullable Hash revision,
-                       @NotNull VirtualFile root) {
-    super(getFileHistoryLogId(path, revision), logData, new FileHistoryColorManager(root, path), refresher);
+                       @NotNull VirtualFile root,
+                       @NotNull String logId,
+                       @NotNull VcsLogDiffHandler vcsLogDiffHandler) {
+    super(logId, logData, new FileHistoryColorManager(root, path), refresher);
 
     assert !path.isDirectory();
 
     myPath = path;
-    myRoot = root;
     myRevision = revision;
 
     myUiProperties = uiProperties;
 
-    myFileHistoryModel = new FileHistoryModel(logData, Objects.requireNonNull(logData.getLogProvider(root).getDiffHandler()), root) {
+    myFileHistoryModel = new FileHistoryModel(logData, vcsLogDiffHandler, root) {
       @NotNull
       @Override
       protected VisiblePack getVisiblePack() {
@@ -81,7 +83,7 @@ public class FileHistoryUi extends AbstractVcsLogUi {
 
     getTable().addHighlighter(LOG_HIGHLIGHTER_FACTORY_EP.findExtensionOrFail(MyCommitsHighlighter.Factory.class).createHighlighter(getLogData(), this));
     if (myRevision != null) {
-      getTable().addHighlighter(new RevisionHistoryHighlighter(myLogData.getStorage(), myRevision, myRoot));
+      getTable().addHighlighter(new RevisionHistoryHighlighter(myLogData.getStorage(), myRevision, root));
     }
     else {
       getTable().addHighlighter(LOG_HIGHLIGHTER_FACTORY_EP.findExtensionOrFail(CurrentBranchHighlighter.Factory.class).createHighlighter(getLogData(), this));
@@ -125,28 +127,29 @@ public class FileHistoryUi extends AbstractVcsLogUi {
       return;
     }
 
-    if (getFilterUi().getFilters().get(VcsLogFilterCollection.BRANCH_FILTER) != null) {
-      String text = VcsLogBundle.message("file.history.commit.not.found.in.branch",
-                                         getCommitPresentation(commitId), myPath.getName());
-      showWarningWithLink(text, VcsLogBundle.message("file.history.commit.not.found.view.and.show.all.branches.link"), () -> {
-        myUiProperties.set(FileHistoryUiProperties.SHOW_ALL_BRANCHES, true);
-        invokeOnChange(() -> jumpTo(commitId, rowGetter, SettableFuture.create(), false, true));
+    boolean hasBranchFilter = getFilterUi().getFilters().get(VcsLogFilterCollection.BRANCH_FILTER) != null;
+    String text = VcsLogBundle.message(hasBranchFilter ? "file.history.commit.not.found.in.branch" : "file.history.commit.not.found",
+                                       getCommitPresentation(commitId), myPath.getName());
+
+    List<NamedRunnable> actions = new ArrayList<>();
+    if (hasBranchFilter) {
+      actions.add(new NamedRunnable(VcsLogBundle.message("file.history.commit.not.found.view.and.show.all.branches.link")) {
+        @Override
+        public void run() {
+          myUiProperties.set(FileHistoryUiProperties.SHOW_ALL_BRANCHES, true);
+          invokeOnChange(() -> jumpTo(commitId, rowGetter, SettableFuture.create(), false, true));
+        }
       });
     }
-    else {
-      String text = VcsLogBundle.message("file.history.commit.not.found",
-                                         getCommitPresentation(commitId), myPath.getName());
-      showWarningWithLink(text, VcsLogBundle.message("file.history.commit.not.found.view.in.log.link"), () -> {
+    actions.add(new NamedRunnable(VcsLogBundle.message("file.history.commit.not.found.view.in.log.link")) {
+      @Override
+      public void run() {
         VcsLogContentUtil.runInMainLog(myProject, ui -> {
-          if (commitId instanceof Hash) {
-            ui.getVcsLog().jumpToCommit((Hash)commitId, myRoot);
-          }
-          else if (commitId instanceof String) {
-            ui.getVcsLog().jumpToReference((String)commitId);
-          }
+          ui.jumpTo(commitId, rowGetter, SettableFuture.create(), false, true);
         });
-      });
-    }
+      }
+    });
+    VcsBalloonProblemNotifier.showOverChangesView(myProject, text, MessageType.WARNING, actions.toArray(new NamedRunnable[0]));
   }
 
   public boolean matches(@NotNull FilePath targetPath, @Nullable Hash targetRevision) {
@@ -242,7 +245,7 @@ public class FileHistoryUi extends AbstractVcsLogUi {
 
     @NotNull
     @Override
-    public VcsCommitStyle getStyle(int commitId, @NotNull VcsShortCommitDetails commitDetails, boolean isSelected) {
+    public VcsCommitStyle getStyle(int commitId, @NotNull VcsShortCommitDetails commitDetails, int column, boolean isSelected) {
       if (isSelected) return VcsCommitStyle.DEFAULT;
 
       if (myCondition == null) {

@@ -1,10 +1,26 @@
+/*******************************************************************************
+ * Copyright 2000-2022 JetBrains s.r.o. and contributors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ ******************************************************************************/
+
 package com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.panels.management.packages.columns
 
 import com.intellij.util.ui.ColumnInfo
 import com.jetbrains.packagesearch.intellij.plugin.PackageSearchBundle
-import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.models.PackageModel
-import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.models.PackageVersion
 import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.models.TargetModules
+import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.models.UiPackageModel
+import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.models.versions.NormalizedPackageVersion
 import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.panels.management.packages.PackagesTableItem
 import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.panels.management.packages.columns.editors.PackageVersionTableCellEditor
 import com.jetbrains.packagesearch.intellij.plugin.ui.toolwindow.panels.management.packages.columns.renderers.PackageVersionTableCellRenderer
@@ -12,8 +28,8 @@ import javax.swing.table.TableCellEditor
 import javax.swing.table.TableCellRenderer
 
 internal class VersionColumn(
-    private val versionSetter: (packageModel: PackageModel, newVersion: PackageVersion) -> Unit
-) : ColumnInfo<PackagesTableItem<*>, VersionViewModel<*>>(
+    private val versionSetter: (uiPackageModel: UiPackageModel<*>, newVersion: NormalizedPackageVersion<*>) -> Unit
+) : ColumnInfo<PackagesTableItem<*>, UiPackageModel<*>>(
     PackageSearchBundle.message("packagesearch.ui.toolwindow.packages.columns.versions")
 ) {
 
@@ -28,7 +44,7 @@ internal class VersionColumn(
     override fun getEditor(item: PackagesTableItem<*>): TableCellEditor = cellEditor
 
     override fun isCellEditable(item: PackagesTableItem<*>?) =
-        item?.packageModel?.getAvailableVersions(onlyStable)?.isNotEmpty() ?: false
+        item?.uiPackageModel?.sortedVersions?.isNotEmpty() ?: false
 
     fun updateData(onlyStable: Boolean, targetModules: TargetModules) {
         this.onlyStable = onlyStable
@@ -37,34 +53,17 @@ internal class VersionColumn(
         cellEditor.updateData(onlyStable)
     }
 
-    override fun valueOf(item: PackagesTableItem<*>) = when (item) {
-        is PackagesTableItem.InstalledPackage -> {
-            val latestInstalledVersion = when (val modules = targetModules) {
-                TargetModules.None -> throw IllegalStateException(
-                    "Trying to get version value for ${item.packageModel.identifier} when there is no target module"
-                )
-                is TargetModules.All -> item.packageModel.getLatestInstalledVersion()
-                else ->
-                    item.packageModel.usageInfo
-                        .filter { usageInfo -> modules.any { usageInfo.projectModule == it.projectModule } }
-                        .map { it.version }
-                        .maxOrNull()
-                        ?: throw IllegalStateException(
-                            "Unable to find usage for supposedly installed package ${item.packageModel.identifier} " +
-                                "(modules: ${modules.modules.joinToString { it.projectModule.name }})"
-                        )
-            }
-
-            VersionViewModel.InstalledPackage(packageModel = item.packageModel, selectedVersion = latestInstalledVersion)
+    override fun valueOf(item: PackagesTableItem<*>): UiPackageModel<*> =
+        when (item) {
+            is PackagesTableItem.InstalledPackage -> item.uiPackageModel
+            is PackagesTableItem.InstallablePackage -> item.uiPackageModel
         }
-        is PackagesTableItem.InstallablePackage -> {
-            VersionViewModel.InstallablePackage(item.packageModel, item.selectedPackageModel.selectedVersion)
-        }
-    }
 
-    override fun setValue(item: PackagesTableItem<*>?, value: VersionViewModel<*>?) {
-        if (value !is VersionViewModel) return
+    override fun setValue(item: PackagesTableItem<*>?, value: UiPackageModel<*>?) {
+        val selectedVersion = value?.selectedVersion
+        if (selectedVersion == null) return
+        if (selectedVersion == item?.uiPackageModel?.selectedVersion) return
 
-        versionSetter(value.packageModel, value.selectedVersion)
+        versionSetter(value, selectedVersion)
     }
 }

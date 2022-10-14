@@ -1,0 +1,3 @@
+SymbolLightClass: B
+SymbolLightInterfaceClass: I2
+SymbolLightInterfaceClass: I3

@@ -143,6 +143,14 @@ public final class DfaUtil {
     return Collections.emptyList();
   }
 
+  /**
+   * Compute method nullability using dataflow analysis. Results are not cached and
+   * this method may work slowly, so avoid calling it often. Could be useful for
+   * refactorings like "extract method".
+   *
+   * @param method method to infer nullability for
+   * @return inferred nullability
+   */
   public static @NotNull Nullability inferMethodNullability(PsiMethod method) {
     if (PsiUtil.resolveClassInType(method.getReturnType()) == null) {
       return Nullability.UNKNOWN;
@@ -162,6 +170,13 @@ public final class DfaUtil {
     return false;
   }
 
+  /**
+   * Compute lambda return value nullability using dataflow analysis. Results are not cached and
+   * this method may work slowly, so avoid calling it often.
+   *
+   * @param lambda lambda to infer nullability for
+   * @return inferred nullability
+   */
   public static @NotNull Nullability inferLambdaNullability(PsiLambdaExpression lambda) {
     if (LambdaUtil.getFunctionalInterfaceReturnType(lambda) == null) {
       return Nullability.UNKNOWN;
@@ -236,15 +251,19 @@ public final class DfaUtil {
    * @return a dataflow context; null if no applicable context found.
    */
   static @Nullable PsiElement getDataflowContext(PsiExpression expression) {
-    PsiMember member = PsiTreeUtil.getParentOfType(expression, PsiMember.class);
-    while (member instanceof PsiAnonymousClass && PsiTreeUtil.isAncestor(((PsiAnonymousClass)member).getArgumentList(), expression, true)) {
-      member = PsiTreeUtil.getParentOfType(member, PsiMember.class);
+    PsiElement element = expression;
+    while (true) {
+      element = element.getParent();
+      if (element == null || element instanceof PsiAnnotation) return null;
+      if (element instanceof PsiMethod method && !method.isConstructor()) {
+        PsiClass containingClass = method.getContainingClass();
+        if (containingClass != null &&
+            (!PsiUtil.isLocalOrAnonymousClass(containingClass) || containingClass instanceof PsiEnumConstantInitializer)) {
+          return method.getBody();
+        }
+      }
+      if (element instanceof PsiClass psiClass && !PsiUtil.isLocalOrAnonymousClass(psiClass)) return psiClass;
     }
-    if (member instanceof PsiField || member instanceof PsiClassInitializer) return member.getContainingClass();
-    if (member instanceof PsiMethod) {
-      return ((PsiMethod)member).isConstructor() ? member.getContainingClass() : ((PsiMethod)member).getBody();
-    }
-    return null;
   }
 
   /**

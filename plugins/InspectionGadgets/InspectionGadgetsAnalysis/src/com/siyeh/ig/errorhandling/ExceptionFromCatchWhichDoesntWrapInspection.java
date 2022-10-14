@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2013 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2022 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -70,7 +70,7 @@ public class ExceptionFromCatchWhichDoesntWrapInspection extends BaseInspection 
   private class ExceptionFromCatchWhichDoesntWrapVisitor extends BaseInspectionVisitor {
 
     @Override
-    public void visitThrowStatement(PsiThrowStatement statement) {
+    public void visitThrowStatement(@NotNull PsiThrowStatement statement) {
       super.visitThrowStatement(statement);
       final PsiCatchSection catchSection = PsiTreeUtil.getParentOfType(statement, PsiCatchSection.class, true, PsiClass.class);
       if (catchSection == null) {
@@ -135,15 +135,26 @@ public class ExceptionFromCatchWhichDoesntWrapInspection extends BaseInspection 
     }
 
     @Override
-    public void visitReferenceExpression(PsiReferenceExpression expression) {
+    public void visitReferenceExpression(@NotNull PsiReferenceExpression expression) {
       if (argumentsContainCatchParameter || !visited.add(expression)) {
         return;
       }
       super.visitReferenceExpression(expression);
       final PsiElement target = expression.resolve();
-      if (!parameter.equals(target)) {
-        if (target instanceof PsiLocalVariable) {
-          final PsiLocalVariable variable = (PsiLocalVariable)target;
+      if (parameter.equals(target)) {
+        if (!ignoreGetMessage) {
+          final PsiElement parent = expression.getParent();
+          if (parent instanceof PsiReferenceExpression) {
+            final PsiElement grandParent = parent.getParent();
+            if (grandParent instanceof PsiMethodCallExpression) {
+              return;
+            }
+          }
+        }
+        argumentsContainCatchParameter = true;
+      }
+      else {
+        if (target instanceof PsiLocalVariable variable) {
           final Query<PsiReference> query = ReferencesSearch.search(variable, variable.getUseScope(), false);
           query.forEach(reference -> {
             final PsiElement element = reference.getElement();
@@ -168,18 +179,17 @@ public class ExceptionFromCatchWhichDoesntWrapInspection extends BaseInspection 
             initializer.accept(this);
           }
         }
-        return;
-      }
-      if (!ignoreGetMessage) {
-        final PsiElement parent = expression.getParent();
-        if (parent instanceof PsiReferenceExpression) {
-          final PsiElement grandParent = parent.getParent();
-          if (grandParent instanceof PsiMethodCallExpression) {
+        else if (target instanceof PsiPatternVariable) {
+          final PsiElement pattern = target.getParent();
+          if (!(pattern instanceof PsiTypeTestPattern)) {
             return;
+          }
+          final PsiElement parent = pattern.getParent();
+          if (parent instanceof PsiInstanceOfExpression instanceOfExpression) {
+            instanceOfExpression.getOperand().accept(this);
           }
         }
       }
-      argumentsContainCatchParameter = true;
     }
 
     boolean usesParameter() {

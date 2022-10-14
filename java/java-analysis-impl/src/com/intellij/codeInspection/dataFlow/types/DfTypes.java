@@ -187,25 +187,17 @@ public final class DfTypes {
    * @return resulting DfType.
    */
   public static @NotNull DfType rangeClamped(@NotNull LongRangeSet range, @NotNull LongRangeType lrType) {
-    switch (lrType) {
-      case INT32:
-        return intRangeClamped(range);
-      case INT64:
-        return longRange(range);
-      default:
-        throw new IllegalStateException("Unexpected value: " + lrType);
-    }
+    return switch (lrType) {
+      case INT32 -> intRangeClamped(range);
+      case INT64 -> longRange(range);
+    };
   }
 
   static @NotNull DfType range(@NotNull LongRangeSet range, @Nullable LongRangeSet wideRange, @NotNull LongRangeType lrType) {
-    switch (lrType) {
-      case INT32:
-        return intRange(range, wideRange);
-      case INT64:
-        return longRange(range, wideRange);
-      default:
-        throw new IllegalStateException("Unexpected value: " + lrType);
-    }
+    return switch (lrType) {
+      case INT32 -> intRange(range, wideRange);
+      case INT64 -> longRange(range, wideRange);
+    };
   }
 
   /**
@@ -290,7 +282,7 @@ public final class DfTypes {
 
   /**
    * Returns a custom constant type
-   *
+   * <p>
    * The following types of the objects are supported:
    * <ul>
    *   <li>Integer/Long/Double/Float/Boolean (will be unboxed)</li>
@@ -323,7 +315,9 @@ public final class DfTypes {
     if (constant == null) return NULL;
     DfConstantType<?> primitiveConstant = primitiveConstantImpl(constant);
     if (primitiveConstant != null) return primitiveConstant;
-    if (!(type instanceof DfReferenceType)) throw new IllegalArgumentException("Not reference type: " + type + "; constant: " + constant);
+    if (!(type instanceof DfReferenceType)) {
+      throw new IllegalArgumentException("Not reference type: " + type + "; constant: " + constant);
+    }
     return new DfReferenceConstantType(constant, ((DfReferenceType)type).getConstraint(), false);
   }
 
@@ -336,6 +330,17 @@ public final class DfTypes {
    */
   public static @NotNull DfConstantType<?> referenceConstant(@NotNull Object constant, @NotNull PsiType type) {
     return new DfReferenceConstantType(constant, TypeConstraints.instanceOf(type), false);
+  }
+
+  /**
+   * Returns a non-primitive constant
+   *
+   * @param constant constant value
+   * @param constraint value type constraint
+   * @return a constant type that contains only given constant
+   */
+  public static @NotNull DfConstantType<?> referenceConstant(@NotNull Object constant, @NotNull TypeConstraint constraint) {
+    return new DfReferenceConstantType(constant, constraint, false);
   }
 
   /**
@@ -377,11 +382,11 @@ public final class DfTypes {
 
   /**
    * @param constant string constant
-   * @param stringType string type
+   * @param constraint string type constraint
    * @return concatenation result string
    */
-  public static @NotNull DfConstantType<?> concatenationResult(@NotNull String constant, @NotNull PsiType stringType) {
-    return new DfReferenceConstantType(constant, TypeConstraints.exact(stringType), true);
+  public static @NotNull DfConstantType<?> concatenationResult(@NotNull String constant, @NotNull TypeConstraint constraint) {
+    return new DfReferenceConstantType(constant, constraint, true);
   }
 
   /**
@@ -390,21 +395,14 @@ public final class DfTypes {
    */
   public static DfConstantType<?> defaultValue(@NotNull PsiType type) {
     if (type instanceof PsiPrimitiveType) {
-      switch (type.getCanonicalText()) {
-        case "boolean":
-          return FALSE;
-        case "byte":
-        case "char":
-        case "short":
-        case "int":
-          return intValue(0);
-        case "long":
-          return longValue(0L);
-        case "float":
-          return floatValue(0F);
-        case "double":
-          return doubleValue(0D);
-      }
+      return switch (type.getCanonicalText()) {
+        case "boolean" -> FALSE;
+        case "byte", "char", "short", "int" -> intValue(0);
+        case "long" -> longValue(0L);
+        case "float" -> floatValue(0F);
+        case "double" -> doubleValue(0D);
+        default -> NULL;
+      };
     }
     return NULL;
   }
@@ -431,6 +429,9 @@ public final class DfTypes {
     TypeConstraint constraint = TypeConstraints.instanceOf(type);
     if (constraint == TypeConstraints.BOTTOM) {
       return nullability == Nullability.NOT_NULL ? DfType.BOTTOM : NULL;
+    }
+    if (constraint.isSingleton() && nullability == Nullability.NOT_NULL) {
+      return new DfReferenceConstantType(constraint, constraint, false);
     }
     return new DfGenericObjectType(Set.of(), constraint,
                                    DfaNullability.fromNullability(nullability), Mutability.UNKNOWN, null, DfType.BOTTOM, false);

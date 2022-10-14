@@ -181,7 +181,7 @@ class InjectionRegistrarImpl implements MultiHostRegistrar {
         assert relevantRange.containsOffset(startOffsetInHost) : textEscaper.getClass() +" is inconsistent: its.getOffsetInHost(0) = "+startOffsetInHost+" while its relevantRange="+relevantRange;
         int endOffsetInHost = textEscaper.getOffsetInHost(charsDecodedSuccessfully, info.registeredRangeInsideHost);
         assert relevantRange.containsOffset(endOffsetInHost) : textEscaper.getClass() +" is inconsistent: its.getOffsetInHost(" + charsDecodedSuccessfully +
-                                                                 ") = "+startOffsetInHost+" while its relevantRange="+relevantRange;
+                                                                 ") = "+endOffsetInHost+" while its relevantRange="+relevantRange;
         ProperTextRange successfulHostRange = new ProperTextRange(startOffsetInHost, endOffsetInHost);
         relevantRange = relevantRange.intersection(successfulHostRange);
       }
@@ -542,7 +542,8 @@ class InjectionRegistrarImpl implements MultiHostRegistrar {
    *   (see call to {@link #parseFile(Language, Language, DocumentWindowImpl, VirtualFile, DocumentEx, PsiFile, Project, CharSequence, List, StringBuilder, String, PsiDocumentManagerBase)} )
    * - feed two injections, the old and the new created fake to the standard tree diff
    *   (see call to {@link BlockSupportImpl#mergeTrees(PsiFileImpl, ASTNode, ASTNode, ProgressIndicator, CharSequence)} )
-   * - return continuation which performs actual PSI replace, just like {@link DocumentCommitThread#doCommit(DocumentCommitThread.CommitTask, PsiFile, FileASTNode, ProperTextRange, List)} does
+   * - return continuation which performs actual PSI replace, just like {@link DocumentCommitThread#doCommit(DocumentCommitThread.CommitTask, PsiFile, FileASTNode, ProperTextRange, List, PsiDocumentManagerBase)}
+   * does
    *   {@code null} means we failed to reparse and will have to kill the injection.
    * </pre>
    */
@@ -757,7 +758,7 @@ class InjectionRegistrarImpl implements MultiHostRegistrar {
     }
     // JavaParserDefinition.create() throws this.
     // DO not over-generalize this exception type to avoid swallowing meaningful exceptions
-    catch (IllegalStateException e) {
+    catch (IllegalArgumentException e) {
       return null;
     }
   }
@@ -831,7 +832,7 @@ class InjectionRegistrarImpl implements MultiHostRegistrar {
             prevHostEndOffset = shredEndOffset;
           }
           ProperTextRange rangeInHost = new ProperTextRange(start, end);
-          tokens.add(new InjectedLanguageUtilBase.TokenInfo(tokenType, rangeInHost, hostNum, iterator.getTextAttributes(),
+          tokens.add(new InjectedLanguageUtilBase.TokenInfo(tokenType, rangeInHost, hostNum,
                                                             iterator.getTextAttributesKeys()));
         }
         range = spilled;

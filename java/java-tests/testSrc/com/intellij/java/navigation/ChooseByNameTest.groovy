@@ -27,9 +27,6 @@ import org.jetbrains.annotations.NotNull
 import org.jetbrains.plugins.groovy.lang.psi.GroovyFile
 
 import static com.intellij.testFramework.EdtTestUtil.runInEdtAndWait
-/**
- * @author peter
- */
 class ChooseByNameTest extends LightJavaCodeInsightFixtureTestCase {
   static final ELEMENTS_LIMIT = 30
 
@@ -626,6 +623,11 @@ class Intf {
     void setEverywhere(boolean state) {
       myScopeDescriptor = new ScopeDescriptor(FindSymbolParameters.searchScopeFor(myProject, state))
     }
+
+    @Override
+    String getSearchProviderId() {
+      return "ClassSearchEverywhereContributor"
+    }
   }
 
   private static class TestFileContributor extends FileSearchEverywhereContributor {
@@ -637,6 +639,11 @@ class Intf {
     void setEverywhere(boolean state) {
       myScopeDescriptor = new ScopeDescriptor(FindSymbolParameters.searchScopeFor(myProject, state))
     }
+
+    @Override
+    String getSearchProviderId() {
+      return "FileSearchEverywhereContributor"
+    }
   }
 
   private static class TestSymbolContributor extends SymbolSearchEverywhereContributor {
@@ -647,6 +654,11 @@ class Intf {
 
     void setEverywhere(boolean state) {
       myScopeDescriptor = new ScopeDescriptor(FindSymbolParameters.searchScopeFor(myProject, state))
+    }
+
+    @Override
+    String getSearchProviderId() {
+      return "SymbolSearchEverywhereContributor"
     }
   }
 }

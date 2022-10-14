@@ -10,7 +10,6 @@ import com.intellij.openapi.editor.Caret;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
-import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
@@ -40,7 +39,7 @@ import java.util.function.Supplier;
  * @deprecated Use {@link InjectedLanguageManager} instead
  */
 @Deprecated
-@ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+@ApiStatus.Internal
 public class InjectedLanguageUtilBase {
   public static final Key<IElementType> INJECTED_FRAGMENT_TYPE = Key.create("INJECTED_FRAGMENT_TYPE");
 
@@ -99,22 +98,15 @@ public class InjectedLanguageUtilBase {
     @NotNull public final IElementType type;
     @NotNull public final ProperTextRange rangeInsideInjectionHost;
     public final int shredIndex;
-    /**
-     * @deprecated Use textAttributesKeys
-     */
-    @Deprecated
-    public final TextAttributes attributes;
     public final TextAttributesKey @NotNull [] textAttributesKeys;
 
     public TokenInfo(@NotNull IElementType type,
                      @NotNull ProperTextRange rangeInsideInjectionHost,
                      int shredIndex,
-                     @NotNull TextAttributes attributes,
                      TextAttributesKey @NotNull [] textAttributesKeys) {
       this.type = type;
       this.rangeInsideInjectionHost = rangeInsideInjectionHost;
       this.shredIndex = shredIndex;
-      this.attributes = attributes;
       this.textAttributesKeys = textAttributesKeys;
     }
   }
@@ -201,7 +193,7 @@ public class InjectedLanguageUtilBase {
   @Nullable
   public static PsiFile findInjectedPsiNoCommit(@NotNull PsiFile host, int offset) {
     PsiElement injected = InjectedLanguageManager.getInstance(host.getProject()).findInjectedElementAt(host, offset);
-    return injected == null ? null : injected.getContainingFile();
+    return injected == null ? null : PsiUtilCore.getTemplateLanguageFile(injected.getContainingFile());
   }
 
   /**
@@ -432,7 +424,6 @@ public class InjectedLanguageUtilBase {
    */
   @NotNull
   @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static ConcurrentList<DocumentWindow> getCachedInjectedDocuments(@NotNull PsiFile hostPsiFile) {
     // modification of cachedInjectedDocuments must be under InjectedLanguageManagerImpl.ourInjectionPsiLock only
     List<DocumentWindow> injected = hostPsiFile.getUserData(INJECTED_DOCS_KEY);
@@ -536,12 +527,24 @@ public class InjectedLanguageUtilBase {
   /**
    * @deprecated Use {@link InjectedLanguageManager#getInjectedPsiFiles(PsiElement)} != null instead
    */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @Deprecated(forRemoval = true)
   public static boolean hasInjections(@NotNull PsiLanguageInjectionHost host) {
     if (!host.isPhysical()) return false;
     final Ref<Boolean> result = Ref.create(false);
     enumerate(host, (injectedPsi, places) -> result.set(true));
     return result.get().booleanValue();
+  }
+
+  public static boolean isInInjectedLanguagePrefixSuffix(@NotNull final PsiElement element) {
+    PsiFile injectedFile = element.getContainingFile();
+    if (injectedFile == null) return false;
+    Project project = injectedFile.getProject();
+    InjectedLanguageManager languageManager = InjectedLanguageManager.getInstance(project);
+    if (!languageManager.isInjectedFragment(injectedFile)) return false;
+    TextRange elementRange = element.getTextRange();
+    List<TextRange> edibles = languageManager.intersectWithAllEditableFragments(injectedFile, elementRange);
+    int combinedEdiblesLength = edibles.stream().mapToInt(TextRange::getLength).sum();
+
+    return combinedEdiblesLength != elementRange.getLength();
   }
 }

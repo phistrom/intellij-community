@@ -19,6 +19,7 @@ import com.intellij.codeInsight.hint.HintManager;
 import com.intellij.codeInsight.hint.QuestionAction;
 import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.codeInsight.intention.LowPriorityAction;
+import com.intellij.codeInsight.intention.preview.IntentionPreviewInfo;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.injected.editor.EditorWindow;
 import com.intellij.lang.Language;
@@ -26,14 +27,16 @@ import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileTypes.PlainTextLanguage;
 import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.IPopupChooserBuilder;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.NlsContexts;
+import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.injection.Injectable;
@@ -43,6 +46,7 @@ import com.intellij.ui.ColoredListCellRenderer;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.util.FileContentUtil;
 import com.intellij.util.IncorrectOperationException;
+import com.intellij.util.InjectionUtils;
 import com.intellij.util.Processor;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.EmptyIcon;
@@ -104,11 +108,20 @@ public class InjectLanguageAction implements IntentionAction, LowPriorityAction 
   public boolean isAvailable(@NotNull Project project, @NotNull Editor editor, @NotNull PsiFile file) {
     PsiLanguageInjectionHost host = findInjectionHost(editor, file);
     if (host == null) return false;
+    if (!InjectionUtils.isInjectLanguageActionEnabled(host)) return false;
     List<Pair<PsiElement, TextRange>> injectedPsi = InjectedLanguageManager.getInstance(project).getInjectedPsiFiles(host);
     if (injectedPsi == null || injectedPsi.isEmpty()) {
       return !InjectedReferencesContributor.isInjected(file.findReferenceAt(editor.getCaretModel().getOffset()));
     }
     return false;
+  }
+
+  @Override
+  public @NotNull IntentionPreviewInfo generatePreview(@NotNull Project project, @NotNull Editor editor, @NotNull PsiFile file) {
+    PsiLanguageInjectionHost host = findInjectionHost(editor, file);
+    if (host == null) return IntentionPreviewInfo.EMPTY;
+    String text = StringUtil.shortenTextWithEllipsis(ElementManipulators.getValueText(host), 40, 10);
+    return new IntentionPreviewInfo.Html(IntelliLangBundle.message("intelliLang.inject.language.action.preview", text));
   }
 
   @Nullable
@@ -130,14 +143,8 @@ public class InjectLanguageAction implements IntentionAction, LowPriorityAction 
   public void invoke(@NotNull Project project,
                      @NotNull Editor editor,
                      @NotNull PsiFile file) throws IncorrectOperationException {
-    SmartPsiElementPointer<PsiFile> filePointer = SmartPointerManager.getInstance(project).createSmartPsiElementPointer(file);
     doChooseLanguageToInject(editor, injectable -> {
-      ReadAction.run(() -> {
-        if (project.isDisposed()) return;
-        PsiFile psiFile = filePointer.getElement();
-        if (psiFile == null || editor.isDisposed()) return;
-        invokeImpl(project, editor, psiFile, injectable);
-      });
+      invokeImpl(project, editor, file, injectable);
       return false;
     });
   }
@@ -274,7 +281,7 @@ public class InjectLanguageAction implements IntentionAction, LowPriorityAction 
                  @NotNull TextRange range,
                  @NotNull SmartPsiElementPointer<PsiLanguageInjectionHost> pointer,
                  @NotNull @Nls String text,
-                 @NotNull Processor<PsiLanguageInjectionHost> data);
+                 @NotNull Processor<? super PsiLanguageInjectionHost> data);
   }
 
 

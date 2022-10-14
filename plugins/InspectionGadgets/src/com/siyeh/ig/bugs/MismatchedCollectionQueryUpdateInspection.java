@@ -39,6 +39,7 @@ import com.siyeh.ig.ui.ExternalizableStringSet;
 import com.siyeh.ig.ui.UiUtils;
 import one.util.streamex.StreamEx;
 import org.intellij.lang.annotations.Pattern;
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -48,7 +49,6 @@ import java.awt.*;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import static com.siyeh.ig.psiutils.ClassUtils.isImmutable;
 
@@ -179,12 +179,12 @@ public class MismatchedCollectionQueryUpdateInspection extends BaseInspection {
     }
 
     @Override
-    public void visitReferenceExpression(PsiReferenceExpression ref) {
+    public void visitReferenceExpression(@NotNull PsiReferenceExpression ref) {
       super.visitReferenceExpression(ref);
       if (myVariable == null) {
         if (ref.getQualifierExpression() == null) {
-          makeUpdated(myInfo);
-          makeQueried(myInfo);
+          makeUpdated();
+          makeQueried();
         }
       } else if (ref.isReferenceTo(myVariable)) {
         process(findEffectiveReference(ref));
@@ -192,23 +192,23 @@ public class MismatchedCollectionQueryUpdateInspection extends BaseInspection {
     }
 
     @Override
-    public void visitThisExpression(PsiThisExpression expression) {
+    public void visitThisExpression(@NotNull PsiThisExpression expression) {
       super.visitThisExpression(expression);
       if (myVariable == null) {
         process(findEffectiveReference(expression));
       }
     }
 
-    private void makeUpdated(QueryUpdateInfo info) {
-      info.updated = true;
-      if (info.queried) {
+    private void makeUpdated() {
+      myInfo.updated = true;
+      if (myInfo.queried) {
         stopWalking();
       }
     }
 
-    private void makeQueried(QueryUpdateInfo info) {
-      info.queried = true;
-      if (info.updated) {
+    private void makeQueried() {
+      myInfo.queried = true;
+      if (myInfo.updated) {
         stopWalking();
       }
     }
@@ -216,7 +216,7 @@ public class MismatchedCollectionQueryUpdateInspection extends BaseInspection {
     private void process(PsiExpression reference) {
       PsiMethodCallExpression qualifiedCall = ExpressionUtils.getCallForQualifier(reference);
       if (qualifiedCall != null) {
-        processQualifiedCall(qualifiedCall, myQueryNames, myUpdateNames);
+        processQualifiedCall(qualifiedCall);
         return;
       }
       PsiElement parent = reference.getParent();
@@ -230,19 +230,19 @@ public class MismatchedCollectionQueryUpdateInspection extends BaseInspection {
               processCollectionMethods((PsiMethodCallExpression)surroundingCall, reference)) {
             return;
           }
-          makeQueried(myInfo);
+          makeQueried();
           if (!isQueryMethod(surroundingCall) && !COLLECTION_SAFE_ARGUMENT_METHODS.matches(surroundingCall)) {
-            makeUpdated(myInfo);
+            makeUpdated();
           }
           return;
         }
       }
       if (parent instanceof PsiMethodReferenceExpression) {
-        processQualifiedMethodReference(((PsiMethodReferenceExpression)parent), myQueryNames, myUpdateNames);
+        processQualifiedMethodReference(((PsiMethodReferenceExpression)parent));
         return;
       }
       if (parent instanceof PsiForeachStatement && ((PsiForeachStatement)parent).getIteratedValue() == reference) {
-        makeQueried(myInfo);
+        makeQueried();
         return;
       }
       if (parent instanceof PsiAssignmentExpression && ((PsiAssignmentExpression)parent).getLExpression() == reference) {
@@ -254,7 +254,7 @@ public class MismatchedCollectionQueryUpdateInspection extends BaseInspection {
         }
         if (ExpressionUtils.nonStructuralChildren(rValue)
           .allMatch(MismatchedCollectionQueryUpdateInspection::isCollectionInitializer)) {
-          makeUpdated(myInfo);
+          makeUpdated();
           return;
         }
       }
@@ -262,7 +262,7 @@ public class MismatchedCollectionQueryUpdateInspection extends BaseInspection {
         IElementType tokenType = ((PsiPolyadicExpression)parent).getOperationTokenType();
         if (tokenType.equals(JavaTokenType.PLUS)) {
           // String concatenation
-          makeQueried(myInfo);
+          makeQueried();
           return;
         }
         if (tokenType.equals(JavaTokenType.EQEQ) || tokenType.equals(JavaTokenType.NE)) {
@@ -270,31 +270,29 @@ public class MismatchedCollectionQueryUpdateInspection extends BaseInspection {
         }
       }
       if (parent instanceof PsiAssertStatement && ((PsiAssertStatement)parent).getAssertDescription() == reference) {
-        makeQueried(myInfo);
+        makeQueried();
         return;
       }
       if (parent instanceof PsiInstanceOfExpression || parent instanceof PsiSynchronizedStatement) return;
       // Any other reference
-      makeUpdated(myInfo);
-      makeQueried(myInfo);
+      makeUpdated();
+      makeQueried();
     }
 
-    private void processQualifiedMethodReference(PsiMethodReferenceExpression expression,
-                                                 Set<String> queryNames,
-                                                 Set<String> updateNames) {
+    private void processQualifiedMethodReference(PsiMethodReferenceExpression expression) {
       final String methodName = expression.getReferenceName();
-      if (isQueryUpdateMethodName(methodName, queryNames)) {
-        makeQueried(myInfo);
+      if (isQueryUpdateMethodName(methodName, myQueryNames)) {
+        makeQueried();
       }
-      if (isQueryUpdateMethodName(methodName, updateNames)) {
-        makeUpdated(myInfo);
+      if (isQueryUpdateMethodName(methodName, myUpdateNames)) {
+        makeUpdated();
       }
       final PsiMethod method = ObjectUtils.tryCast(expression.resolve(), PsiMethod.class);
       if (method != null &&
           (!PsiType.VOID.equals(method.getReturnType()) &&
            !PsiType.VOID.equals(LambdaUtil.getFunctionalInterfaceReturnType(expression)) ||
            ContainerUtil.or(method.getParameterList().getParameters(), p -> LambdaUtil.isFunctionalType(p.getType())))) {
-        makeQueried(myInfo);
+        makeQueried();
       }
     }
 
@@ -303,42 +301,42 @@ public class MismatchedCollectionQueryUpdateInspection extends BaseInspection {
       String name = call.getMethodExpression().getReferenceName();
       if (!COLLECTIONS_ALL.contains(name) || !isCollectionsClassMethod(call)) return false;
       if (COLLECTIONS_QUERIES.contains(name) && !(call.getParent() instanceof PsiExpressionStatement)) {
-        makeQueried(myInfo);
+        makeQueried();
         return true;
       }
       if (COLLECTIONS_UPDATES.contains(name)) {
         int index = ArrayUtil.indexOf(expressionList.getExpressions(), arg);
         if (index == 0) {
-          makeUpdated(myInfo);
+          makeUpdated();
         }
         else {
-          makeQueried(myInfo);
+          makeQueried();
         }
         return true;
       }
       return false;
     }
 
-    private void processQualifiedCall(PsiMethodCallExpression call, Set<String> queryNames, Set<String> updateNames) {
+    private void processQualifiedCall(PsiMethodCallExpression call) {
       boolean voidContext = ExpressionUtils.isVoidContext(call);
       String name = call.getMethodExpression().getReferenceName();
-      boolean queryQualifier = isQueryUpdateMethodName(name, queryNames);
-      boolean updateQualifier = isQueryUpdateMethodName(name, updateNames);
+      boolean queryQualifier = isQueryUpdateMethodName(name, myQueryNames);
+      boolean updateQualifier = isQueryUpdateMethodName(name, myUpdateNames);
       if (queryQualifier &&
           (!voidContext || PsiType.VOID.equals(call.getType()) || "toArray".equals(name) && !call.getArgumentList().isEmpty())) {
-        makeQueried(myInfo);
+        makeQueried();
       }
       if (updateQualifier) {
-        makeUpdated(myInfo);
+        makeUpdated();
         if (!voidContext) {
-          makeQueried(myInfo);
+          makeQueried();
         }
         else {
           for (PsiExpression arg : call.getArgumentList().getExpressions()) {
             PsiParameter parameter = MethodCallUtils.getParameterForArgument(arg);
             if (parameter != null && LambdaUtil.isFunctionalType(parameter.getType())) {
               if (ExpressionUtils.nonStructuralChildren(arg).anyMatch(e -> mayHaveSideEffect(e))) {
-                makeQueried(myInfo);
+                makeQueried();
                 break;
               }
             }
@@ -348,21 +346,21 @@ public class MismatchedCollectionQueryUpdateInspection extends BaseInspection {
               TypeUtils.variableHasTypeOrSubtype(myVariable, "java.util.concurrent.BlockingQueue")) {
             // poll(timeout, unit) on a blocking queue/dequeue may be considered querying, even if the result is not used,
             // because the thread will be blocked until a value is received (or a timeout happens).
-            makeQueried(myInfo);
+            makeQueried();
           }
           else if (("take".equals(name) || "takeFirst".equals(name) || "takeLast".equals(name)) &&
                    TypeUtils.variableHasTypeOrSubtype(myVariable, "java.util.concurrent.BlockingQueue")) {
             // take() on a blocking queue/dequeue may be considered querying, even if the result is not used.
             // because the thread will be blocked until a value is received.
-            makeQueried(myInfo);
+            makeQueried();
           }
         }
       }
       if (!queryQualifier && !updateQualifier) {
         if (!isQueryMethod(call)) {
-          makeUpdated(myInfo);
+          makeUpdated();
         }
-        makeQueried(myInfo);
+        makeQueried();
       }
     }
 
@@ -503,7 +501,7 @@ public class MismatchedCollectionQueryUpdateInspection extends BaseInspection {
       if (written) {
         PsiExpression initializer = variable.getInitializer();
         if (initializer != null) {
-          List<PsiExpression> expressions = ExpressionUtils.nonStructuralChildren(initializer).collect(Collectors.toList());
+          List<PsiExpression> expressions = ExpressionUtils.nonStructuralChildren(initializer).toList();
           if (!ContainerUtil.and(expressions, MismatchedCollectionQueryUpdateInspection::isCollectionInitializer)) {
             expressions.stream().filter(MismatchedCollectionQueryUpdateInspection::isCollectionInitializer)
               .forEach(emptyCollection -> registerError(emptyCollection, Boolean.TRUE));
@@ -613,8 +611,15 @@ public class MismatchedCollectionQueryUpdateInspection extends BaseInspection {
     return getCollectionQueryUpdateInfo(variable, codeBlock, queryNames, updateNames);
   }
 
-  public static boolean isUnmodified(PsiMethodCallExpression methodCall) {
-    final PsiExpression effectiveReference =  findEffectiveReference(methodCall);
+  /**
+   * @param collectCall a method call returning a list (e.g. {@code Stream.of(1, 2, 3).collect(Collectors.toList())})
+   * @return {@code true} if it's known that the result of {@code collectCall} is never updated;
+   * {@code false} if updated or not known
+   */
+  @Contract("null -> false")
+  public static boolean isUnmodified(@Nullable PsiMethodCallExpression collectCall) {
+    if (collectCall == null) return false;
+    final PsiExpression effectiveReference =  findEffectiveReference(collectCall);
     QueryUpdateInfo info = new QueryUpdateInfo();
     new Visitor(null, defaultQueryNames, defaultUpdateNames, info).process(effectiveReference);
     if (!info.updated) return true;

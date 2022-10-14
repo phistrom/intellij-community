@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.formatter
 
@@ -7,7 +7,7 @@ import com.intellij.psi.codeStyle.CommonCodeStyleSettings
 import org.jetbrains.kotlin.idea.KotlinLanguage
 import org.jetbrains.kotlin.idea.core.formatter.KotlinCodeStyleSettings
 
-class KotlinStyleGuideCodeStyle : KotlinPredefinedCodeStyle("Kotlin style guide", KotlinLanguage.INSTANCE) {
+class KotlinStyleGuideCodeStyle : KotlinPredefinedCodeStyle(KotlinStyleBundle.message("list.item.kotlin.style.guide"), KotlinLanguage.INSTANCE) {
     override val codeStyleId: String = CODE_STYLE_ID
 
     override fun apply(settings: CodeStyleSettings) {

@@ -15,43 +15,46 @@ import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.siyeh.InspectionGadgetsBundle;
 import de.plushnikov.intellij.plugin.LombokClassNames;
 import de.plushnikov.intellij.plugin.handler.BuilderHandler;
 import de.plushnikov.intellij.plugin.handler.FieldNameConstantsHandler;
 import de.plushnikov.intellij.plugin.handler.LazyGetterHandler;
 import de.plushnikov.intellij.plugin.handler.OnXAnnotationHandler;
 import de.plushnikov.intellij.plugin.util.LombokLibraryUtil;
-import de.plushnikov.intellij.plugin.util.PsiAnnotationSearchUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 import java.util.regex.Pattern;
 
-
 public class LombokHighlightErrorFilter implements HighlightInfoFilter {
-  private static final Pattern LOMBOK_ANY_ANNOTATION_REQUIRED =
-    Pattern.compile(JavaErrorBundle.message("incompatible.types", "lombok.*AnyAnnotation\\[\\]", "__*"));
 
-  private final Map<HighlightSeverity, Map<TextAttributesKey, List<LombokHighlightFilter>>> registeredFilters;
-  private final Map<HighlightSeverity, Map<TextAttributesKey, List<LombokHighlightFixHook>>> registeredHooks;
+  private static class Holder {
+    static final Pattern LOMBOK_ANY_ANNOTATION_REQUIRED =
+      Pattern.compile(JavaErrorBundle.message("incompatible.types", "lombok.*AnyAnnotation\\[\\]", "__*"));
+
+    static final Map<HighlightSeverity, Map<TextAttributesKey, List<LombokHighlightFilter>>> registeredFilters;
+    static final Map<HighlightSeverity, Map<TextAttributesKey, List<LombokHighlightFixHook>>> registeredHooks;
+
+    static {
+      registeredFilters = new HashMap<>();
+      registeredHooks = new HashMap<>();
+
+      for (LombokHighlightFilter highlightFilter : LombokHighlightFilter.values()) {
+        registeredFilters.computeIfAbsent(highlightFilter.severity, s -> new HashMap<>())
+          .computeIfAbsent(highlightFilter.key, k -> new ArrayList<>())
+          .add(highlightFilter);
+      }
+
+      for (LombokHighlightFixHook highlightFixHook : LombokHighlightFixHook.values()) {
+        registeredHooks.computeIfAbsent(highlightFixHook.severity, s -> new HashMap<>())
+          .computeIfAbsent(highlightFixHook.key, k -> new ArrayList<>())
+          .add(highlightFixHook);
+      }
+    }
+  }
 
   public LombokHighlightErrorFilter() {
-    registeredFilters = new HashMap<>();
-    registeredHooks = new HashMap<>();
-
-    for (LombokHighlightFilter highlightFilter : LombokHighlightFilter.values()) {
-      registeredFilters.computeIfAbsent(highlightFilter.severity, s -> new HashMap<>())
-        .computeIfAbsent(highlightFilter.key, k -> new ArrayList<>())
-        .add(highlightFilter);
-    }
-
-    for (LombokHighlightFixHook highlightFixHook : LombokHighlightFixHook.values()) {
-      registeredHooks.computeIfAbsent(highlightFixHook.severity, s -> new HashMap<>())
-        .computeIfAbsent(highlightFixHook.key, k -> new ArrayList<>())
-        .add(highlightFixHook);
-    }
   }
 
   @Override
@@ -71,7 +74,7 @@ public class LombokHighlightErrorFilter implements HighlightInfoFilter {
     }
 
     // check exceptions for highlights
-    boolean acceptHighlight = registeredFilters
+    boolean acceptHighlight = Holder.registeredFilters
       .getOrDefault(highlightInfo.getSeverity(), Collections.emptyMap())
       .getOrDefault(highlightInfo.type.getAttributesKey(), Collections.emptyList())
       .stream()
@@ -89,13 +92,13 @@ public class LombokHighlightErrorFilter implements HighlightInfoFilter {
       //Handling onX parameters
       if (OnXAnnotationHandler.isOnXParameterAnnotation(highlightInfo, file)
         || OnXAnnotationHandler.isOnXParameterValue(highlightInfo, file)
-        || (description != null && LOMBOK_ANY_ANNOTATION_REQUIRED.matcher(description).matches())) {
+        || (description != null && Holder.LOMBOK_ANY_ANNOTATION_REQUIRED.matcher(description).matches())) {
         return false;
       }
     }
 
     // register different quick fix for highlight
-    registeredHooks
+    Holder.registeredHooks
       .getOrDefault(highlightInfo.getSeverity(), Collections.emptyMap())
       .getOrDefault(highlightInfo.type.getAttributesKey(), Collections.emptyList())
       .stream()
@@ -112,7 +115,7 @@ public class LombokHighlightErrorFilter implements HighlightInfoFilter {
       private final Pattern pattern2 = preparePattern(2);
 
       @NotNull
-      private Pattern preparePattern(int count) {
+      private static Pattern preparePattern(int count) {
         return Pattern.compile(JavaErrorBundle.message("unhandled.exceptions", ".*", count));
       }
 
@@ -217,48 +220,6 @@ public class LombokHighlightErrorFilter implements HighlightInfoFilter {
       public boolean accept(@NotNull PsiElement highlightedElement) {
         return !LazyGetterHandler.isLazyGetterHandled(highlightedElement)
           || !LazyGetterHandler.isInitializedInConstructors(highlightedElement);
-      }
-    },
-
-    /**
-     * Handles warnings that are related to Builder.Default cause.
-     * The final fields that are marked with Builder.Default contains only possible value because user can set another value during the creation of the object.
-     */
-    //see de.plushnikov.intellij.plugin.inspection.DataFlowInspectionTest.testDefaultBuilderFinalValueInspectionIsAlwaysThat
-    //see de.plushnikov.intellij.plugin.inspection.PointlessBooleanExpressionInspectionTest.testPointlessBooleanExpressionBuilderDefault
-    CONSTANT_CONDITIONS_DEFAULT_BUILDER_CAN_BE_SIMPLIFIED(HighlightSeverity.WARNING, CodeInsightColors.WARNINGS_ATTRIBUTES) {
-      @SuppressWarnings("UnresolvedPropertyKey")
-      private final Pattern patternCanBeSimplified =
-        preparePattern(InspectionGadgetsBundle.message("simplifiable.conditional.expression.problem.descriptor"), "''{0}''");
-
-      @SuppressWarnings("UnresolvedPropertyKey")
-      private final Pattern patternIsAlways =
-        preparePattern(JavaAnalysisBundle.message("dataflow.message.constant.condition"), "<code>{0, choice, 0#false|1#true}</code>");
-
-      @NotNull
-      private Pattern preparePattern(String message, String s) {
-        return Pattern.compile(ProblemDescriptorUtil.removeLocReference(message).replace("<code>#ref</code>", "'(.+)'").replace(s, "'(.+)'"));
-      }
-
-      @Override
-      public boolean descriptionCheck(@Nullable String description, PsiElement highlightedElement) {
-        return description != null
-          && (patternCanBeSimplified.matcher(description).matches() || patternIsAlways.matcher(description).matches());
-      }
-
-      @Override
-      public boolean accept(@NotNull PsiElement highlightedElement) {
-        PsiReferenceExpression parent = PsiTreeUtil.getParentOfType(highlightedElement, PsiReferenceExpression.class);
-        if (parent == null) {
-          return true;
-        }
-
-        PsiElement resolve = parent.resolve();
-        if (!(resolve instanceof PsiField)) {
-          return true;
-        }
-
-        return !PsiAnnotationSearchUtil.isAnnotatedWith((PsiField) resolve, LombokClassNames.BUILDER_DEFAULT);
       }
     };
 

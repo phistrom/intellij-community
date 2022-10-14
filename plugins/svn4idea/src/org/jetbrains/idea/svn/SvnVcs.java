@@ -1,9 +1,10 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.idea.svn;
 
-import com.intellij.ide.FrameStateListener;
+import com.intellij.application.Topics;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.Application;
+import com.intellij.openapi.application.ApplicationActivationListener;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Logger;
@@ -27,6 +28,7 @@ import com.intellij.openapi.vcs.versionBrowser.ChangeBrowserSettings;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
+import com.intellij.openapi.wm.IdeFrame;
 import com.intellij.util.Consumer;
 import com.intellij.util.ThreeState;
 import com.intellij.util.messages.MessageBusConnection;
@@ -82,10 +84,7 @@ import static java.util.function.Function.identity;
 
 public final class SvnVcs extends AbstractVcs {
   private static final Logger LOG = new SvnFilteringExceptionLogger(Logger.getInstance(SvnVcs.class));
-
-  private static final String DO_NOT_LISTEN_TO_WC_DB = "svn.do.not.listen.to.wc.db";
   private static final Logger REFRESH_LOG = Logger.getInstance("#svn_refresh");
-  public static boolean ourListenToWcDb = !Boolean.getBoolean(DO_NOT_LISTEN_TO_WC_DB);
 
   public static final @NonNls @NotNull String VCS_NAME = "svn";
   public static final @NlsSafe @NotNull String VCS_DISPLAY_NAME = "Subversion";
@@ -251,8 +250,8 @@ public final class SvnVcs extends AbstractVcs {
     LoadedRevisionsCache.getInstance(myProject);
     if (myFrameStateListenerDisposable == null && !myProject.isDefault()) {
       myFrameStateListenerDisposable = Disposer.newDisposable();
-      busConnection.subscribe(FrameStateListener.TOPIC, new MyFrameStateListener(ChangeListManager.getInstance(myProject),
-                                                                                 VcsDirtyScopeManager.getInstance(myProject)));
+      Topics.subscribe(ApplicationActivationListener.TOPIC, myFrameStateListenerDisposable,
+                       new MyFrameStateListener(ChangeListManager.getInstance(myProject), VcsDirtyScopeManager.getInstance(myProject)));
     }
 
     mySvnBranchPointsCalculator = new SvnBranchPointsCalculator(this);
@@ -721,7 +720,7 @@ public final class SvnVcs extends AbstractVcs {
     }
   }
 
-  private static final class MyFrameStateListener implements FrameStateListener {
+  private static final class MyFrameStateListener implements ApplicationActivationListener {
     private final ChangeListManager myClManager;
     private final VcsDirtyScopeManager myDirtyScopeManager;
 
@@ -731,7 +730,7 @@ public final class SvnVcs extends AbstractVcs {
     }
 
     @Override
-    public void onFrameActivated() {
+    public void applicationActivated(@NotNull IdeFrame ideFrame) {
       final List<VirtualFile> folders = ((ChangeListManagerImpl)myClManager).getLockedFolders();
       if (!folders.isEmpty()) {
         myDirtyScopeManager.filesDirty(null, folders);
@@ -778,7 +777,6 @@ public final class SvnVcs extends AbstractVcs {
    * For instance, when working copies of several formats are presented in project
    * (though it seems to be rather unlikely case).
    *
-   * @return
    */
   @NotNull
   public ClientFactory getFactory() {

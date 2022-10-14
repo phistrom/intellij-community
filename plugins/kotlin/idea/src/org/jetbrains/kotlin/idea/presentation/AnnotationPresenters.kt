@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.presentation
 
@@ -6,8 +6,8 @@ import com.intellij.navigation.ItemPresentation
 import com.intellij.navigation.ItemPresentationProvider
 import com.intellij.psi.util.parentOfType
 import org.jetbrains.kotlin.fileClasses.JvmFileClassUtil
-import org.jetbrains.kotlin.idea.KotlinBundle
-import org.jetbrains.kotlin.idea.KotlinIconsIndependent
+import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
+import org.jetbrains.kotlin.idea.KotlinIcons
 import org.jetbrains.kotlin.psi.*
 import javax.swing.Icon
 
@@ -43,5 +43,5 @@ class KtJvmNameAnnotatedFilePresentation(private val annotationEntry: KtAnnotati
         return KotlinBundle.message("presentation.text.in.container", containingFile.name, containingFile.packageFqName)
     }
 
-    override fun getIcon(unused: Boolean): Icon = KotlinIconsIndependent.FILE
+    override fun getIcon(unused: Boolean): Icon = KotlinIcons.FILE
 }

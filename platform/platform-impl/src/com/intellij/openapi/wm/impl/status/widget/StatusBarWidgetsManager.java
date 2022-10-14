@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.wm.impl.status.widget;
 
 import com.intellij.ide.lightEdit.LightEdit;
@@ -12,6 +12,7 @@ import com.intellij.openapi.extensions.PluginDescriptor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.SimpleModificationTracker;
 import com.intellij.openapi.wm.*;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
@@ -19,10 +20,11 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
-@Service
+@Service(Service.Level.PROJECT)
 public final class StatusBarWidgetsManager extends SimpleModificationTracker implements Disposable {
-  private static final @NotNull Logger LOG = Logger.getInstance(StatusBar.class);
+  private static final @NotNull Logger LOG = Logger.getInstance(StatusBarWidgetsManager.class);
 
+  private final List<StatusBarWidgetFactory> myPendingFactories = new ArrayList<>();
   private final Map<StatusBarWidgetFactory, StatusBarWidget> myWidgetFactories = new LinkedHashMap<>();
   private final Map<String, StatusBarWidgetFactory> myWidgetIdsMap = new HashMap<>();
 
@@ -101,11 +103,18 @@ public final class StatusBarWidgetsManager extends SimpleModificationTracker imp
     }
   }
 
+  public boolean wasWidgetCreated(@NotNull String factoryId) {
+    synchronized (myWidgetFactories) {
+      return ContainerUtil.exists(myWidgetFactories.keySet(), factory -> factory.getId().equalsIgnoreCase(factoryId));
+    }
+  }
+
   @Override
   public void dispose() {
     synchronized (myWidgetFactories) {
       myWidgetFactories.forEach((factory, createdWidget) -> disableWidget(factory));
       myWidgetFactories.clear();
+      myPendingFactories.clear();
     }
   }
 
@@ -140,16 +149,15 @@ public final class StatusBarWidgetsManager extends SimpleModificationTracker imp
       myWidgetIdsMap.put(widget.ID(), factory);
       String anchor = getAnchor(factory, availableFactories);
 
-      UIUtil.invokeLaterIfNeeded(() -> {
-        if (!myProject.isDisposed()) {
-          StatusBar statusBar = WindowManager.getInstance().getStatusBar(myProject);
-          if (statusBar == null) {
-            LOG.error("Cannot add a widget for project without root status bar: " + factory.getId());
-            return;
-          }
+      ApplicationManager.getApplication().invokeLater(() -> {
+        StatusBar statusBar = WindowManager.getInstance().getStatusBar(myProject);
+        if (statusBar == null) {
+          LOG.error("Cannot add a widget for project without root status bar: " + factory.getId());
+        }
+        else {
           statusBar.addWidget(widget, anchor, this);
         }
-      });
+      }, myProject.getDisposed());
     }
   }
 
@@ -198,6 +206,20 @@ public final class StatusBarWidgetsManager extends SimpleModificationTracker imp
     return factory.isAvailable(myProject) && factory.isConfigurable() && factory.canBeEnabledOn(statusBar);
   }
 
+  public void installPendingWidgets() {
+    LOG.assertTrue(WindowManager.getInstance().getStatusBar(myProject) != null);
+
+    synchronized (myWidgetFactories) {
+      List<StatusBarWidgetFactory> pendingFactories = List.copyOf(myPendingFactories);
+      myPendingFactories.clear();
+      for (StatusBarWidgetFactory factory : pendingFactories) {
+        addWidgetFactory(factory);
+      }
+    }
+
+    updateAllWidgets();
+  }
+
   private void addWidgetFactory(@NotNull StatusBarWidgetFactory factory) {
     synchronized (myWidgetFactories) {
       if (LightEdit.owns(myProject) && !(factory instanceof LightEditCompatible)) {
@@ -205,6 +227,10 @@ public final class StatusBarWidgetsManager extends SimpleModificationTracker imp
       }
       if (myWidgetFactories.containsKey(factory)) {
         LOG.error("Factory has been added already: " + factory.getId());
+        return;
+      }
+      if (WindowManager.getInstance().getStatusBar(myProject) == null) {
+        myPendingFactories.add(factory);
         return;
       }
       myWidgetFactories.put(factory, null);
@@ -221,6 +247,7 @@ public final class StatusBarWidgetsManager extends SimpleModificationTracker imp
     synchronized (myWidgetFactories) {
       disableWidget(factory);
       myWidgetFactories.remove(factory);
+      myPendingFactories.remove(factory);
       incModificationCount();
     }
   }

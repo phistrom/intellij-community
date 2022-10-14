@@ -1,8 +1,8 @@
 // FILE: bar/Foo.before.java
-// "/(Static import|Import static) method 'foo.Bar.foobar'/" "true"
+// "/(Static import|Import static) method 'foo.Bar.foobar\(\)'/" "true"
 // ERROR: Unresolved reference: foobar
 // ACTION: Create method 'foobar'
-// WITH_RUNTIME
+// WITH_STDLIB
 package bar;
 
 public class Foo {
@@ -25,10 +25,10 @@ class Bar {
 }
 
 // FILE: bar/Foo.after.java
-// "/(Static import|Import static) method 'foo.Bar.foobar'/" "true"
+// "/(Static import|Import static) method 'foo.Bar.foobar\(\)'/" "true"
 // ERROR: Unresolved reference: foobar
 // ACTION: Create method 'foobar'
-// WITH_RUNTIME
+// WITH_STDLIB
 package bar;
 
 import static foo.Bar.foobar;

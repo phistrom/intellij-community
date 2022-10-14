@@ -5,6 +5,7 @@ import com.intellij.openapi.util.NlsContexts;
 import com.intellij.ui.components.panels.NonOpaquePanel;
 import com.intellij.ui.components.panels.OpaquePanel;
 import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.NamedColorUtil;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.accessibility.AccessibleContextUtil;
 
@@ -52,7 +53,11 @@ public abstract class GroupedElementsRenderer implements Accessible {
 
     setComponentIcon(icon, disabledIcon);
 
-    setSelected(myComponent, isSelected);
+    if (!ExperimentalUI.isNewUI()) {
+      setSelected(myComponent, isSelected);
+    } else {
+      UIUtil.setNotOpaqueRecursively(myComponent);
+    }
     setSelected(myTextLabel, isSelected);
 
     myRendererComponent.setPreferredWidth(preferredForcedWidth);
@@ -125,7 +130,7 @@ public abstract class GroupedElementsRenderer implements Accessible {
 
     @Override
     protected final Color getSelectionForeground() {
-      return UIUtil.getListSelectionForeground(true);
+      return NamedColorUtil.getListSelectionForeground(true);
     }
 
     @Override

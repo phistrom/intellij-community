@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.refactoring
 
@@ -14,8 +14,17 @@ import org.jetbrains.kotlin.idea.caches.resolve.unsafeResolveToDescriptor
 import org.jetbrains.kotlin.idea.util.IdeDescriptorRenderers
 import org.jetbrains.kotlin.psi.KtClassOrObject
 import org.jetbrains.kotlin.psi.KtDeclaration
+import org.jetbrains.kotlin.renderer.ClassifierNamePolicy
 import org.jetbrains.kotlin.renderer.DescriptorRenderer
-import org.jetbrains.kotlin.resolve.DescriptorToSourceUtils
+import org.jetbrains.kotlin.renderer.ParameterNameRenderingPolicy
+
+private val FUNCTION_RENDERER = DescriptorRenderer.withOptions {
+    withDefinedIn = false
+    modifiers = emptySet()
+    classifierNamePolicy = ClassifierNamePolicy.SHORT
+    withoutTypeParameters = true
+    parameterNameRenderingPolicy = ParameterNameRenderingPolicy.NONE
+}
 
 fun wrapOrSkip(s: String, inCode: Boolean) = if (inCode) "<code>$s</code>" else s
 
@@ -39,25 +48,8 @@ fun formatPsiClass(
     return if (markAsJava) "[Java] $description" else description
 }
 
-fun formatClass(classDescriptor: DeclarationDescriptor, inCode: Boolean): String {
-    val element = DescriptorToSourceUtils.descriptorToDeclaration(classDescriptor)
-    return if (element is PsiClass) {
-        formatPsiClass(element, false, inCode)
-    } else {
-        wrapOrSkip(formatClassDescriptor(classDescriptor), inCode)
-    }
-}
 
-fun formatFunction(functionDescriptor: DeclarationDescriptor, inCode: Boolean): String {
-    val element = DescriptorToSourceUtils.descriptorToDeclaration(functionDescriptor)
-    return if (element is PsiMethod) {
-        formatPsiMethod(element, false, inCode)
-    } else {
-        wrapOrSkip(formatFunctionDescriptor(functionDescriptor), inCode)
-    }
-}
-
-private fun formatFunctionDescriptor(functionDescriptor: DeclarationDescriptor) = DescriptorRenderer.COMPACT.render(functionDescriptor)
+private fun formatFunctionDescriptor(functionDescriptor: DeclarationDescriptor): String = FUNCTION_RENDERER.render(functionDescriptor)
 
 fun formatPsiMethod(
     psiMethod: PsiMethod,

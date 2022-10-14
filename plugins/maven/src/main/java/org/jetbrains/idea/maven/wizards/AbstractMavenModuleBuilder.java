@@ -1,12 +1,14 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.idea.maven.wizards;
 
+import com.intellij.ide.highlighter.ModuleFileType;
 import com.intellij.ide.util.projectWizard.*;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.externalSystem.service.project.manage.ExternalProjectsManagerImpl;
-import com.intellij.openapi.module.JavaModuleType;
-import com.intellij.openapi.module.ModuleType;
-import com.intellij.openapi.module.StdModuleTypes;
+import com.intellij.openapi.externalSystem.util.ExternalSystemUtil;
+import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.*;
+import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.DumbAwareRunnable;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.JavaSdk;
@@ -22,6 +24,8 @@ import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.idea.maven.importing.MavenImportUtil;
+import org.jetbrains.idea.maven.importing.MavenProjectImporter;
 import org.jetbrains.idea.maven.model.MavenArchetype;
 import org.jetbrains.idea.maven.model.MavenId;
 import org.jetbrains.idea.maven.project.MavenEnvironmentForm;
@@ -37,7 +41,6 @@ import java.util.List;
 import java.util.Map;
 
 import static icons.OpenapiIcons.RepositoryLibraryLogo;
-import static org.jetbrains.idea.maven.utils.MavenUtil.MAVEN_NAME;
 
 public abstract class AbstractMavenModuleBuilder extends ModuleBuilder implements SourcePathsBuilder {
   private MavenProject myAggregatorProject;
@@ -54,6 +57,12 @@ public abstract class AbstractMavenModuleBuilder extends ModuleBuilder implement
   private Map<String, String> myPropertiesToCreateByArtifact;
 
   @Override
+  protected void setupModule(Module module) throws ConfigurationException {
+    super.setupModule(module);
+    ExternalSystemUtil.markModuleAsMaven(module, true);
+  }
+
+  @Override
   public void setupRootModel(@NotNull ModifiableRootModel rootModel) {
     final Project project = rootModel.getProject();
 
@@ -61,7 +70,7 @@ public abstract class AbstractMavenModuleBuilder extends ModuleBuilder implement
     rootModel.addContentEntry(root);
 
     // todo this should be moved to generic ModuleBuilder
-    if (myJdk != null){
+    if (myJdk != null) {
       rootModel.setSdk(myJdk);
     } else {
       rootModel.inheritSdk();
@@ -76,6 +85,24 @@ public abstract class AbstractMavenModuleBuilder extends ModuleBuilder implement
                                    myInheritVersion, myArchetype, myPropertiesToCreateByArtifact,
                                    MavenProjectBundle.message("command.name.create.new.maven.module")).configure(project, root, false);
     });
+  }
+
+  @Override
+  public @Nullable Module commitModule(@NotNull Project project, @Nullable ModifiableModuleModel model) {
+    setMavenModuleFilePath(project, getName());
+    return super.commitModule(project, model);
+  }
+
+  private void setMavenModuleFilePath(@NotNull Project project, @NotNull String moduleName) {
+    if (myParentProject == null) return;
+    if (!MavenProjectImporter.isLegacyImportToTreeStructureEnabled(project)) return;
+
+    String parentModuleName = MavenImportUtil.getModuleName(myParentProject, project);
+    if (StringUtil.isNotEmpty(parentModuleName)) {
+      String moduleFilePath =
+        project.getBasePath() + File.separator + parentModuleName + "." + moduleName + ModuleFileType.DOT_DEFAULT_EXTENSION;
+      setModuleFilePath(moduleFilePath);
+    }
   }
 
   @Override
@@ -165,8 +192,16 @@ public abstract class AbstractMavenModuleBuilder extends ModuleBuilder implement
     return myInheritGroupId;
   }
 
+  public void setInheritGroupId(boolean inheritGroupId) {
+    myInheritGroupId = inheritGroupId;
+  }
+
   public boolean isInheritVersion() {
     return myInheritVersion;
+  }
+
+  public void setInheritVersion(boolean inheritVersion) {
+    myInheritVersion = inheritVersion;
   }
 
   public void setProjectId(MavenId id) {

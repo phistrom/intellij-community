@@ -27,8 +27,10 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ContentEntry;
 import com.intellij.openapi.roots.ModifiableRootModel;
+import com.intellij.openapi.roots.ProjectModelExternalSource;
 import com.intellij.openapi.roots.SourceFolder;
 import com.intellij.openapi.startup.StartupManager;
+import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VfsUtilCore;
@@ -150,7 +152,7 @@ public final class ContentRootDataService extends AbstractProjectDataService<Con
     for (final DataNode<ContentRootData> node : data) {
       final ContentRootData contentRoot = node.getData();
 
-      final ContentEntry contentEntry = findOrCreateContentRoot(modifiableRootModel, contentRoot.getRootPath());
+      final ContentEntry contentEntry = findOrCreateContentRoot(modifiableRootModel, contentRoot);
       if (!importedContentEntries.contains(contentEntry)) {
         removeSourceFoldersIfAbsent(contentEntry, contentRoot);
         importedContentEntries.add(contentEntry);
@@ -166,7 +168,8 @@ public final class ContentRootDataService extends AbstractProjectDataService<Con
             String sourceRootPath = sourceRoot.getPath();
             boolean createSourceFolder = !updatedSourceRoots.contains(sourceRootPath);
             if (createSourceFolder) {
-              createOrReplaceSourceFolder(sourceFolderManager, contentEntry, sourceRoot, module, type, forceDirectoriesCreation);
+              createOrReplaceSourceFolder(sourceFolderManager, contentEntry, sourceRoot, module, type, forceDirectoriesCreation,
+                                          ExternalSystemApiUtil.toExternalSource(contentRoot.getOwner()));
               if (externalSrcType == ExternalSystemSourceType.SOURCE || externalSrcType == ExternalSystemSourceType.TEST) {
                 updatedSourceRoots.add(sourceRootPath);
               }
@@ -177,7 +180,8 @@ public final class ContentRootDataService extends AbstractProjectDataService<Con
       }
 
       for (SourceRoot path : contentRoot.getPaths(ExternalSystemSourceType.EXCLUDED)) {
-        createExcludedRootIfAbsent(contentEntry, path, module.getName(), module.getProject());
+        createExcludedRootIfAbsent(contentEntry, path, module.getName(), module.getProject(),
+                                   ExternalSystemApiUtil.toExternalSource(node.getData().getOwner()));
       }
       contentEntriesMap.remove(contentEntry.getUrl());
     }
@@ -188,27 +192,18 @@ public final class ContentRootDataService extends AbstractProjectDataService<Con
 
   @Nullable
   private static JpsModuleSourceRootType<?> getJavaSourceRootType(ExternalSystemSourceType type) {
-    switch (type) {
-      case SOURCE:
-      case SOURCE_GENERATED:
-        return JavaSourceRootType.SOURCE;
-      case TEST:
-      case TEST_GENERATED:
-        return JavaSourceRootType.TEST_SOURCE;
-      case EXCLUDED:
-        return null;
-      case RESOURCE:
-      case RESOURCE_GENERATED:
-        return JavaResourceRootType.RESOURCE;
-      case TEST_RESOURCE:
-      case TEST_RESOURCE_GENERATED:
-        return JavaResourceRootType.TEST_RESOURCE;
-    }
-    return null;
+    return switch (type) {
+      case SOURCE, SOURCE_GENERATED -> JavaSourceRootType.SOURCE;
+      case TEST, TEST_GENERATED -> JavaSourceRootType.TEST_SOURCE;
+      case EXCLUDED -> null;
+      case RESOURCE, RESOURCE_GENERATED -> JavaResourceRootType.RESOURCE;
+      case TEST_RESOURCE, TEST_RESOURCE_GENERATED -> JavaResourceRootType.TEST_RESOURCE;
+    };
   }
 
   @NotNull
-  private static ContentEntry findOrCreateContentRoot(@NotNull ModifiableRootModel model, @NotNull String path) {
+  private static ContentEntry findOrCreateContentRoot(@NotNull ModifiableRootModel model, @NotNull ContentRootData contentRootData) {
+    String path = contentRootData.getRootPath();
     ContentEntry[] entries = model.getContentEntries();
 
     for (ContentEntry entry : entries) {
@@ -220,7 +215,7 @@ public final class ContentRootDataService extends AbstractProjectDataService<Con
         return entry;
       }
     }
-    return model.addContentEntry(pathToUrl(path));
+    return model.addContentEntry(pathToUrl(path), ExternalSystemApiUtil.toExternalSource(contentRootData.getOwner()));
   }
 
   private static Set<String> getSourceRoots(@NotNull ContentRootData contentRoot) {
@@ -254,9 +249,17 @@ public final class ContentRootDataService extends AbstractProjectDataService<Con
                                                   @NotNull final SourceRoot sourceRoot,
                                                   @NotNull Module module,
                                                   @NotNull JpsModuleSourceRootType<?> sourceRootType,
-                                                  boolean createEmptyContentRootDirectories) {
-
+                                                  boolean createEmptyContentRootDirectories,
+                                                  @NotNull ProjectModelExternalSource externalSource) {
     String path = sourceRoot.getPath();
+    if (SystemInfo.isWindows) {
+      if (!path.isEmpty() && StringUtil.isWhiteSpace(path.charAt(path.length() - 1))) {
+        LOG.warn("Source root ending with a space found. Such directories is not properly supported by JDK on Windows, see https://bugs.java.com/bugdatabase/view_bug.do?bug_id=8190546. " +
+                 "The source root will not be added: '" + path + "'");
+        return;
+      }
+    }
+
     if (createEmptyContentRootDirectories) {
       createEmptyDirectory(path);
     }
@@ -271,14 +274,13 @@ public final class ContentRootDataService extends AbstractProjectDataService<Con
     }
 
     String url = pathToUrl(path);
-
     if (!Files.exists(Path.of(path))) {
       logDebug("Source folder [%s] does not exist and will not be created, will add when dir is created", url);
       logUnitTest("Adding source folder listener to watch [%s] for creation in project [hashCode=%d]", url, module.getProject().hashCode());
       sourceFolderManager.addSourceFolder(module, url, sourceRootType);
     }
     else {
-      contentEntry.addSourceFolder(url, sourceRootType);
+      contentEntry.addSourceFolder(url, sourceRootType, externalSource);
     }
   }
 
@@ -353,7 +355,11 @@ public final class ContentRootDataService extends AbstractProjectDataService<Con
     }
   }
 
-  private static void createExcludedRootIfAbsent(@NotNull ContentEntry entry, @NotNull SourceRoot root, @NotNull String moduleName, @NotNull Project project) {
+  private static void createExcludedRootIfAbsent(@NotNull ContentEntry entry,
+                                                 @NotNull SourceRoot root,
+                                                 @NotNull String moduleName,
+                                                 @NotNull Project project,
+                                                 @NotNull ProjectModelExternalSource source) {
     String rootPath = root.getPath();
     for (VirtualFile file : entry.getExcludeFolderFiles()) {
       if (ExternalSystemApiUtil.getLocalFileSystemPath(file).equals(rootPath)) {
@@ -361,7 +367,7 @@ public final class ContentRootDataService extends AbstractProjectDataService<Con
       }
     }
     logDebug("Importing excluded root '%s' for content root '%s' of module '%s'", root, entry.getUrl(), moduleName);
-    entry.addExcludeFolder(pathToUrl(rootPath));
+    entry.addExcludeFolder(pathToUrl(rootPath), source);
   }
 
 

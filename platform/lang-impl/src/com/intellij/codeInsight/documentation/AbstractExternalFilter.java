@@ -156,21 +156,21 @@ public abstract class AbstractExternalFilter {
     if (baseUrl != null) {
       data.append("<base href=\"").append(baseUrl).append("\">");
     }
-    data.append("<style type=\"text/css\">" +
-                "  ul.inheritance {\n" +
-                "      margin:0;\n" +
-                "      padding:0;\n" +
-                "  }\n" +
-                "  ul.inheritance li {\n" +
-                "       display:inline;\n" +
-                "       list-style-type:none;\n" +
-                "  }\n" +
-                "  ul.inheritance li ul.inheritance {\n" +
-                "    margin-left:15px;\n" +
-                "    padding-left:15px;\n" +
-                "    padding-top:1px;\n" +
-                "  }\n" +
-                "</style>");
+    data.append("""
+                  <style type="text/css">  ul.inheritance {
+                        margin:0;
+                        padding:0;
+                    }
+                    ul.inheritance li {
+                         display:inline;
+                         list-style-type:none;
+                    }
+                    ul.inheritance li ul.inheritance {
+                      margin-left:15px;
+                      padding-left:15px;
+                      padding-top:1px;
+                    }
+                  </style>""");
 
     String read;
     String contentEncoding = null;
@@ -383,19 +383,23 @@ public abstract class AbstractExternalFilter {
     }
   }
 
-  private static class MyReader extends InputStreamReader {
+  protected static class MyReader extends InputStreamReader {
     private final ByteArrayInputStream myInputStream;
 
-    MyReader(ByteArrayInputStream in) {
+    public MyReader(ByteArrayInputStream in) {
       super(in);
       in.reset();
       myInputStream = in;
     }
 
-    MyReader(ByteArrayInputStream in, String charsetName) throws UnsupportedEncodingException {
+    public MyReader(ByteArrayInputStream in, String charsetName) throws UnsupportedEncodingException {
       super(in, charsetName);
       in.reset();
       myInputStream = in;
+    }
+
+    public ByteArrayInputStream getInputStream() {
+      return myInputStream;
     }
   }
 

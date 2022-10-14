@@ -4,6 +4,7 @@ package org.jetbrains.plugins.github.api
 import com.fasterxml.jackson.databind.JsonNode
 import com.intellij.collaboration.api.dto.GraphQLRequestDTO
 import com.intellij.collaboration.api.dto.GraphQLResponseDTO
+import com.intellij.collaboration.api.util.LinkHttpHeaderValue
 import com.intellij.util.ThrowableConvertor
 import org.jetbrains.plugins.github.api.data.GithubResponsePage
 import org.jetbrains.plugins.github.api.data.GithubSearchResult
@@ -19,8 +20,6 @@ import java.io.IOException
 sealed class GithubApiRequest<out T>(val url: String) {
   var operationName: String? = null
   abstract val acceptMimeType: String?
-
-  open val tokenHeaderType = GithubApiRequestExecutor.TokenHeaderType.TOKEN
 
   protected val headers = mutableMapOf<String, String>()
   val additionalHeaders: Map<String, String>
@@ -77,8 +76,9 @@ sealed class GithubApiRequest<out T>(val url: String) {
       : Get<GithubResponsePage<T>>(url, acceptMimeType) {
 
       override fun extractResult(response: GithubApiResponse): GithubResponsePage<T> {
-        return GithubResponsePage.parseFromHeader(parseJsonList(response, clazz),
-                                                  response.findHeader(GithubResponsePage.HEADER_NAME))
+        val list = parseJsonList(response, clazz)
+        val linkHeader = response.findHeader(LinkHttpHeaderValue.HEADER_NAME)?.let(LinkHttpHeaderValue::parse)
+        return GithubResponsePage(list, linkHeader)
       }
     }
 
@@ -88,8 +88,9 @@ sealed class GithubApiRequest<out T>(val url: String) {
       : Get<GithubResponsePage<T>>(url, acceptMimeType) {
 
       override fun extractResult(response: GithubApiResponse): GithubResponsePage<T> {
-        return GithubResponsePage.parseFromHeader(parseJsonSearchPage(response, clazz).items,
-                                                  response.findHeader(GithubResponsePage.HEADER_NAME))
+        val list = parseJsonList(response, clazz)
+        val linkHeader = response.findHeader(LinkHttpHeaderValue.HEADER_NAME)?.let(LinkHttpHeaderValue::parse)
+        return GithubResponsePage(list, linkHeader)
       }
     }
   }
@@ -124,8 +125,6 @@ sealed class GithubApiRequest<out T>(val url: String) {
                                    private val queryName: String,
                                    private val variablesObject: Any)
       : Post<T>(GithubApiContentHelper.JSON_MIME_TYPE, url) {
-
-      override val tokenHeaderType = GithubApiRequestExecutor.TokenHeaderType.BEARER
 
       override val body: String
         get() {

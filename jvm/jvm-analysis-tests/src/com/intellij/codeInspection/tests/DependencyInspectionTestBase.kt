@@ -1,23 +1,44 @@
 package com.intellij.codeInspection.tests
 
 import com.intellij.codeInspection.DependencyInspection
-import com.intellij.testFramework.fixtures.JavaCodeInsightFixtureTestCase
+import com.intellij.packageDependencies.DependencyRule
+import com.intellij.packageDependencies.DependencyValidationManager
+import com.intellij.psi.search.scope.packageSet.NamedScope
+import com.intellij.psi.search.scope.packageSet.PackageSetFactory
 
-abstract class DependencyInspectionTestBase : JavaCodeInsightFixtureTestCase() {
+abstract class DependencyInspectionTestBase : UastInspectionTestBase() {
+  override val inspection = DependencyInspection()
+
+  protected val javaFooFile = "JavaFoo.java"
+
+  protected val kotlinFooFile = "KotlinFoo.kt"
+
   override fun setUp() {
     super.setUp()
-    myFixture.enableInspections(inspection)
+    myFixture.addFileToProject("pkg/api/$javaFooFile", """
+      package pkg.api;
+      
+      public class JavaFoo() { };
+    """.trimIndent())
+    myFixture.addFileToProject("pkg/api/$kotlinFooFile", """
+      package pkg.api
+      
+      public class KotlinFoo()
+    """.trimIndent())
   }
 
-  override fun tearDown() {
-    try {
-      myFixture.disableInspections(inspection)
-    } finally {
-      super.tearDown()
+  protected fun dependencyViolationTest(fromFile: String, toFile: String, toFileText: String, skipImports: Boolean = false) {
+    val dependencyValidationManager = DependencyValidationManager.getInstance(project)
+    dependencyValidationManager.setSkipImportStatements(skipImports)
+    myFixture.addFileToProject("pkg/client/$toFile", toFileText)
+    val fromScopeId = fromFile.substringBefore(".")
+    val fromScope = dependencyValidationManager.getScope(fromScopeId) ?: NamedScope(
+      fromScopeId, PackageSetFactory.getInstance().compile("file:pkg/api/$fromFile")
+    )
+    val toScope = NamedScope(toFile.substringBefore("."), PackageSetFactory.getInstance().compile("file:pkg/client/$toFile"))
+    dependencyValidationManager.apply {
+      addRule(DependencyRule(toScope, fromScope, true))
     }
-  }
-
-  companion object {
-    private val inspection = DependencyInspection()
+    myFixture.testHighlighting("pkg/client/$toFile")
   }
 }

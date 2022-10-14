@@ -27,6 +27,7 @@ import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
 import com.intellij.execution.runners.ProgramRunner;
 import com.intellij.icons.AllIcons;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
@@ -95,9 +96,6 @@ public class MavenResumeAction extends AnAction {
 
     final MavenRunConfiguration runConfiguration = (MavenRunConfiguration)environment.getRunProfile();
     myMavenVersion = getMavenVersion(runConfiguration);
-
-
-    getTemplatePresentation().setEnabled(false);
 
     if (VersionComparatorUtil.compare(myMavenVersion, "3.5.3") < 0 || context == null) {
       processHandler.addProcessListener(new LegacyMavenResumeProcessAdapter(runConfiguration));
@@ -222,6 +220,11 @@ public class MavenResumeAction extends AnAction {
     else {
       e.getPresentation().setEnabled(false);
     }
+  }
+
+  @Override
+  public @NotNull ActionUpdateThread getActionUpdateThread() {
+    return ActionUpdateThread.BGT;
   }
 
   @Override

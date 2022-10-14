@@ -26,6 +26,7 @@ import com.intellij.remoteServer.runtime.deployment.debug.DebugConnectionDataNot
 import com.intellij.remoteServer.runtime.deployment.debug.DebugConnector;
 import com.intellij.util.Consumer;
 import com.intellij.util.messages.MessageBusConnection;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -73,6 +74,16 @@ public class ServerConnectionImpl<D extends DeploymentConfiguration> implements 
   @Nls
   public @NotNull String getStatusText() {
     return myStatusText != null ? myStatusText : myStatus.getPresentableText();
+  }
+
+  /**
+   * @deprecated Workaround fpr CWM-3308, in general, the runtime instance is internal and should not be exposed
+   */
+  @ApiStatus.Internal
+  @Deprecated
+  @Nullable
+  public ServerRuntimeInstance<D> getServerRuntimeInstance() {
+    return myRuntimeInstance;
   }
 
   @Override
@@ -233,7 +244,7 @@ public class ServerConnectionImpl<D extends DeploymentConfiguration> implements 
       .map(nextForProject -> nextForProject.findManager(deployment))
       .filter(Objects::nonNull)
       .map(DeploymentLogManagerImpl::getMainLoggingHandler)
-      .collect(Collectors.toList());
+      .toList();
 
     final Consumer<String> logConsumer = message -> {
       if (handlers.isEmpty()) {
@@ -566,7 +577,7 @@ public class ServerConnectionImpl<D extends DeploymentConfiguration> implements 
         DeploymentImpl deployment = orderedDeployments.get(remoteDeployment);
         if (deployment != null) {
           if (deployment instanceof LocalDeploymentImpl) {
-            ((LocalDeploymentImpl)deployment).setRemoteDeployment(remoteDeployment);
+            ((LocalDeploymentImpl<?>)deployment).setRemoteDeployment(remoteDeployment);
           }
         }
         else {

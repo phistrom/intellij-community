@@ -7,8 +7,10 @@ import com.intellij.ui.DoubleClickListener
 import com.intellij.ui.SideBorder
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.ListTableModel
+import com.intellij.util.ui.NamedColorUtil
 import com.intellij.util.ui.UIUtil
 import com.jetbrains.python.PyBundle.message
+import com.jetbrains.python.packaging.repository.PyPackageRepository
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
@@ -30,7 +32,7 @@ internal class PyPackagesTable<T : DisplayablePackage>(model: ListTableModel<T>,
     val column = columnModel.getColumn(1)
     column.maxWidth = 100
     column.resizable = false
-    border = SideBorder(UIUtil.getBoundsColor(), SideBorder.BOTTOM)
+    border = SideBorder(NamedColorUtil.getBoundsColor(), SideBorder.BOTTOM)
     rowHeight = 20
 
     initCrossNavigation(service, tablesView)
@@ -128,7 +130,7 @@ internal class PyPackagesTable<T : DisplayablePackage>(model: ListTableModel<T>,
 
   var items: List<T>
     get() = listModel.items
-    set(value) { listModel.items = value }
+    set(value) { listModel.items = value.toMutableList() }
 
   companion object {
     private const val NEXT_ROW_ACTION = "selectNextRow"
@@ -175,22 +177,24 @@ fun borderPanel(init: JPanel.() -> Unit) = object : JPanel() {
   }
 }
 
-fun headerPanel(label: JLabel, component: JComponent) = object : JPanel() {
+fun headerPanel(label: JLabel, component: JComponent?) = object : JPanel() {
   init {
     background = UIUtil.getControlColor()
     layout = BorderLayout()
-    border = BorderFactory.createCompoundBorder(SideBorder(UIUtil.getBoundsColor(), SideBorder.BOTTOM), EmptyBorder(0, 5, 0, 5))
+    border = BorderFactory.createCompoundBorder(SideBorder(NamedColorUtil.getBoundsColor(), SideBorder.BOTTOM), EmptyBorder(0, 5, 0, 5))
     preferredSize = Dimension(preferredSize.width, 25)
     minimumSize = Dimension(minimumSize.width, 25)
     maximumSize = Dimension(maximumSize.width, 25)
 
     add(label, BorderLayout.WEST)
-    addMouseListener(object : MouseAdapter() {
-      override fun mouseClicked(e: MouseEvent?) {
-        component.isVisible = !component.isVisible
-        label.icon = if (component.isVisible) AllIcons.General.ArrowDown else AllIcons.General.ArrowRight
-      }
-    })
+    if (component != null) {
+      addMouseListener(object : MouseAdapter() {
+        override fun mouseClicked(e: MouseEvent?) {
+          component.isVisible = !component.isVisible
+          label.icon = if (component.isVisible) AllIcons.General.ArrowDown else AllIcons.General.ArrowRight
+        }
+      })
+    }
   }
 }
 
@@ -215,11 +219,15 @@ private class PyPaginationAwareRenderer : DefaultTableCellRenderer() {
 }
 
 
-internal class PyPackagingTableGroup<T: DisplayablePackage>(@NlsSafe val name: String, val repoUrl: String, val table: PyPackagesTable<T>) {
+internal class PyPackagingTableGroup<T: DisplayablePackage>(val repository: PyPackageRepository, val table: PyPackagesTable<T>) {
+  @NlsSafe val name: String = repository.name!!
+  val repoUrl = repository.repositoryUrl ?: ""
+
   private var expanded = false
   private val label = JLabel(name).apply { icon = AllIcons.General.ArrowDown }
   private val header: JPanel = headerPanel(label, table)
   internal var itemsCount: Int? = null
+
 
   internal var items: List<T>
     get() = table.items

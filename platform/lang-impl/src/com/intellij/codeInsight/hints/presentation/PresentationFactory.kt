@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.hints.presentation
 
 import com.intellij.codeInsight.hint.HintManager
@@ -14,6 +14,7 @@ import com.intellij.openapi.editor.colors.EditorColors
 import com.intellij.openapi.editor.colors.EditorColors.REFERENCE_HYPERLINK_COLOR
 import com.intellij.openapi.editor.colors.TextAttributesKey
 import com.intellij.openapi.editor.impl.EditorImpl
+import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.vfs.JarFileSystem
@@ -39,7 +40,21 @@ import kotlin.math.max
  */
 @ApiStatus.Experimental
 class PresentationFactory(private val editor: EditorImpl) : InlayPresentationFactory {
-  private val textMetricsStorage = InlayTextMetricsStorage(editor)
+  companion object {
+    private val TEXT_METRICS_STORAGE = Key.create<InlayTextMetricsStorage>("InlayTextMetricsStorage")
+
+    private fun getTextMetricStorage(editor: EditorImpl): InlayTextMetricsStorage {
+      val storage = editor.getUserData(TEXT_METRICS_STORAGE)
+      if (storage == null) {
+        val newStorage = InlayTextMetricsStorage(editor)
+        editor.putUserData(TEXT_METRICS_STORAGE, newStorage)
+        return newStorage
+      }
+      return storage
+    }
+  }
+
+  private val textMetricsStorage = getTextMetricStorage(editor)
   private val offsetFromTopProvider = object : InsetValueProvider {
     override val top: Int
       get() = textMetricsStorage.getFontMetrics(true).offsetFromTop()
@@ -255,7 +270,6 @@ class PresentationFactory(private val editor: EditorImpl) : InlayPresentationFac
 
   @Contract(pure = true)
   fun referenceOnHover(base: InlayPresentation, clickListener: ClickListener): InlayPresentation {
-    val delegate = DynamicDelegatePresentation(base)
     val hovered = onClick(
       base = withReferenceAttributes(base),
       buttons = EnumSet.of(MouseButton.Left, MouseButton.Middle),
@@ -263,18 +277,8 @@ class PresentationFactory(private val editor: EditorImpl) : InlayPresentationFac
         clickListener.onClick(e, p)
       }
     )
-    return OnHoverPresentation(delegate, object : HoverListener {
-      override fun onHover(event: MouseEvent, translated: Point) {
-        val handCursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-        editor.setCustomCursor(this@PresentationFactory, handCursor)
-        delegate.delegate = hovered
-      }
-
-      override fun onHoverFinished() {
-        delegate.delegate = base
-        editor.setCustomCursor(this@PresentationFactory, null)
-      }
-    })
+    val delegate = ChangeOnHoverPresentation(base, { hovered })
+    return WithCursorOnHoverPresentation(delegate, Cursor.getPredefinedCursor(Cursor.HAND_CURSOR), editor)
   }
 
   private fun referenceInternal(base: InlayPresentation,
@@ -314,6 +318,12 @@ class PresentationFactory(private val editor: EditorImpl) : InlayPresentationFac
     }
   }
 
+  @Contract(pure = true)
+  fun withCursorOnHover(base: InlayPresentation, cursor: Cursor): InlayPresentation {
+    return WithCursorOnHoverPresentation(base, cursor, editor)
+  }
+
+  @Contract(pure = true)
   fun withReferenceAttributes(noHighlightReference: InlayPresentation): WithAttributesPresentation {
     return attributes(noHighlightReference, REFERENCE_HYPERLINK_COLOR,
                       WithAttributesPresentation.AttributesFlags().withSkipEffects(true))
@@ -366,8 +376,12 @@ class PresentationFactory(private val editor: EditorImpl) : InlayPresentationFac
     return SequencePresentation(seq)
   }
 
-  fun button(default: InlayPresentation, clicked: InlayPresentation, clickListener: ClickListener?, hoverListener: HoverListener?) : InlayPresentation {
-    val defaultOrClicked: BiStatePresentation = object : BiStatePresentation({ default }, { clicked }, false) {
+  fun button(default: InlayPresentation,
+             clicked: InlayPresentation,
+             clickListener: ClickListener?,
+             hoverListener: HoverListener?,
+             initialState: Boolean = false): Pair<InlayPresentation, BiStatePresentation> {
+    val defaultOrClicked: BiStatePresentation = object : BiStatePresentation({ default }, { clicked }, initialState) {
       override val width: Int
         get() = max(default.width, clicked.width)
 
@@ -387,7 +401,7 @@ class PresentationFactory(private val editor: EditorImpl) : InlayPresentationFac
       override fun mouseExited() {
         hoverListener?.onHoverFinished()
       }
-    }
+    } to defaultOrClicked
   }
 
   private fun attributes(base: InlayPresentation,
@@ -409,7 +423,7 @@ class PresentationFactory(private val editor: EditorImpl) : InlayPresentationFac
       var hint: LightweightHint? = null
       onHover(base, object : HoverListener {
         override fun onHover(event: MouseEvent, translated: Point) {
-          if (hint?.isVisible != true) {
+          if (hint?.isVisible != true && editor.contentComponent.isShowing) {
             hint = showTooltip(editor, event, tooltip)
           }
         }

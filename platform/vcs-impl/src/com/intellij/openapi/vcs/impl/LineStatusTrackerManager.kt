@@ -1,4 +1,6 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:Suppress("ReplacePutWithAssignment")
+
 package com.intellij.openapi.vcs.impl
 
 import com.google.common.collect.HashMultiset
@@ -27,10 +29,12 @@ import com.intellij.openapi.editor.event.EditorFactoryListener
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.fileEditor.FileDocumentManagerListener
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.progress.ProcessCanceledException
-import com.intellij.openapi.progress.util.BackgroundTaskUtil
+import com.intellij.openapi.progress.runUnderIndicator
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.io.FileUtilRt
 import com.intellij.openapi.util.text.StringUtil
@@ -55,19 +59,21 @@ import com.intellij.openapi.vfs.newvfs.events.VFileMoveEvent
 import com.intellij.openapi.vfs.newvfs.events.VFilePropertyChangeEvent
 import com.intellij.testFramework.LightVirtualFile
 import com.intellij.util.EventDispatcher
+import com.intellij.util.childScope
 import com.intellij.util.concurrency.Semaphore
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.ui.UIUtil
 import com.intellij.vcs.commit.isNonModalCommit
 import com.intellij.vcsUtil.VcsUtil
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.CalledInAny
 import org.jetbrains.annotations.NonNls
 import org.jetbrains.annotations.TestOnly
 import java.nio.charset.Charset
 import java.util.*
-import java.util.concurrent.Future
 import java.util.function.Supplier
 
 class LineStatusTrackerManager(private val project: Project) : LineStatusTrackerManagerI, Disposable {
@@ -100,9 +106,9 @@ class LineStatusTrackerManager(private val project: Project) : LineStatusTracker
     }
   }
 
-  class MyStartupActivity : VcsStartupActivity {
+  internal class MyStartupActivity : VcsStartupActivity {
     override fun runActivity(project: Project) {
-      LineStatusTrackerManager.getInstanceImpl(project).startListenForEditors()
+      getInstanceImpl(project).startListenForEditors()
     }
 
     override fun getOrder(): Int = VcsInitObject.OTHER_INITIALIZATION.order
@@ -123,8 +129,10 @@ class LineStatusTrackerManager(private val project: Project) : LineStatusTracker
 
     updatePartialChangeListsAvailability()
 
-    runInEdt {
-      if (project.isDisposed) return@runInEdt
+    AppUIExecutor.onUiThread().expireWith(project).execute {
+      if (project.isDisposed) {
+        return@execute
+      }
 
       ApplicationManager.getApplication().addApplicationListener(MyApplicationListener(), this)
       FileStatusManager.getInstance(project).addFileStatusListener(MyFileStatusListener(), this)
@@ -314,7 +322,7 @@ class LineStatusTrackerManager(private val project: Project) : LineStatusTracker
     data.clmFilePath = filePath
   }
 
-  private fun unregisterTrackerInCLM(data: TrackerData) {
+  private fun unregisterTrackerInCLM(data: TrackerData, wasUnbound: Boolean = false) {
     val tracker = data.tracker
     if (tracker !is ChangelistsLocalLineStatusTracker) return
 
@@ -328,7 +336,7 @@ class LineStatusTrackerManager(private val project: Project) : LineStatusTracker
     data.clmFilePath = null
 
     val actualFilePath = VcsUtil.getFilePath(tracker.virtualFile)
-    if (filePath != actualFilePath) {
+    if (filePath != actualFilePath && !wasUnbound) {
       LOG.error("[unregisterTrackerInCLM] unexpected file path: expected: $filePath, actual: $actualFilePath")
     }
   }
@@ -410,20 +418,22 @@ class LineStatusTrackerManager(private val project: Project) : LineStatusTracker
   }
 
   private fun getTrackerProvider(virtualFile: VirtualFile): LocalLineStatusTrackerProvider? {
-    if (!canCreateTrackerFor(virtualFile)) return null
+    if (!canCreateTrackerFor(virtualFile)) {
+      return null
+    }
 
-    val customTracker = LocalLineStatusTrackerProvider.EP_NAME.findFirstSafe { it.isTrackedFile(project, virtualFile) }
-    if (customTracker != null) return customTracker
-
+    LocalLineStatusTrackerProvider.EP_NAME.findFirstSafe { it.isTrackedFile(project, virtualFile) }?.let {
+      return it
+    }
     return listOf(ChangelistsLocalStatusTrackerProvider, DefaultLocalStatusTrackerProvider).find { it.isTrackedFile(project, virtualFile) }
   }
 
   @RequiresEdt
-  private fun releaseTracker(document: Document) {
+  private fun releaseTracker(document: Document, wasUnbound: Boolean = false) {
     val data = trackers.remove(document) ?: return
 
     eventDispatcher.multicaster.onTrackerRemoved(data.tracker)
-    unregisterTrackerInCLM(data)
+    unregisterTrackerInCLM(data, wasUnbound)
     data.tracker.release()
 
     log("Tracker released", data.tracker.virtualFile)
@@ -545,7 +555,12 @@ class LineStatusTrackerManager(private val project: Project) : LineStatusTracker
     }
 
     private fun handleSuccess(request: RefreshRequest, document: Document, refreshData: RefreshData) {
-      val virtualFile = FileDocumentManager.getInstance().getFile(document)!!
+      val virtualFile = FileDocumentManager.getInstance().getFile(document)
+      if (virtualFile == null) {
+        log("Loading finished: document is not bound", null)
+        return
+      }
+
       val loader = request.loader
 
       val tracker: LocalLineStatusTracker<*>
@@ -655,10 +670,10 @@ class LineStatusTrackerManager(private val project: Project) : LineStatusTracker
 
     private fun isTrackedEditor(editor: Editor): Boolean {
       // can't filter out "!isInLocalFileSystem" files, custom VcsBaseContentProvider can handle them
-      if (FileDocumentManager.getInstance().getFile(editor.document) == null) {
-        return false
-      }
-      return editor.project == null || editor.project == project
+      // check for isDisposed - light project in tests
+      return !project.isDisposed &&
+             (editor.project == null || editor.project == project) &&
+             FileDocumentManager.getInstance().getFile(editor.document) != null
     }
   }
 
@@ -715,6 +730,16 @@ class LineStatusTrackerManager(private val project: Project) : LineStatusTracker
         val data = trackers[document] ?: return
 
         action(data)
+      }
+    }
+  }
+
+  internal class MyFileDocumentManagerListener : FileDocumentManagerListener {
+    override fun afterDocumentUnbound(file: VirtualFile, document: Document) {
+      val projectManager = ProjectManager.getInstanceIfCreated() ?: return
+      for (project in projectManager.openProjects) {
+        val lstm = project.getServiceIfCreated(LineStatusTrackerManagerI::class.java) as? LineStatusTrackerManager ?: continue
+        lstm.releaseTracker(document, wasUnbound = true)
       }
     }
   }
@@ -787,7 +812,7 @@ class LineStatusTrackerManager(private val project: Project) : LineStatusTracker
   private inner class MyChangeListAvailabilityListener : ChangeListAvailabilityListener {
     override fun onBefore() {
       if (ChangeListManager.getInstance(project).areChangeListsEnabled()) {
-        val fileStates = LineStatusTrackerManager.getInstanceImpl(project).collectPartiallyChangedFilesStates()
+        val fileStates = getInstanceImpl(project).collectPartiallyChangedFilesStates()
         if (fileStates.isNotEmpty()) {
           PartialLineStatusTrackerManagerState.saveCurrentState(project, fileStates)
         }
@@ -1034,6 +1059,7 @@ class LineStatusTrackerManager(private val project: Project) : LineStatusTracker
                    NotificationType.INFORMATION) {
     init {
       icon = AllIcons.Toolwindows.ToolWindowChanges
+      setDisplayId(VcsNotificationIdsHolder.INACTIVE_RANGES_DAMAGED)
       addAction(NotificationAction.createSimple(
         Supplier { VcsBundle.message("action.NotificationAction.InactiveRangesDamagedNotification.text.view.changes") },
         Runnable {
@@ -1101,7 +1127,10 @@ class LineStatusTrackerManager(private val project: Project) : LineStatusTracker
  * - Notifies callbacks when queue is exhausted.
  */
 private abstract class SingleThreadLoader<Request, T> : Disposable {
-  private val LOG = Logger.getInstance(SingleThreadLoader::class.java)
+  companion object {
+    private val LOG = Logger.getInstance(SingleThreadLoader::class.java)
+  }
+
   private val LOCK: Any = Any()
 
   private val taskQueue = ArrayDeque<Request>()
@@ -1111,7 +1140,7 @@ private abstract class SingleThreadLoader<Request, T> : Disposable {
 
   private var isScheduled: Boolean = false
   private var isDisposed: Boolean = false
-  private var lastFuture: Future<*>? = null
+  private val scope = ApplicationManager.getApplication().coroutineScope.childScope()
 
   @RequiresBackgroundThread
   protected abstract fun loadRequest(request: Request): Result<T>
@@ -1119,15 +1148,18 @@ private abstract class SingleThreadLoader<Request, T> : Disposable {
   @RequiresEdt
   protected abstract fun handleResult(request: Request, result: Result<T>)
 
-
   @RequiresEdt
   fun scheduleRefresh(request: Request) {
-    if (isDisposed) return
+    if (isDisposed) {
+      return
+    }
 
     synchronized(LOCK) {
-      if (taskQueue.contains(request)) return
-      taskQueue.add(request)
+      if (taskQueue.contains(request)) {
+        return
+      }
 
+      taskQueue.add(request)
       schedule()
     }
   }
@@ -1139,7 +1171,7 @@ private abstract class SingleThreadLoader<Request, T> : Disposable {
       isDisposed = true
       taskQueue.clear()
       waitingForRefresh.clear()
-      lastFuture?.cancel(true)
+      scope.cancel()
 
       callbacks += callbacksWaitingUpdateCompletion
       callbacksWaitingUpdateCompletion.clear()
@@ -1178,18 +1210,21 @@ private abstract class SingleThreadLoader<Request, T> : Disposable {
 
 
   private fun schedule() {
-    if (isDisposed) return
+    if (isDisposed) {
+      return
+    }
 
     synchronized(LOCK) {
-      if (isScheduled) return
-      if (taskQueue.isEmpty()) return
+      if (isScheduled || taskQueue.isEmpty()) {
+        return
+      }
 
       isScheduled = true
-      lastFuture = ApplicationManager.getApplication().executeOnPooledThread {
+      scope.launch {
         ClientId.withClientId(ClientId.localId) {
-          BackgroundTaskUtil.runUnderDisposeAwareIndicator(this, Runnable {
+          runUnderIndicator {
             handleRequests()
-          })
+          }
         }
       }
     }
@@ -1260,7 +1295,7 @@ private abstract class SingleThreadLoader<Request, T> : Disposable {
       try {
         callback.run()
       }
-      catch (e: ProcessCanceledException) {
+      catch (ignore: ProcessCanceledException) {
       }
       catch (e: Throwable) {
         LOG.error(e)
@@ -1352,7 +1387,7 @@ private abstract class BaseRevisionStatusTrackerContentLoader : LineStatusTracke
            oldInfo.charset != newInfo.charset
   }
 
-  override fun loadContent(project: Project, info: ContentInfo): BaseRevisionContent? {
+  override fun loadContent(project: Project, info: ContentInfo): TrackerContent? {
     info as BaseRevisionContentInfo
     val lastUpToDateContent = info.baseContent.loadContent() ?: return null
     val correctedText = StringUtil.convertLineSeparators(lastUpToDateContent)
@@ -1374,15 +1409,14 @@ private abstract class BaseRevisionStatusTrackerContentLoader : LineStatusTracke
   private class BaseRevisionContent(val text: CharSequence) : TrackerContent
 }
 
-
 interface LocalLineStatusTrackerProvider {
   fun isTrackedFile(project: Project, file: VirtualFile): Boolean
   fun isMyTracker(tracker: LocalLineStatusTracker<*>): Boolean
   fun createTracker(project: Project, file: VirtualFile): LocalLineStatusTracker<*>?
 
   companion object {
-    val EP_NAME: ExtensionPointName<LocalLineStatusTrackerProvider> =
-      ExtensionPointName.create("com.intellij.openapi.vcs.impl.LocalLineStatusTrackerProvider")
+    internal val EP_NAME =
+      ExtensionPointName<LocalLineStatusTrackerProvider>("com.intellij.openapi.vcs.impl.LocalLineStatusTrackerProvider")
   }
 }
 

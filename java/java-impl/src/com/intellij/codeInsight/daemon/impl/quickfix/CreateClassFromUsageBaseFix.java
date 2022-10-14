@@ -19,7 +19,9 @@ import com.intellij.codeInsight.ExpectedTypeInfo;
 import com.intellij.codeInsight.ExpectedTypesProvider;
 import com.intellij.codeInsight.daemon.QuickFixBundle;
 import com.intellij.codeInsight.intention.impl.BaseIntentionAction;
+import com.intellij.codeInsight.intention.preview.IntentionPreviewInfo;
 import com.intellij.codeInspection.util.IntentionName;
+import com.intellij.ide.scratch.ScratchUtil;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
@@ -27,6 +29,7 @@ import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
+import com.intellij.psi.util.PsiUtilCore;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -43,6 +46,9 @@ public abstract class CreateClassFromUsageBaseFix extends BaseIntentionAction {
     myRefElement = SmartPointerManager.getInstance(refElement.getProject()).createSmartPsiElementPointer(refElement);
   }
 
+  @Override
+  public abstract @NotNull IntentionPreviewInfo generatePreview(@NotNull Project project, @NotNull Editor editor, @NotNull PsiFile file);
+
   protected abstract @IntentionName String getText(String varName);
 
   private boolean isAvailableInContext(@NotNull final PsiJavaCodeReferenceElement element) {
@@ -56,6 +62,7 @@ public abstract class CreateClassFromUsageBaseFix extends BaseIntentionAction {
 
     if (parent instanceof PsiTypeElement) {
       if (parent.getParent() instanceof PsiReferenceParameterList) return true;
+      if (parent.getParent() instanceof PsiDeconstructionPattern) return true;
 
       while (parent.getParent() instanceof PsiTypeElement){
         parent = parent.getParent();
@@ -138,7 +145,7 @@ public abstract class CreateClassFromUsageBaseFix extends BaseIntentionAction {
   public boolean isAvailable(@NotNull final Project project, final Editor editor, final PsiFile file) {
     final PsiJavaCodeReferenceElement element = getRefElement();
     if (element == null ||
-        !element.getManager().isInProject(element)) {
+        (!element.getManager().isInProject(element) && !ScratchUtil.isScratch(PsiUtilCore.getVirtualFile(element)))) {
       return false;
     }
     JavaResolveResult[] results = element.multiResolve(true);

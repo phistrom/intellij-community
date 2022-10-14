@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.plugins.groovy.dsl;
 
 import com.intellij.ide.impl.TrustedProjects;
@@ -40,6 +40,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.groovy.GdslFileType;
 import org.jetbrains.plugins.groovy.dsl.DslActivationStatus.Status;
 import org.jetbrains.plugins.groovy.dsl.holders.CustomMembersHolder;
+import org.jetbrains.plugins.groovy.dsl.holders.OriginAwareMembersHolder;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyFile;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.blocks.GrClosableBlock;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.GrTypeDefinition;
@@ -52,9 +53,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
-/**
- * @author peter
- */
 public final class GroovyDslFileIndex {
   private static final Key<Pair<GroovyDslExecutor, Long>> CACHED_EXECUTOR = Key.create("CachedGdslExecutor");
   private static final Key<CachedValue<List<GroovyDslScript>>> SCRIPTS_CACHE = Key.create("GdslScriptCache");
@@ -98,7 +96,7 @@ public final class GroovyDslFileIndex {
     }, app.getDisposed());
   }
 
-  static void disableFile(@NotNull VirtualFile vfile, @NotNull Status status, @NlsSafe @Nullable String error) {
+  public static void disableFile(@NotNull VirtualFile vfile, @NotNull Status status, @NlsSafe @Nullable String error) {
     assert status != Status.ACTIVE;
     setStatusAndError(vfile, status, error);
     vfile.putUserData(CACHED_EXECUTOR, null);
@@ -206,6 +204,10 @@ public final class GroovyDslFileIndex {
     for (GroovyDslScript script : getDslScripts(placeFile.getProject())) {
       GroovyClassDescriptor descriptor = new GroovyClassDescriptor(psiType, psiClass, place, placeFile);
       CustomMembersHolder holder = script.processExecutor(descriptor);
+      VirtualFile origin = script.getFile();
+      if (origin != null) {
+        holder = new OriginAwareMembersHolder(origin, holder);
+      }
       if (!processor.process(holder, descriptor)) {
         return false;
       }

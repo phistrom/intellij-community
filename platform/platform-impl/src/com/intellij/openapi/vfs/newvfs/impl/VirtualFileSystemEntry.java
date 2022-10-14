@@ -1,10 +1,11 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vfs.newvfs.impl;
 
 import com.intellij.core.CoreBundle;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ex.ApplicationManagerEx;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.impl.LoadTextUtil;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.util.Key;
@@ -38,54 +39,44 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
   static final PersistentFS ourPersistence = PersistentFS.getInstance();
 
   @ApiStatus.Internal
+  public static void markAllFilesAsUnindexed() {
+    VfsData.markAllFilesAsUnindexed();
+  }
+
+  @ApiStatus.Internal
   static class VfsDataFlags {
     static final int IS_WRITABLE_FLAG = 0x0100_0000;
     static final int IS_HIDDEN_FLAG = 0x0200_0000;
-    /**
-     * @see com.intellij.util.indexing.UnindexedFilesFinder
-     * @see com.intellij.util.indexing.FileBasedIndexImpl
-     */
-    private static final int INDEXED_FLAG = 0x0400_0000;
-    /**
-     * true if the line separator for this file was detected to be equal to {@link com.intellij.util.LineSeparator#getSystemLineSeparator()}
-     */
-    static final int SYSTEM_LINE_SEPARATOR_DETECTED = 0x0800_0000; // makes sense for non-directory file only
-    /**
-     * the case-sensitivity of this directory children is known, so the flag CHILDREN_CASE_SENSITIVE is actual
-     */
-    static final int CHILDREN_CASE_SENSITIVITY_CACHED = SYSTEM_LINE_SEPARATOR_DETECTED; // makes sense for directory only
+    static final int IS_OFFLINE = 0x0400_0000;
+    /** {@code true} if the line separator for this file was detected to be equal to {@link com.intellij.util.LineSeparator#getSystemLineSeparator()}. */
+    static final int SYSTEM_LINE_SEPARATOR_DETECTED = 0x0800_0000; // applicable only to non-directory files
+    /** The case-sensitivity of the directory children is known, so the value of {@link #CHILDREN_CASE_SENSITIVE} is actual. */
+    static final int CHILDREN_CASE_SENSITIVITY_CACHED = SYSTEM_LINE_SEPARATOR_DETECTED; // applicable only to directories
     private static final int DIRTY_FLAG = 0x1000_0000;
-    /**
-     * this file is a symlink
-     */
+    /** This file is a symlink. */
     static final int IS_SYMLINK_FLAG = 0x2000_0000;
-    /**
-     * this file is not a symlink but there's a symlink somewhere up among parents
-     */
+    /** This file is not a symlink, but there's a symlink somewhere up among the parents. */
     static final int STRICT_PARENT_HAS_SYMLINK_FLAG = 0x4000_0000;
-    /**
-     * this directory contains case-sensitive files. I.e. files "readme.txt" and "README.TXT" it can contain would be treated as different files.
-     */
-    static final int CHILDREN_CASE_SENSITIVE = 0x8000_0000; // makes sense for directory only
-    static final int IS_SPECIAL_FLAG = CHILDREN_CASE_SENSITIVE; // makes sense for non-directory file only
+    /** This directory contains case-sensitive files. I.e. files "readme.txt" and "README.TXT" it can contain would be treated as different. */
+    static final int CHILDREN_CASE_SENSITIVE = 0x8000_0000; // applicable only to directories
+    static final int IS_SPECIAL_FLAG = CHILDREN_CASE_SENSITIVE; // applicable only to non-directory files
   }
+
   static final int ALL_FLAGS_MASK =
-    VfsDataFlags.DIRTY_FLAG | VfsDataFlags.IS_SYMLINK_FLAG |
-    VfsDataFlags.STRICT_PARENT_HAS_SYMLINK_FLAG | VfsDataFlags.IS_WRITABLE_FLAG | VfsDataFlags.IS_HIDDEN_FLAG | VfsDataFlags.INDEXED_FLAG |
-    VfsDataFlags.CHILDREN_CASE_SENSITIVE | VfsDataFlags.CHILDREN_CASE_SENSITIVITY_CACHED;
+    VfsDataFlags.IS_WRITABLE_FLAG | VfsDataFlags.IS_HIDDEN_FLAG | VfsDataFlags.IS_OFFLINE | VfsDataFlags.SYSTEM_LINE_SEPARATOR_DETECTED |
+    VfsDataFlags.DIRTY_FLAG | VfsDataFlags.IS_SYMLINK_FLAG | VfsDataFlags.STRICT_PARENT_HAS_SYMLINK_FLAG | VfsDataFlags.CHILDREN_CASE_SENSITIVE;
 
   @MagicConstant(flagsFromClass = VfsDataFlags.class)
   @interface Flags {}
 
-  @NotNull // except NULL_VIRTUAL_FILE
-  private volatile VfsData.Segment mySegment;
+  private volatile @NotNull("except `NULL_VIRTUAL_FILE`") VfsData.Segment mySegment;
   private volatile VirtualDirectoryImpl myParent;
   final int myId;
   private volatile CachedFileType myFileType;
 
   static {
-    //noinspection ConstantConditions
-    assert (~ALL_FLAGS_MASK) == LocalTimeCounter.TIME_MASK;
+    //noinspection ConstantValue
+    assert ~ALL_FLAGS_MASK == LocalTimeCounter.TIME_MASK;
   }
 
   VirtualFileSystemEntry(int id, @NotNull VfsData.Segment segment, @Nullable VirtualDirectoryImpl parent) {
@@ -97,9 +88,8 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
     }
   }
 
-  // for NULL_FILE
   private VirtualFileSystemEntry() {
-    // although in general mySegment is always @NotNull, in this case we made an exception to be able to instantiate special singleton NULL_VIRTUAL_FILE
+    // an exception to instantiate the special singleton `NULL_VIRTUAL_FILE`
     //noinspection ConstantConditions
     mySegment = null;
     myParent = null;
@@ -107,10 +97,14 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
   }
 
   @NotNull VfsData getVfsData() {
-    return getSegment().vfsData;
+    VfsData data = getSegment().vfsData;
+    if (!((PersistentFSImpl)ourPersistence).isOwnData(data)) {
+      throw new AssertionError("Alien file!");
+    }
+    return data;
   }
 
-  VfsData.@NotNull Segment getSegment() {
+  @NotNull VfsData.Segment getSegment() {
     VfsData.Segment segment = mySegment;
     if (segment.replacement != null) {
       segment = updateSegmentAndParent(segment);
@@ -142,14 +136,12 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
   }
 
   @Override
-  @NotNull
-  public String getName() {
+  public @NotNull String getName() {
     return getNameSequence().toString();
   }
 
-  @NotNull
   @Override
-  public CharSequence getNameSequence() {
+  public @NotNull CharSequence getNameSequence() {
     return FileNameCache.getVFileName(getNameId());
   }
 
@@ -168,7 +160,26 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
 
   @Override
   public boolean isDirty() {
-    return getFlagInt(VfsDataFlags.DIRTY_FLAG);
+    return getFlagInt(VfsDataFlags.DIRTY_FLAG) && !isOffline();
+  }
+
+  @Override
+  public boolean isOffline() {
+    if (getFlagInt(VfsDataFlags.IS_OFFLINE)) {
+      return true;
+    }
+
+    VirtualDirectoryImpl parent = getParent();
+    return parent != null && parent.isOffline();
+  }
+
+  @Override
+  public void setOffline(boolean offline) {
+    boolean wasOffline = isOffline();
+    setFlagInt(VfsDataFlags.IS_OFFLINE, offline);
+    if (wasOffline && !isOffline()) {
+      markDirtyRecursively();
+    }
   }
 
   @Override
@@ -189,11 +200,17 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
   }
 
   public boolean isFileIndexed() {
-    return getFlagInt(VfsDataFlags.INDEXED_FLAG);
+    if (VfsData.isIsIndexedFlagDisabled) {
+      return false;
+    }
+    return getSegment().isIndexed(myId);
   }
 
   public void setFileIndexed(boolean indexed) {
-    setFlagInt(VfsDataFlags.INDEXED_FLAG, indexed);
+    if (VfsData.isIsIndexedFlagDisabled) {
+      return;
+    }
+    getSegment().setIndexed(myId, indexed);
   }
 
   @Override
@@ -240,8 +257,7 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
   }
 
   @Override
-  @NotNull
-  public String getUrl() {
+  public @NotNull String getUrl() {
     String protocol = getFileSystem().getProtocol();
     int prefixLen = protocol.length() + "://".length();
     char[] chars = appendPathOnFileSystem(prefixLen, new int[]{prefixLen});
@@ -250,19 +266,18 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
   }
 
   @Override
-  @NotNull
-  public String getPath() {
+  public @NotNull String getPath() {
     return new String(appendPathOnFileSystem(0, new int[]{0}));
   }
 
   @Override
-  public void delete(final Object requestor) throws IOException {
+  public void delete(Object requestor) throws IOException {
     ApplicationManager.getApplication().assertWriteAccessAllowed();
     ourPersistence.deleteFile(requestor, this);
   }
 
   @Override
-  public void rename(final Object requestor, @NotNull @NonNls final String newName) throws IOException {
+  public void rename(Object requestor, @NotNull @NonNls String newName) throws IOException {
     ApplicationManager.getApplication().assertWriteAccessAllowed();
     if (getName().equals(newName)) return;
     validateName(newName);
@@ -270,8 +285,7 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
   }
 
   @Override
-  @NotNull
-  public VirtualFile createChildData(final Object requestor, @NotNull final String name) throws IOException {
+  public @NotNull VirtualFile createChildData(Object requestor, @NotNull String name) throws IOException {
     validateName(name);
     return ourPersistence.createChildFile(requestor, this, name);
   }
@@ -292,7 +306,7 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
   }
 
   @Override
-  public void setTimeStamp(final long time) throws IOException {
+  public void setTimeStamp(long time) throws IOException {
     ourPersistence.setTimeStamp(this, time);
   }
 
@@ -301,9 +315,8 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
     return ourPersistence.getLength(this);
   }
 
-  @NotNull
   @Override
-  public VirtualFile copy(final Object requestor, @NotNull final VirtualFile newParent, @NotNull final String copyName) throws IOException {
+  public @NotNull VirtualFile copy(Object requestor, @NotNull VirtualFile newParent, @NotNull String copyName) throws IOException {
     if (getFileSystem() != newParent.getFileSystem()) {
       throw new IOException(CoreBundle.message("file.copy.error", newParent.getPresentableUrl()));
     }
@@ -316,7 +329,7 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
   }
 
   @Override
-  public void move(final Object requestor, @NotNull final VirtualFile newParent) throws IOException {
+  public void move(Object requestor, @NotNull VirtualFile newParent) throws IOException {
     ApplicationManager.getApplication().assertWriteAccessAllowed();
 
     if (getFileSystem() != newParent.getFileSystem()) {
@@ -345,8 +358,7 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
   }
 
   @Override
-  @NotNull
-  public VirtualFile createChildDirectory(final Object requestor, @NotNull final String name) throws IOException {
+  public @NotNull VirtualFile createChildDirectory(Object requestor, @NotNull String name) throws IOException {
     validateName(name);
     return ourPersistence.createChildDirectory(requestor, this, name);
   }
@@ -368,8 +380,10 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
   }
 
   @Override
-  @NonNls
-  public String toString() {
+  public @NonNls String toString() {
+    if (!((PersistentFSImpl)ourPersistence).isOwnData(getSegment().vfsData)) {
+      return "Alien file!";
+    }
     if (isValid()) {
       return getUrl();
     }
@@ -408,7 +422,8 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
   }
 
   private static class DebugInvalidation {
-    private static final boolean DEBUG = ApplicationManager.getApplication().isUnitTestMode() || ApplicationManager.getApplication().isInternal();
+    private static final Logger LOG = Logger.getInstance(VirtualFileSystemEntry.class);
+    private static final boolean DEBUG = LOG.isDebugEnabled();
     private static final Key<String> INVALIDATION_REASON = Key.create("INVALIDATION_REASON");
     private static final Key<Throwable> INVALIDATION_TRACE = Key.create("INVALIDATION_TRACE");
   }
@@ -439,14 +454,12 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
     return reason + "; stacktrace:\n" + ExceptionUtil.getThrowableText(trace);
   }
 
-  @NotNull
   @Override
-  public Charset getCharset() {
+  public @NotNull Charset getCharset() {
     return isCharsetSet() ? super.getCharset() : computeCharset();
   }
 
-  @NotNull
-  private Charset computeCharset() {
+  private @NotNull Charset computeCharset() {
     Charset charset;
     if (isDirectory()) {
       Charset configured = EncodingManager.getInstance().getEncoding(this, true);
@@ -477,7 +490,7 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
   @Override
   public @NotNull String getPresentableName() {
     if (UISettings.getInstance().getHideKnownExtensionInTabs() && !isDirectory()) {
-      final String nameWithoutExtension = getNameWithoutExtension();
+      String nameWithoutExtension = getNameWithoutExtension();
       return nameWithoutExtension.isEmpty() ? getName() : nameWithoutExtension;
     }
     return getName();
@@ -540,7 +553,7 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
   @Override
   public NewVirtualFile getCanonicalFile() {
     if (thisOrParentHaveSymlink()) {
-      final String path = getCanonicalPath();
+      String path = getCanonicalPath();
       return path != null ? (NewVirtualFile)getFileSystem().findFileByPath(path) : null;
     }
     return this;
@@ -549,6 +562,7 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
   @Override
   public boolean isRecursiveOrCircularSymlink() {
     if (!isSymlink()) return false;
+
     NewVirtualFile resolved = getCanonicalFile();
     // invalid symlink
     if (resolved == null) return false;
@@ -557,7 +571,7 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
 
     // check if it's circular - any symlink above resolves to my target too
     for (VirtualFileSystemEntry p = getParent(); p != null ; p = p.getParent()) {
-      // optimization: when the file has no symlinks up the hierarchy, it's not circular
+      // when the file has no symlinks up the hierarchy, it's not circular
       if (!p.thisOrParentHaveSymlink()) return false;
       if (p.isSymlink()) {
         VirtualFile parentResolved = p.getCanonicalFile();
@@ -566,12 +580,12 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
         }
       }
     }
+
     return false;
   }
 
-  @NotNull
   @Override
-  public FileType getFileType() {
+  public final @NotNull FileType getFileType() {
     CachedFileType cache = myFileType;
     FileType type = cache == null ? null : cache.getUpToDateOrNull();
     if (type == null) {
@@ -590,39 +604,34 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
         return "NULL";
       }
 
-      @NotNull
       @Override
-      public NewVirtualFileSystem getFileSystem() {
+      public @NotNull NewVirtualFileSystem getFileSystem() {
         throw new UnsupportedOperationException();
       }
 
-      @Nullable
       @Override
-      public NewVirtualFile findChild(@NotNull String name) {
+      public @Nullable NewVirtualFile findChild(@NotNull String name) {
         throw new UnsupportedOperationException();
       }
 
-      @Nullable
       @Override
-      public NewVirtualFile refreshAndFindChild(@NotNull String name) {
+      public @Nullable NewVirtualFile refreshAndFindChild(@NotNull String name) {
         throw new UnsupportedOperationException();
       }
 
-      @Nullable
       @Override
-      public NewVirtualFile findChildIfCached(@NotNull String name) {
+      public @Nullable NewVirtualFile findChildIfCached(@NotNull String name) {
         throw new UnsupportedOperationException();
       }
 
-      @NotNull
       @Override
-      public Collection<VirtualFile> getCachedChildren() {
+      public @NotNull Collection<VirtualFile> getCachedChildren() {
         throw new UnsupportedOperationException();
       }
 
-      @NotNull
       @Override
-      public Iterable<VirtualFile> iterInDbChildren() {
+      @SuppressWarnings("SpellCheckingInspection")
+      public @NotNull Iterable<VirtualFile> iterInDbChildren() {
         throw new UnsupportedOperationException();
       }
 
@@ -636,9 +645,8 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
         throw new UnsupportedOperationException();
       }
 
-      @NotNull
       @Override
-      public OutputStream getOutputStream(Object requestor, long newModificationStamp, long newTimeStamp) {
+      public @NotNull OutputStream getOutputStream(Object requestor, long newModificationStamp, long newTimeStamp) {
         throw new UnsupportedOperationException();
       }
 

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.testframework.sm.runner;
 
 import com.intellij.execution.Location;
@@ -17,6 +17,8 @@ import com.intellij.ide.DataManager;
 import com.intellij.ide.nls.NlsMessages;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.ExecutionDataKeys;
+import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
@@ -30,6 +32,7 @@ import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.CachedValue;
 import com.intellij.psi.util.CachedValueProvider;
 import com.intellij.psi.util.CachedValuesManager;
+import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
@@ -46,7 +49,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *
  * @author Roman Chernyatchik
  */
-public class SMTestProxy extends AbstractTestProxy {
+public class SMTestProxy extends AbstractTestProxy implements Navigatable {
   public static final Key<String> NODE_ID = Key.create("test.proxy.id");
 
   private static final Logger LOG = Logger.getInstance(SMTestProxy.class.getName());
@@ -60,7 +63,7 @@ public class SMTestProxy extends AbstractTestProxy {
   private List<SMTestProxy> myChildren;
   private SMTestProxy myParent;
 
-  private AbstractState myState = NotRunState.getInstance();
+  private volatile AbstractState myState = NotRunState.getInstance();
   private Long myDuration = null; // duration is unknown
   private boolean myDurationIsCached = false; // is used for separating unknown and unset duration
   private boolean myHasCriticalErrors = false;
@@ -268,6 +271,35 @@ public class SMTestProxy extends AbstractTestProxy {
     return myConfig;
   }
 
+  private Navigatable getNavigatable() {
+    SMRootTestProxy root = getRoot();
+    if (root == null) return null;
+    return TestsUIUtil.getOpenFileDescriptor(this, root.myTestConsoleProperties);
+  }
+
+  @Override
+  public void navigate(boolean requestFocus) {
+    ReadAction.nonBlocking(() -> getNavigatable())
+      .expireWith(this)
+      .coalesceBy(this)
+      .finishOnUiThread(ModalityState.NON_MODAL, navigatable -> {
+      if (navigatable != null) {
+        navigatable.navigate(requestFocus);
+      }
+    }).submit(AppExecutorUtil.getAppExecutorService());
+  }
+
+  @Override
+  public boolean canNavigate() {
+    Navigatable navigatable = getNavigatable();
+    return navigatable != null && navigatable.canNavigate();
+  }
+
+  @Override
+  public boolean canNavigateToSource() {
+    return canNavigate();
+  }
+
   @Override
   @Nullable
   public Location getLocation(@NotNull Project project, @NotNull GlobalSearchScope searchScope) {
@@ -391,22 +423,14 @@ public class SMTestProxy extends AbstractTestProxy {
   @Nullable
   @Override
   public String getDurationString(TestConsoleProperties consoleProperties) {
-    switch (getMagnitudeInfo()) {
-      case PASSED_INDEX:
-        return !isSubjectToHide(consoleProperties) ? getDurationString() : null;
-      case RUNNING_INDEX:
+    return switch (getMagnitudeInfo()) {
+      case PASSED_INDEX -> !isSubjectToHide(consoleProperties) ? getDurationString() : null;
+      case RUNNING_INDEX ->
         // pad duration with zeros, like "1m 02 s 003 ms" to avoid annoying flickering
-        return !isSubjectToHide(consoleProperties) ? getDurationPaddedString() : null;
-      case COMPLETE_INDEX:
-      case FAILED_INDEX:
-      case ERROR_INDEX:
-      case IGNORED_INDEX:
-      case SKIPPED_INDEX:
-      case TERMINATED_INDEX:
-        return getDurationString();
-      default:
-        return null;
-    }
+        !isSubjectToHide(consoleProperties) ? getDurationPaddedString() : null;
+      case COMPLETE_INDEX, FAILED_INDEX, ERROR_INDEX, IGNORED_INDEX, SKIPPED_INDEX, TERMINATED_INDEX -> getDurationString();
+      default -> null;
+    };
   }
 
   private boolean isSubjectToHide(TestConsoleProperties consoleProperties) {
@@ -525,11 +549,11 @@ public class SMTestProxy extends AbstractTestProxy {
                                       @NotNull final String actualText,
                                       @NotNull final String expectedText,
                                       @NotNull final TestFailedEvent event) {
-    TestComparisionFailedState comparisionFailedState =
+    TestComparisionFailedState comparisonFailedState =
       setTestComparisonFailed(localizedMessage, stackTrace, actualText, expectedText, event.getExpectedFilePath(), event.getActualFilePath(),
                               event.shouldPrintExpectedAndActualValues());
-    comparisionFailedState.setToDeleteExpectedFile(event.isExpectedFileTemp());
-    comparisionFailedState.setToDeleteActualFile(event.isActualFileTemp());
+    comparisonFailedState.setToDeleteExpectedFile(event.isExpectedFileTemp());
+    comparisonFailedState.setToDeleteActualFile(event.isActualFileTemp());
   }
 
   public TestComparisionFailedState setTestComparisonFailed(@NotNull final String localizedMessage,
@@ -732,12 +756,13 @@ public class SMTestProxy extends AbstractTestProxy {
   @Override
   @Nullable
   public DiffHyperlink getDiffViewerProvider() {
-    if (myState instanceof TestComparisionFailedState) {
-      return ((TestComparisionFailedState)myState).getHyperlink();
+    AbstractState state = myState;
+    if (state instanceof TestComparisionFailedState) {
+      return ((TestComparisionFailedState)state).getHyperlink();
     }
 
-    if (myState instanceof CompoundTestFailedState) {
-      return ContainerUtil.getFirstItem(((CompoundTestFailedState)myState).getHyperlinks());
+    if (state instanceof CompoundTestFailedState) {
+      return ContainerUtil.getFirstItem(((CompoundTestFailedState)state).getHyperlinks());
     }
 
     return null;
@@ -746,8 +771,9 @@ public class SMTestProxy extends AbstractTestProxy {
   @NotNull
   @Override
   public List<DiffHyperlink> getDiffViewerProviders() {
-    if (myState instanceof CompoundTestFailedState) {
-      return ((CompoundTestFailedState)myState).getHyperlinks();
+    AbstractState state = myState;
+    if (state instanceof CompoundTestFailedState) {
+      return ((CompoundTestFailedState)state).getHyperlinks();
     }
     return super.getDiffViewerProviders();
   }
@@ -903,7 +929,6 @@ public class SMTestProxy extends AbstractTestProxy {
 
   /**
    * Recursively invalidates cached duration for container(parent) suites or updates their value
-   * @param duration
    */
   private void invalidateCachedDurationForContainerSuites(long duration) {
     // Manual duration does not need any automatic calculation

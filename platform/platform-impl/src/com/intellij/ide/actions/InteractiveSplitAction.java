@@ -1,10 +1,7 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.actions;
 
-import com.intellij.openapi.actionSystem.ActionPlaces;
-import com.intellij.openapi.actionSystem.AnAction;
-import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx;
 import com.intellij.openapi.fileEditor.impl.EditorWindow;
@@ -12,20 +9,28 @@ import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 
-
-public class InteractiveSplitAction extends AnAction implements DumbAware {
+final class InteractiveSplitAction extends AnAction implements DumbAware {
   @Override
   public void update(@NotNull AnActionEvent e) {
     e.getPresentation().setEnabledAndVisible(e.getProject() != null && e.getData(CommonDataKeys.VIRTUAL_FILE) != null);
   }
 
   @Override
+  public @NotNull ActionUpdateThread getActionUpdateThread() {
+    return ActionUpdateThread.BGT;
+  }
+
+  @Override
   public void actionPerformed(@NotNull AnActionEvent e) {
     EditorWindow editorWindow = e.getData(EditorWindow.DATA_KEY);
     // When invoked from editor VF in context can be different from actual editor VF, e.g. for diff in editor tab
-    VirtualFile file = editorWindow != null && editorWindow.getSelectedFile() != null
-                       ? editorWindow.getSelectedFile()
-                       : e.getData(CommonDataKeys.VIRTUAL_FILE);
+    VirtualFile file;
+    if (editorWindow != null && editorWindow.getSelectedFile() != null) {
+      file = editorWindow.getSelectedFile();
+    }
+    else {
+      file = e.getData(CommonDataKeys.VIRTUAL_FILE);
+    }
     boolean openedFromEditor = true;
     if (editorWindow == null) {
       openedFromEditor = false;
@@ -41,6 +46,12 @@ public class InteractiveSplitAction extends AnAction implements DumbAware {
   }
 
   public static abstract class Key extends AnAction implements DumbAware {
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
+    }
+
     @Override
     public void update(@NotNull AnActionEvent e) {
       final EditorWindow.SplitterService splitterService =

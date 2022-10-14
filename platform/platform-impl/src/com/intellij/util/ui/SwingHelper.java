@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.util.ui;
 
 import com.intellij.ide.BrowserUtil;
@@ -6,6 +6,7 @@ import com.intellij.ide.IdeBundle;
 import com.intellij.ide.IdeEventQueue;
 import com.intellij.ide.ui.AntialiasingType;
 import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.application.ApplicationManager;
@@ -36,7 +37,6 @@ import com.intellij.util.PlatformIcons;
 import com.intellij.util.containers.ComparatorUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.update.UiNotifyConnector;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -402,7 +402,7 @@ public class SwingHelper {
               textFieldWithHistoryWithBrowseButton.getChildComponent().getTextEditor(),
               browseDialogTitle,
               fileChooserDescriptor,
-              TextComponentAccessor.TEXT_FIELD_WITH_HISTORY_WHOLE_TEXT);
+              TextComponentAccessors.TEXT_FIELD_WITH_HISTORY_WHOLE_TEXT);
   }
 
   public static void installFileCompletionAndBrowseDialog(@Nullable Project project,
@@ -430,8 +430,7 @@ public class SwingHelper {
   /**
    * @deprecated use {@link com.intellij.ui.components.BrowserLink} instead
    */
-  @ApiStatus.ScheduledForRemoval(inVersion = "2022.1")
-  @Deprecated
+  @Deprecated(forRemoval = true)
   @NotNull
   public static HyperlinkLabel createWebHyperlink(@NlsSafe @NotNull String url) {
     return createWebHyperlink(url, url);
@@ -440,8 +439,7 @@ public class SwingHelper {
   /**
    * @deprecated use {@link com.intellij.ui.components.BrowserLink} instead
    */
-  @ApiStatus.ScheduledForRemoval(inVersion = "2022.1")
-  @Deprecated
+  @Deprecated(forRemoval = true)
   @NotNull
   public static HyperlinkLabel createWebHyperlink(@NlsContexts.LinkLabel @NotNull String text, @NotNull String url) {
     HyperlinkLabel hyperlink = new HyperlinkLabel(text);
@@ -552,8 +550,8 @@ public class SwingHelper {
           }
         }
       };
-      textPane.setFont(myFont != null ? myFont : UIUtil.getLabelFont());
-      textPane.setEditorKit(UIUtil.getHTMLEditorKit());
+      textPane.setFont(myFont != null ? myFont : StartupUiUtil.getLabelFont());
+      textPane.setEditorKit(HTMLEditorKitBuilder.simple());
       textPane.setEditable(false);
       if (myBackground != null) {
         textPane.setBackground(myBackground);
@@ -614,8 +612,8 @@ public class SwingHelper {
       textPane = new JEditorPane();
     }
     GraphicsUtil.setAntialiasingType(textPane, AntialiasingType.getAAHintForSwingComponent());
-    textPane.setFont(font != null ? font : UIUtil.getLabelFont());
-    textPane.setEditorKit(UIUtil.getHTMLEditorKit());
+    textPane.setFont(font != null ? font : StartupUiUtil.getLabelFont());
+    textPane.setEditorKit(HTMLEditorKitBuilder.simple());
     textPane.setEditable(false);
     if (background != null) {
       textPane.setBackground(background);
@@ -684,6 +682,10 @@ public class SwingHelper {
     }
 
     @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.BGT;
+    }
+    @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
       Transferable content = new StringSelection(myUrl);
       CopyPasteManager.getInstance().setContents(content);
@@ -702,6 +704,11 @@ public class SwingHelper {
     @Override
     public void update(@NotNull AnActionEvent e) {
       e.getPresentation().setEnabled(true);
+    }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.BGT;
     }
 
     @Override
@@ -763,19 +770,19 @@ public class SwingHelper {
   public static @NotNull JEditorPane createHtmlLabel(@NotNull @Nls String bodyInnerHtml,
                                                      @Nullable @Nls String disabledBodyInnerHtml,
                                                      @Nullable Consumer<? super String> hyperlinkListener) {
-    final Font font = UIUtil.getLabelFont();
+    final Font font = StartupUiUtil.getLabelFont();
     String html = buildHtml(
       UIUtil.getCssFontDeclaration(font, UIUtil.getActiveTextColor(), null, null),
       bodyInnerHtml
     );
     String disabledHtml = buildHtml(
-      UIUtil.getCssFontDeclaration(font, UIUtil.getInactiveTextColor(), null, null),
+      UIUtil.getCssFontDeclaration(font, NamedColorUtil.getInactiveTextColor(), null, null),
       ObjectUtils.notNull(disabledBodyInnerHtml, bodyInnerHtml)
     );
 
     final JEditorPane pane = new SwingHelper.HtmlViewerBuilder()
       .setCarryTextOver(false)
-      .setFont(UIUtil.getLabelFont())
+      .setFont(StartupUiUtil.getLabelFont())
       .setDisabledHtml(disabledHtml)
       .create();
     pane.setText(html);

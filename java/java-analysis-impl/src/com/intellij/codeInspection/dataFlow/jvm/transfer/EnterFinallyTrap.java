@@ -2,11 +2,10 @@
 package com.intellij.codeInspection.dataFlow.jvm.transfer;
 
 import com.intellij.codeInspection.dataFlow.interpreter.DataFlowInterpreter;
-import com.intellij.codeInspection.dataFlow.lang.ir.ControlFlowOffset;
+import com.intellij.codeInspection.dataFlow.lang.ir.ControlFlow;
 import com.intellij.codeInspection.dataFlow.lang.ir.DfaInstructionState;
 import com.intellij.codeInspection.dataFlow.memory.DfaMemoryState;
 import com.intellij.codeInspection.dataFlow.value.DfaControlTransferValue;
-import com.intellij.psi.PsiCodeBlock;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiResourceList;
 import com.intellij.util.containers.FList;
@@ -18,10 +17,10 @@ import java.util.List;
 
 public class EnterFinallyTrap implements DfaControlTransferValue.Trap {
   private final PsiElement myAnchor;
-  private final @NotNull ControlFlowOffset myJumpOffset;
+  private final ControlFlow.@NotNull ControlFlowOffset myJumpOffset;
   private final @NotNull List<@NotNull DfaControlTransferValue> myBackLinks = new ArrayList<>();
 
-  public EnterFinallyTrap(PsiElement anchor, @NotNull ControlFlowOffset offset) {
+  public EnterFinallyTrap(PsiElement anchor, ControlFlow.@NotNull ControlFlowOffset offset) {
     myAnchor = anchor;
     myJumpOffset = offset; 
   }
@@ -64,14 +63,8 @@ public class EnterFinallyTrap implements DfaControlTransferValue.Trap {
     return myJumpOffset.getInstructionOffset();
   }
 
-  public static class TryFinally extends EnterFinallyTrap {
-    public TryFinally(@NotNull PsiCodeBlock finallyBlock, @NotNull ControlFlowOffset offset) {
-      super(finallyBlock, offset);
-    }
-  }
-
   public static class TwrFinally extends EnterFinallyTrap {
-    public TwrFinally(@NotNull PsiResourceList resourceList, @NotNull ControlFlowOffset offset) {
+    public TwrFinally(@NotNull PsiResourceList resourceList, ControlFlow.@NotNull ControlFlowOffset offset) {
       super(resourceList, offset);
     }
 

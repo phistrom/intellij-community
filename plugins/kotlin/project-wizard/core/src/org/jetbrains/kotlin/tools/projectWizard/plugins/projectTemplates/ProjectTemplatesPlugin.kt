@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.kotlin.tools.projectWizard.plugins.projectTemplates
 
 import org.jetbrains.kotlin.tools.projectWizard.KotlinNewProjectWizardBundle
@@ -22,11 +22,12 @@ class ProjectTemplatesPlugin(context: Context) : Plugin(context) {
             KotlinNewProjectWizardBundle.message("plugin.templates.setting.template"),
             GenerationPhase.INIT_TEMPLATE,
             parser = valueParserM { _, _ ->
-                Failure(ParseError("Project templates is not supported in yaml for now"))
+                Failure(ParseError(KotlinNewProjectWizardBundle.message("error.text.project.templates.is.not.supported.in.yaml.for.now")))
             },
         ) {
             values = ProjectTemplate.ALL
             isRequired = false
+            tooltipText = KotlinNewProjectWizardBundle.message("plugin.templates.setting.template.tooltip")
         }
     }
 

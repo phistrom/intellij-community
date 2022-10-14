@@ -41,7 +41,10 @@ import com.intellij.util.ui.components.BorderLayoutPanel;
 import com.intellij.vcs.commit.CommitMessageUi;
 import com.intellij.vcs.commit.message.BodyLimitSettings;
 import com.intellij.vcs.commit.message.CommitMessageInspectionProfile;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
@@ -67,16 +70,22 @@ public class CommitMessage extends JPanel implements Disposable, DataProvider, C
 
   private static final @NotNull EditorCustomization COLOR_SCHEME_FOR_CURRENT_UI_THEME_CUSTOMIZATION = editor -> {
     editor.setBackgroundColor(null); // to use background from set color scheme
-    editor.setColorsScheme(getCommitMessageColorScheme());
+    editor.setColorsScheme(getCommitMessageColorScheme(editor));
   };
 
   @NotNull
-  private static EditorColorsScheme getCommitMessageColorScheme() {
+  private static EditorColorsScheme getCommitMessageColorScheme(EditorEx editor) {
     boolean isLaFDark = ColorUtil.isDark(UIUtil.getPanelBackground());
     boolean isEditorDark = EditorColorsManager.getInstance().isDarkEditor();
-    return isLaFDark == isEditorDark
-           ? EditorColorsManager.getInstance().getGlobalScheme()
-           : EditorColorsManager.getInstance().getSchemeForCurrentUITheme();
+    EditorColorsScheme colorsScheme = isLaFDark == isEditorDark
+                                      ? EditorColorsManager.getInstance().getGlobalScheme()
+                                      : EditorColorsManager.getInstance().getSchemeForCurrentUITheme();
+
+    // We have to wrap the colorsScheme into a scheme delegate in order to avoid editing the global scheme
+    colorsScheme = editor.createBoundColorSchemeDelegate(colorsScheme);
+    colorsScheme.setEditorFontSize(editor.getColorsScheme().getEditorFontSize());
+
+    return colorsScheme;
   }
 
   @NotNull private final EditorTextField myEditorField;
@@ -174,6 +183,11 @@ public class CommitMessage extends JPanel implements Disposable, DataProvider, C
     if (VcsDataKeys.COMMIT_MESSAGE_CONTROL.is(dataId)) {
       return this;
     }
+    if (VcsDataKeys.COMMIT_MESSAGE_DOCUMENT.is(dataId)) {
+      Editor editor = myEditorField.getEditor();
+      if (editor == null) return null;
+      return editor.getDocument();
+    }
     return null;
   }
 
@@ -186,17 +200,6 @@ public class CommitMessage extends JPanel implements Disposable, DataProvider, C
   @Override
   public void setCommitMessage(@Nullable String currentDescription) {
     setText(currentDescription);
-  }
-
-  /**
-   * Creates a text editor appropriate for creating commit messages.
-   * @return a commit message editor
-   * @deprecated Use {@link CommitMessage} component.
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
-  public static EditorTextField createCommitTextEditor(@NotNull Project project, @SuppressWarnings("unused") boolean forceSpellCheckOn) {
-    return createCommitMessageEditor(project, false);
   }
 
   @NotNull
@@ -317,7 +320,7 @@ public class CommitMessage extends JPanel implements Disposable, DataProvider, C
       PsiFile file = PsiDocumentManager.getInstance(myProject).getPsiFile(editor.getDocument());
 
       if (file != null) {
-        file.putUserData(InspectionProfileWrapper.CUSTOMIZATION_KEY,
+        InspectionProfileWrapper.setCustomInspectionProfileWrapperTemporarily(file,
                          profile -> new InspectionProfileWrapper(CommitMessageInspectionProfile.getInstance(myProject)));
       }
       editor.putUserData(IntentionManager.SHOW_INTENTION_OPTIONS_KEY, false);
@@ -335,15 +338,15 @@ public class CommitMessage extends JPanel implements Disposable, DataProvider, C
     protected void refresh(@Nullable EditorMarkupModelImpl editorMarkupModel) {
       super.refresh(editorMarkupModel);
       if (editorMarkupModel != null) {
-        editorMarkupModel.setTrafficLightIconVisible(hasHighSeverities(getErrorCount()));
+        editorMarkupModel.setTrafficLightIconVisible(hasHighSeverities(getErrorCounts()));
       }
     }
 
-    private boolean hasHighSeverities(int @NotNull [] errorCount) {
+    private boolean hasHighSeverities(int @NotNull [] errorCounts) {
       HighlightSeverity minSeverity = notNull(HighlightDisplayLevel.find("TYPO"), HighlightDisplayLevel.DO_NOT_SHOW).getSeverity();
 
-      for (int i = 0; i < errorCount.length; i++) {
-        if (errorCount[i] > 0 && getSeverityRegistrar().compare(getSeverityRegistrar().getSeverityByIndex(i), minSeverity) > 0) {
+      for (int i = 0; i < errorCounts.length; i++) {
+        if (errorCounts[i] > 0 && getSeverityRegistrar().compare(getSeverityRegistrar().getSeverityByIndex(i), minSeverity) > 0) {
           return true;
         }
       }

@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.gradle
 
 import org.jetbrains.kotlin.tools.projectWizard.core.asStringWithUnixSlashes
@@ -9,16 +9,17 @@ import java.nio.file.Path
 
 interface AndroidIR : GradleIR
 
-//TODO parematrize
+//TODO parameterize
 data class AndroidConfigIR(
     val javaPackage: JavaPackage?,
     val newManifestPath: Path?,
     val printVersionCode: Boolean,
     val printBuildTypes: Boolean,
+    var androidSdkVersion: String = "31"
 ) : AndroidIR, FreeIR {
     override fun GradlePrinter.renderGradle() {
         sectionCall("android", needIndent = true) {
-            call("compileSdkVersion") { +"29" }; nlIndented() // TODO dehardcode
+            call("compileSdkVersion") { +androidSdkVersion }; nlIndented()
             if (newManifestPath != null) {
                 when (dsl) {
                     GradlePrinter.GradleDsl.KOTLIN -> {
@@ -35,12 +36,17 @@ data class AndroidConfigIR(
                     assignmentOrCall("applicationId") { +javaPackage.asCodePackage().quotified }; nlIndented()
                 }
                 call("minSdkVersion") { +"24" }; nlIndented()  // TODO dehardcode
-                call("targetSdkVersion") { +"29" };// TODO dehardcode
+                call("targetSdkVersion") { +androidSdkVersion }
                 if (printVersionCode) {
                     nlIndented()
                     assignmentOrCall("versionCode") { +"1" }; nlIndented()
                     assignmentOrCall("versionName") { +"1.0".quotified }
                 }
+            }
+            nlIndented()
+            sectionCall("compileOptions", needIndent = true) {
+                assignmentOrCall("sourceCompatibility") { +"JavaVersion.VERSION_1_8" }; nlIndented()
+                assignmentOrCall("targetCompatibility") { +"JavaVersion.VERSION_1_8" }
             }
             if (printBuildTypes) {
                 nlIndented()

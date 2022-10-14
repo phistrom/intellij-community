@@ -23,9 +23,6 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 
-/**
- * @author peter
- */
 public class BaseCompletionService extends CompletionService {
   private static final Logger LOG = Logger.getInstance(BaseCompletionService.class);
 
@@ -33,6 +30,8 @@ public class BaseCompletionService extends CompletionService {
 
   @ApiStatus.Internal
   public static final Key<CompletionContributor> LOOKUP_ELEMENT_CONTRIBUTOR = Key.create("lookup element contributor");
+
+  public static final Key<Boolean> FORBID_WORD_COMPLETION = new Key<>("ForbidWordCompletion");
 
   @Override
   public void performCompletion(CompletionParameters parameters, Consumer<? super CompletionResult> consumer) {

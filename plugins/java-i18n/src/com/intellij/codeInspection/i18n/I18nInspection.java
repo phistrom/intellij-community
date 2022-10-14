@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package com.intellij.codeInspection.i18n;
 
@@ -36,7 +36,6 @@ import com.intellij.psi.util.ClassUtil;
 import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
-import com.intellij.refactoring.introduceField.IntroduceConstantHandler;
 import com.intellij.uast.UastHintedVisitorAdapter;
 import com.intellij.ui.AddDeleteListPanel;
 import com.intellij.ui.DocumentAdapter;
@@ -48,6 +47,7 @@ import com.intellij.util.ObjectUtils;
 import com.intellij.util.ThreeState;
 import com.intellij.util.containers.ContainerUtil;
 import com.siyeh.ig.callMatcher.CallMatcher;
+import com.siyeh.ig.fixes.IntroduceConstantFix;
 import com.siyeh.ig.psiutils.TypeUtils;
 import com.siyeh.ig.psiutils.VariableAccessUtils;
 import org.intellij.lang.annotations.RegExp;
@@ -446,35 +446,14 @@ public final class I18nInspection extends AbstractBaseUastLocalInspectionTool im
            new Class[] {UInjectionHost.class};
   }
 
-  @Nullable
   @Override
-  public String getAlternativeID() {
+  public @NotNull String getAlternativeID() {
     return "nls";
   }
 
   @NotNull
   private static LocalQuickFix createIntroduceConstantFix() {
-    return new LocalQuickFix() {
-      @Override
-      @NotNull
-      public String getFamilyName() {
-        return IntroduceConstantHandler.getRefactoringNameText();
-      }
-
-      @Override
-      public boolean startInWriteAction() {
-        return false;
-      }
-
-      @Override
-      public void applyFix(@NotNull final Project project, @NotNull final ProblemDescriptor descriptor) {
-        PsiElement element = descriptor.getPsiElement();
-        if (!(element instanceof PsiExpression)) return;
-
-        PsiExpression[] expressions = {(PsiExpression)element};
-        new IntroduceConstantHandler().invoke(project, expressions);
-      }
-    };
+    return new IntroduceConstantFix();
   }
 
   @Nullable
@@ -613,7 +592,7 @@ public final class I18nInspection extends AbstractBaseUastLocalInspectionTool im
           fixes.addAll(IntentionWrapper.wrapToQuickFixes(JvmElementActionFactories.createAddAnnotationActions((JvmModifiersOwner)target, AnnotationRequestsKt.annotationRequest(fqn)), sourcePsi.getContainingFile()));
           if (addNullSafe) {
             for (IntentionAction action : JvmElementActionFactories.createAddAnnotationActions((JvmModifiersOwner)target, AnnotationRequestsKt.annotationRequest(NlsInfo.NLS_SAFE))) {
-              fixes.add(new IntentionWrapper(action, sourcePsi.getContainingFile()) {
+              fixes.add(new IntentionWrapper(action) {
                 @Override
                 public @NotNull String getFamilyName() {
                   return JavaI18nBundle.message("intention.family.name.mark.as.nlssafe");
@@ -953,7 +932,7 @@ public final class I18nInspection extends AbstractBaseUastLocalInspectionTool im
     if (parent instanceof UResolvable && isNonNlsCall((UResolvable)parent, nonNlsTargets)) {
       return true;
     }
-    if (parent != null && UastExpressionUtils.isAssignment(parent)) {
+    if (UastExpressionUtils.isAssignment(parent)) {
       UExpression operand = ((UBinaryExpression)parent).getLeftOperand();
       if (operand instanceof UReferenceExpression &&
           isNonNlsCall((UReferenceExpression)operand, nonNlsTargets)) return true;

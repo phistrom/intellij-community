@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.nj2k
 
@@ -11,6 +11,7 @@ import java.util.*
 
 object ConversionsRunner {
     private fun createConversions(context: NewJ2kConverterContext) = listOf(
+        ParenthesizeBinaryExpressionIfNeededConversion(context),
         NonCodeElementsConversion(context),
         JavaModifiersConversion(context),
         JavaAnnotationsConversion(context),
@@ -22,13 +23,10 @@ object ConversionsRunner {
         BoxedTypeOperationsConversion(context),
         AnyWithStringConcatenationConversion(context),
         AssignmentExpressionUnfoldingConversion(context),
-        AddParenthesisForLineBreaksInBinaryExpression(context),
-        ThrowStatementConversion(context),
         ArrayInitializerConversion(context),
-        TryStatementConversion(context),
+        JavaStatementConversion(context),
         EnumFieldAccessConversion(context),
-        SynchronizedStatementConversion(context),
-        JetbrainsNullableAnnotationsConverter(context),
+        NullabilityAnnotationsConversion(context),
         DefaultArgumentsConversion(context),
         ConstructorConversion(context),
         MoveConstructorsAfterFieldsConversion(context),
@@ -37,20 +35,16 @@ object ConversionsRunner {
         BlockToRunConversion(context),
         PrimaryConstructorDetectConversion(context),
         InsertDefaultPrimaryConstructorConversion(context),
-        FieldToPropertyConversion(context),
+        ClassMemberConversion(context),
         JavaStandardMethodsConversion(context),
-        JavaMethodToKotlinFunctionConversion(context),
-        MainFunctionConversion(context),
-        AssertStatementConversion(context),
-        SwitchStatementConversion(context),
-        LiteralConversion(context),
+        SwitchToWhenConversion(context),
+        YieldStatementConversion(context),
         ForConversion(context),
         LabeledStatementConversion(context),
         ArrayOperationsConversion(context),
         EqualsOperatorConversion(context),
         TypeMappingConversion(context),
         InternalDeclarationConversion(context),
-
         InnerClassConversion(context),
         StaticsToCompanionExtractConversion(context),
         InterfaceWithFieldConversion(context),
@@ -64,10 +58,8 @@ object ConversionsRunner {
         ImplicitCastsConversion(context),
         PrimitiveTypeCastsConversion(context),
         LiteralConversion(context),
-        StaticMemberAccessConversion(context),
         RemoveRedundantQualifiersForCallsConversion(context),
-        FunctionalInterfacesConverter(context),
-
+        FunctionalInterfacesConversion(context),
         FilterImportsConversion(context),
         AddElementsInfoConversion(context)
     )
@@ -92,7 +84,9 @@ object ConversionsRunner {
 
     private fun Conversion.description(): String {
         val conversionName = this::class.simpleName
-        val words = conversionName?.let { wordRegex.findAll(conversionName).map { it.value.decapitalize(Locale.US) }.toList() }
+        val words = conversionName?.let {
+            wordRegex.findAll(conversionName).map { it.value.replaceFirstChar { char -> char.lowercase(Locale.US) } }.toList()
+        }
         return when {
             conversionName == null -> "Converting..."
             conversionName.endsWith("Conversion") -> "Converting ${words!!.dropLast(1).joinToString(" ")}"
@@ -100,5 +94,5 @@ object ConversionsRunner {
         }
     }
 
-    private val wordRegex = "[A-Z][a-z0-9]+".toRegex()
+    private val wordRegex = """[A-Z][a-z\d]+""".toRegex()
 }

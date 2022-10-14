@@ -1,10 +1,11 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.debugger.coroutine.util
 
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.xdebugger.XDebugSession
 import com.intellij.xdebugger.XDebugSessionListener
+import org.jetbrains.annotations.Nls
 import javax.swing.Icon
 import javax.swing.JComponent
 import kotlin.properties.ReadOnlyProperty
@@ -17,7 +18,7 @@ interface CreateContentParamsProvider {
 data class CreateContentParams(
     val id: String,
     val component: JComponent,
-    val displayName: String,
+    @Nls val displayName: String,
     val icon: Icon?,
     val parentComponent: JComponent
 )

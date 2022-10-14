@@ -28,9 +28,6 @@ import java.util.*;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
-/**
- * @author peter
- */
 public final class DependentGroovycRunner {
   public static final String TEMP_RESOURCE_SUFFIX = "___" + new Random().nextInt() + "_neverHappen";
   public static final String[] RESOURCES_TO_MASK = {
@@ -108,6 +105,11 @@ public final class DependentGroovycRunner {
           for (ClassNode aClass : source.getAST().getClasses()) {
             resourceLoader.myClass2File.put(aClass.getName(), file);
           }
+        }
+
+        @SuppressWarnings("RedundantMethodOverride")
+        public void doPhaseOperation(CompilationUnit unit) throws CompilationFailedException {
+          super.doPhaseOperation(unit);
         }
       }, Phases.CONVERSION);
 
@@ -457,6 +459,11 @@ public final class DependentGroovycRunner {
               }
               catch (LinkageError ignored) {
               }
+            }
+
+            @SuppressWarnings("RedundantMethodOverride")
+            public void doPhaseOperation(CompilationUnit unit) throws CompilationFailedException {
+              super.doPhaseOperation(unit);
             }
           }, phase);
         }

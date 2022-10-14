@@ -2,6 +2,7 @@
 package com.intellij.ui;
 
 import com.intellij.openapi.util.Pair;
+import com.intellij.ui.popup.list.InlineActionsUtilKt;
 
 import javax.swing.*;
 import javax.swing.event.ListDataEvent;
@@ -65,10 +66,10 @@ public class ListExpandableItemsHandler extends AbstractExpandableItemsHandler<I
         updateSelection(list);
 
         if (evt.getOldValue() != null) {
-          ((ListModel)evt.getOldValue()).removeListDataListener(modelListener);
+          ((ListModel<?>)evt.getOldValue()).removeListDataListener(modelListener);
         }
         if (evt.getNewValue() != null) {
-          ((ListModel)evt.getNewValue()).addListDataListener(modelListener);
+          ((ListModel<?>)evt.getNewValue()).addListDataListener(modelListener);
         }
       }
     });
@@ -108,8 +109,19 @@ public class ListExpandableItemsHandler extends AbstractExpandableItemsHandler<I
 
     AppUIUtil.targetToDevice(rendererComponent, myComponent);
 
-    bounds.width = rendererComponent.getPreferredSize().width;
+    if (!containsInlineButtons(rendererComponent)) bounds.width = rendererComponent.getPreferredSize().width;
 
     return Pair.create(rendererComponent, bounds);
+  }
+
+  private static boolean containsInlineButtons(Component cmp) {
+    if (cmp instanceof JComponent && Boolean.TRUE.equals(((JComponent)cmp).getClientProperty(InlineActionsUtilKt.INLINE_BUTTON_MARKER))) return true;
+
+    if (cmp instanceof Container) {
+      for (Component child : ((Container)cmp).getComponents()) {
+        if (containsInlineButtons(child)) return true;
+      }
+    }
+    return false;
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2020 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2022 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -180,11 +180,22 @@ public class TooBroadScopeInspection extends BaseInspection {
       }
       final PsiReferenceExpression methodExpression = methodCallExpression.getMethodExpression();
       final PsiExpression qualifierExpression = methodExpression.getQualifierExpression();
-      if (qualifierExpression != null && !isMovable(qualifierExpression)) {
-        return false;
+      if (qualifierExpression != null) {
+        if (!isMovable(qualifierExpression)) {
+          return false;
+        }
+      }
+      else {
+        if (method.getContainingFile() != expression.getContainingFile()) {
+          return false;
+        }
+        final PsiClass aClass = method.getContainingClass();
+        if (aClass == null || !ClassUtils.isImmutableClass(aClass)) {
+          return false;
+        }
       }
       final PsiExpressionList argumentList = methodCallExpression.getArgumentList();
-      for (PsiExpression argument : argumentList.getExpressions()){
+      for (PsiExpression argument : argumentList.getExpressions()) {
         if (!isMovable(argument)) {
           return false;
         }
@@ -254,7 +265,7 @@ public class TooBroadScopeInspection extends BaseInspection {
     TooBroadScopeVisitor() {}
 
     @Override
-    public void visitLocalVariable(PsiLocalVariable variable) {
+    public void visitLocalVariable(@NotNull PsiLocalVariable variable) {
       super.visitLocalVariable(variable);
       if (variable.getType() == PsiType.NULL || variable instanceof PsiResourceVariable) {
         return;

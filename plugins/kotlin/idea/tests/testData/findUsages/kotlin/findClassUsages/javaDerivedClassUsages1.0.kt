@@ -8,12 +8,12 @@ open class <caret>A: X {
 
 }
 
-open class C: Y {
+open class C : Y {
 
 }
 
-interface Z: A {
+open class Z : A() {
 
 }
 
-// DISABLE-ERRORS
+// FIR_COMPARISON

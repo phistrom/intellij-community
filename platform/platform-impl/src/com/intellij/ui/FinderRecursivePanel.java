@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ui;
 
 import com.intellij.icons.AllIcons;
@@ -79,6 +79,11 @@ public abstract class FinderRecursivePanel<T> extends OnePixelSplitter implement
   private final Object myUpdateCoalesceKey = new Object();
 
   private final CopyProvider myCopyProvider = new CopyProvider() {
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
+    }
+
     @Override
     public void performCopy(@NotNull DataContext dataContext) {
       final T value = getSelectedValue();
@@ -269,6 +274,11 @@ public abstract class FinderRecursivePanel<T> extends OnePixelSplitter implement
       }
 
       @Override
+      public @NotNull ActionUpdateThread getActionUpdateThread() {
+        return ActionUpdateThread.EDT;
+      }
+
+      @Override
       public void actionPerformed(@NotNull AnActionEvent e) {
         assert myParent != null;
         myParent.handleGotoPrevious();
@@ -286,6 +296,11 @@ public abstract class FinderRecursivePanel<T> extends OnePixelSplitter implement
       }
 
       @Override
+      public @NotNull ActionUpdateThread getActionUpdateThread() {
+        return ActionUpdateThread.EDT;
+      }
+
+      @Override
       public void actionPerformed(@NotNull AnActionEvent e) {
         FinderRecursivePanel<?> finderRecursivePanel = (FinderRecursivePanel<?>)getSecondComponent();
         finderRecursivePanel.handleGotoNext();
@@ -298,6 +313,11 @@ public abstract class FinderRecursivePanel<T> extends OnePixelSplitter implement
       @Override
       public void update(@NotNull AnActionEvent e) {
         e.getPresentation().setEnabled(isEditable());
+      }
+
+      @Override
+      public @NotNull ActionUpdateThread getActionUpdateThread() {
+        return ActionUpdateThread.EDT;
       }
 
       @Override
@@ -374,21 +394,28 @@ public abstract class FinderRecursivePanel<T> extends OnePixelSplitter implement
     Object selectedValue = getSelectedValue();
     if (selectedValue == null) return null;
 
-    if (CommonDataKeys.PSI_ELEMENT.is(dataId) && selectedValue instanceof PsiElement) {
+    if (PlatformCoreDataKeys.MODULE.is(dataId) && selectedValue instanceof Module) {
       return selectedValue;
     }
-    if (CommonDataKeys.NAVIGATABLE.is(dataId) && selectedValue instanceof Navigatable) {
-      return selectedValue;
-    }
-    if (LangDataKeys.MODULE.is(dataId) && selectedValue instanceof Module) {
-      return selectedValue;
-    }
-
     if (selectedValue instanceof DataProvider && (!(selectedValue instanceof ValidateableNode) || ((ValidateableNode)selectedValue).isValid())) {
       return ((DataProvider)selectedValue).getData(dataId);
     }
     if (PlatformDataKeys.COPY_PROVIDER.is(dataId)) {
       return myCopyProvider;
+    }
+    if (PlatformCoreDataKeys.BGT_DATA_PROVIDER.is(dataId)) {
+      return (DataProvider)slowId -> getSlowData(slowId, selectedValue);
+    }
+    return null;
+  }
+
+  @Nullable
+  private static Object getSlowData(@NotNull String dataId, @NotNull Object selectedValue) {
+    if (CommonDataKeys.PSI_ELEMENT.is(dataId) && selectedValue instanceof PsiElement) {
+      return selectedValue;
+    }
+    if (CommonDataKeys.NAVIGATABLE.is(dataId) && selectedValue instanceof Navigatable) {
+      return selectedValue;
     }
     return null;
   }

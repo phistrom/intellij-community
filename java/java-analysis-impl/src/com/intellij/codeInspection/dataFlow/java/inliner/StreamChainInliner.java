@@ -23,11 +23,14 @@ import com.intellij.codeInspection.dataFlow.Mutability;
 import com.intellij.codeInspection.dataFlow.java.CFGBuilder;
 import com.intellij.codeInspection.dataFlow.jvm.JvmPsiRangeSetUtil;
 import com.intellij.codeInspection.dataFlow.jvm.SpecialField;
+import com.intellij.codeInspection.dataFlow.jvm.problems.ConsumedStreamProblem;
 import com.intellij.codeInspection.dataFlow.rangeSet.LongRangeSet;
+import com.intellij.codeInspection.dataFlow.types.DfStreamStateType;
 import com.intellij.codeInspection.dataFlow.types.DfType;
 import com.intellij.codeInspection.dataFlow.types.DfTypes;
 import com.intellij.codeInspection.dataFlow.value.DfaVariableValue;
 import com.intellij.codeInspection.dataFlow.value.RelationType;
+import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.*;
 import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiUtil;
@@ -65,8 +68,13 @@ public class StreamChainInliner implements CallInliner {
           instanceCall(JAVA_UTIL_STREAM_BASE_STREAM, "reduce").parameterCount(1),
           instanceCall(JAVA_UTIL_STREAM_BASE_STREAM, "findFirst", "findAny").parameterCount(0));
   private static final CallMatcher MIN_MAX_TERMINAL = instanceCall(JAVA_UTIL_STREAM_BASE_STREAM, "min", "max").parameterCount(1);
+  private static final CallMatcher TWO_ARG_REDUCE =
+    instanceCall(JAVA_UTIL_STREAM_STREAM, "reduce").parameterTypes("T", "java.util.function.BinaryOperator");
   private static final CallMatcher COLLECT_TERMINAL =
     instanceCall(JAVA_UTIL_STREAM_STREAM, "collect").parameterTypes("java.util.stream.Collector");
+  private static final CallMatcher TO_LIST_TERMINAL = instanceCall(JAVA_UTIL_STREAM_STREAM, "toList")
+    .parameterCount(0)
+    .withLanguageLevelAtLeast(LanguageLevel.JDK_16);
   private static final CallMatcher COLLECT3_TERMINAL =
     instanceCall(JAVA_UTIL_STREAM_STREAM, "collect").parameterTypes("java.util.function.Supplier",
                                                                     "java.util.function.BiConsumer", "java.util.function.BiConsumer");
@@ -78,6 +86,8 @@ public class StreamChainInliner implements CallInliner {
           staticCall(JAVA_UTIL_STREAM_COLLECTORS, "toCollection").parameterCount(1));
   private static final CallMatcher MAP_COLLECTOR =
     staticCall(JAVA_UTIL_STREAM_COLLECTORS, "toMap", "toConcurrentMap", "toUnmodifiableMap");
+  private static final CallMatcher GROUPING_COLLECTOR =
+    staticCall(JAVA_UTIL_STREAM_COLLECTORS, "groupingBy", "partitioningBy", "groupingByConcurrent");
   private static final CallMatcher NOT_NULL_COLLECTORS =
     staticCall(JAVA_UTIL_STREAM_COLLECTORS, "joining", "maxBy", "minBy", "averagingInt", "averagingLong", "averagingDouble",
                "summingInt", "summingLong", "summingDouble", "summarizingInt", "summarizingLong", "summarizingDouble");
@@ -139,7 +149,9 @@ public class StreamChainInliner implements CallInliner {
     .register(OPTIONAL_TERMINAL, call -> new OptionalTerminalStep(call))
     .register(TO_ARRAY_TERMINAL, call -> new ToArrayStep(call))
     .register(COLLECT3_TERMINAL, call -> new Collect3TerminalStep(call))
-    .register(COLLECT_TERMINAL, call -> createTerminalFromCollector(call));
+    .register(COLLECT_TERMINAL, call -> createTerminalFromCollector(call))
+    .register(TO_LIST_TERMINAL, call -> new ToCollectionStep(call, null, true))
+    .register(TWO_ARG_REDUCE, call -> new TwoArgReduceStep(call));
 
   private static final Step NULL_TERMINAL_STEP = new Step(null, null, null) {
     @Override
@@ -210,9 +222,11 @@ public class StreamChainInliner implements CallInliner {
 
     @Override
     void before(CFGBuilder builder) {
+      builder.pushUnknown(); // qualifier
       for (PsiExpression arg : myCall.getArgumentList().getExpressions()) {
-        builder.pushExpression(arg).pop();
+        builder.pushExpression(arg);
       }
+      builder.call(myCall).pop();
       super.before(builder);
     }
 
@@ -325,6 +339,27 @@ public class StreamChainInliner implements CallInliner {
     }
   }
 
+  static class TwoArgReduceStep extends TerminalStep {
+    private final PsiExpression myInitialValue;
+
+    TwoArgReduceStep(@NotNull PsiMethodCallExpression call) {
+      super(call, call.getArgumentList().getExpressions()[1]);
+      myInitialValue = call.getArgumentList().getExpressions()[0];
+    }
+
+    @Override
+    void iteration(CFGBuilder builder) {
+      builder.push(myResult).swap().invokeFunction(2, myFunction)
+        .assignTo(myResult).pop();
+    }
+
+    @Override
+    protected void pushInitialValue(CFGBuilder builder) {
+      builder.pushExpression(myInitialValue)
+        .boxUnbox(myInitialValue, myCall.getType());
+    }
+  }
+
   static class Collect3TerminalStep extends TerminalStep {
     private final @NotNull PsiExpression mySupplier;
     private final @NotNull PsiExpression myAccumulator;
@@ -354,8 +389,14 @@ public class StreamChainInliner implements CallInliner {
   }
 
   static class OptionalTerminalStep extends TerminalStep {
+    private final boolean myExpectNotNull;
+
     OptionalTerminalStep(@NotNull PsiMethodCallExpression call) {
       super(call, ArrayUtil.getFirstElement(call.getArgumentList().getExpressions()));
+      String methodName = call.getMethodExpression().getReferenceName();
+      // While findFirst/findAny will work if the found element is definitely not-null,
+      // it's highly suspicious to supply a nullable element there
+      myExpectNotNull = "findFirst".equals(methodName) || "findAny".equals(methodName);
     }
 
     @Override
@@ -376,6 +417,11 @@ public class StreamChainInliner implements CallInliner {
       }
       DfType source = DfaOptionalSupport.getOptionalValue(true);
       builder.pushForWrite(myResult).push(source).assign().splice(2);
+    }
+
+    @Override
+    boolean expectNotNull() {
+      return myExpectNotNull;
     }
   }
 
@@ -521,7 +567,7 @@ public class StreamChainInliner implements CallInliner {
     void iteration(CFGBuilder builder) {
       if (myStreamSource != null) {
         builder.assignTo(myParameter).pop();
-        buildStreamCFG(builder, myChain, myStreamSource);
+        buildStreamCFG(builder, myChain, myStreamSource, false);
       } else {
         PsiExpression arg = myCall.getArgumentList().getExpressions()[0];
         PsiType outType = StreamApiUtil.getStreamElementType(myCall.getType());
@@ -647,6 +693,9 @@ public class StreamChainInliner implements CallInliner {
         } else {
           dfType = dfType.meet(DfTypes.LOCAL_OBJECT);
         }
+        if (SpecialField.fromQualifierType(dfType) == SpecialField.COLLECTION_SIZE) {
+          dfType = dfType.meet(SpecialField.COLLECTION_SIZE.asDfType(DfTypes.intValue(0)));
+        }
         builder.push(dfType);
       }
     }
@@ -666,7 +715,7 @@ public class StreamChainInliner implements CallInliner {
 
     @Override
     boolean expectNotNull() {
-      if (myImmutable) return true;
+      if (myImmutable && !"toList".equals(myCall.getMethodExpression().getReferenceName())) return true;
       PsiType collectionType = ExpectedTypeUtils.findExpectedType(myCall, false);
       PsiType itemType = JavaGenericsUtil.getCollectionItemType(collectionType, myCall.getResolveScope());
       return DfaPsiUtil.getTypeNullability(itemType) == Nullability.NOT_NULL;
@@ -737,6 +786,35 @@ public class StreamChainInliner implements CallInliner {
     }
   }
 
+  static class GroupingStep extends AbstractCollectionStep {
+    private final @NotNull PsiExpression myKeyExtractor;
+    private final @Nullable PsiExpression myDownstream;
+
+    GroupingStep(@NotNull PsiMethodCallExpression call,
+                 @NotNull PsiExpression keyExtractor,
+                 @Nullable PsiExpression downstream,
+                 @Nullable PsiExpression supplier) {
+      super(call, supplier, false);
+      myKeyExtractor = keyExtractor;
+      myDownstream = downstream;
+    }
+
+    @Override
+    void before(CFGBuilder builder) {
+      builder.evaluateFunction(myKeyExtractor)
+             .evaluateFunction(myDownstream);
+      super.before(builder);
+    }
+
+    @Override
+    void iteration(CFGBuilder builder) {
+      // Null keys are not tolerated
+      builder.invokeFunction(1, myKeyExtractor, Nullability.NOT_NULL);
+      // Actual addition of Map element is unnecessary for current analysis
+      builder.flush(SpecialField.COLLECTION_SIZE.createValue(builder.getFactory(), myResult)).pop();
+    }
+  }
+
   @Override
   public boolean tryInlineCall(@NotNull CFGBuilder builder, @NotNull PsiMethodCallExpression call) {
     if (TERMINAL_CALL.test(call)) {
@@ -754,11 +832,16 @@ public class StreamChainInliner implements CallInliner {
     }
     PsiExpression originalQualifier = firstStep.myCall.getMethodExpression().getQualifierExpression();
     if (originalQualifier == null) return false;
-    builder.pushUnknown()
-           .ifConditionIs(true)
-           .chain(b -> buildStreamCFG(b, firstStep, originalQualifier))
-           .end()
-           .push(DfTypes.typedObject(call.getType(), Nullability.NOT_NULL), call);
+    builder.pushExpression(originalQualifier)
+      .chain(b -> checkAndMarkConsumed(b, originalQualifier))
+      .pop()
+      .pushUnknown()
+      .ifConditionIs(true)
+      .chain(b -> buildStreamCFG(b, firstStep, originalQualifier, true))
+      .end()
+      .push(builder.getFactory().fromDfType(SpecialField.CONSUMED_STREAM.asDfType(DfStreamStateType.OPEN)
+                                                 .meet(DfTypes.LOCAL_OBJECT)
+                                                 .meet(DfTypes.NOT_NULL_OBJECT)));
     return true;
   }
 
@@ -768,12 +851,13 @@ public class StreamChainInliner implements CallInliner {
     Step firstStep = buildChain(qualifierCall, terminalStep);
     PsiExpression originalQualifier = firstStep.myCall.getMethodExpression().getQualifierExpression();
     if (originalQualifier == null) return false;
-    buildStreamCFG(builder, firstStep, originalQualifier);
+    buildStreamCFG(builder, firstStep, originalQualifier, false);
     firstStep.pushResult(builder);
     return true;
   }
 
-  private static void buildStreamCFG(CFGBuilder builder, Step firstStep, PsiExpression originalQualifier) {
+  private static void buildStreamCFG(CFGBuilder builder, Step firstStep, PsiExpression originalQualifier,
+                                     boolean originalQualifierAlreadyChecked) {
     PsiType inType = StreamApiUtil.getStreamElementType(originalQualifier.getType(), false);
     PsiMethodCallExpression sourceCall = tryCast(PsiUtil.skipParenthesizedExprDown(originalQualifier), PsiMethodCallExpression.class);
     if(STREAM_GENERATE.test(sourceCall)) {
@@ -842,9 +926,13 @@ public class StreamChainInliner implements CallInliner {
         .push(DfTypes.intValue(0))
         .ifCondition(RelationType.GT);
     } else {
+      if (!originalQualifierAlreadyChecked) {
+        builder
+          .pushExpression(originalQualifier)
+          .chain(b -> checkAndMarkConsumed(b, originalQualifier))
+          .pop();
+      }
       builder
-        .pushExpression(originalQualifier)
-        .pop()
         .chain(firstStep::before)
         .pushUnknown()
         .ifConditionIs(true);
@@ -852,6 +940,16 @@ public class StreamChainInliner implements CallInliner {
     builder
       .chain(b -> makeMainLoop(b, firstStep, inType))
       .end();
+  }
+
+  private static void checkAndMarkConsumed(CFGBuilder builder, PsiExpression qualifier) {
+    builder
+      .dup()
+      .unwrap(SpecialField.CONSUMED_STREAM)
+      .ensure(RelationType.NE, DfStreamStateType.CONSUMED, new ConsumedStreamProblem(qualifier), "java.lang.IllegalStateException")
+      .push(DfStreamStateType.CONSUMED)
+      .assign()
+      .pop();
   }
 
   private static void makeMainLoop(CFGBuilder builder, Step firstStep, PsiType inType) {
@@ -904,6 +1002,15 @@ public class StreamChainInliner implements CallInliner {
         PsiExpression supplier = args.length >= 4 ? args[3] : null;
         return new ToMapStep(call, keyExtractor, valueExtractor, merger, supplier,
                              "toUnmodifiableMap".equals(collectorCall.getMethodExpression().getReferenceName()));
+      }
+    }
+    if (GROUPING_COLLECTOR.matches(collectorCall)) {
+      PsiExpression[] args = collectorCall.getArgumentList().getExpressions();
+      if (args.length >= 1 && args.length <= 3) {
+        PsiExpression keyExtractor = args[0];
+        PsiExpression downstream = args.length > 1 ? args[args.length - 1] : null;
+        PsiExpression supplier = args.length == 3 ? args[1] : null;
+        return new GroupingStep(call, keyExtractor, downstream, supplier);
       }
     }
 

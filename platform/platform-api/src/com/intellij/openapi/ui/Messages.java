@@ -1,26 +1,23 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.ui;
 
 import com.intellij.CommonBundle;
-import com.intellij.openapi.application.Application;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.messages.AlertMessagesManager;
 import com.intellij.openapi.ui.messages.MessageDialog;
 import com.intellij.openapi.ui.messages.MessagesService;
-import com.intellij.openapi.util.*;
-import com.intellij.openapi.util.registry.Registry;
+import com.intellij.openapi.util.NlsContexts;
+import com.intellij.openapi.util.NlsSafe;
+import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.ui.BrowserHyperlinkListener;
 import com.intellij.ui.DocumentAdapter;
-import com.intellij.ui.MessageException;
 import com.intellij.ui.ScrollPaneFactory;
-import com.intellij.ui.components.JBScrollPane;
-import com.intellij.ui.mac.MacMessages;
 import com.intellij.util.Function;
 import com.intellij.util.PairFunction;
 import com.intellij.util.execution.ParametersListUtil;
+import com.intellij.util.ui.HTMLEditorKitBuilder;
 import com.intellij.util.ui.JBInsets;
 import com.intellij.util.ui.UI;
 import com.intellij.util.ui.UIUtil;
@@ -41,66 +38,11 @@ import static com.intellij.openapi.util.NlsContexts.*;
  * Provides several default notification dialogs ("OK|Cancel") as well as simple input dialogs.
  */
 @ApiStatus.NonExtendable
-@SuppressWarnings("DeprecatedIsStillUsed")
 public class Messages {
-  public static final int OK = 0;
-  public static final int YES = 0;
-  public static final int NO = 1;
-  public static final int CANCEL = 2;
-
-  @MagicConstant(intValues = {YES, NO})
-  public @interface YesNoResult { }
-
-  @MagicConstant(intValues = {OK, CANCEL})
-  public @interface OkCancelResult { }
-
-  @MagicConstant(intValues = {YES, NO, CANCEL})
-  public @interface YesNoCancelResult { }
-
-  /** @deprecated Use {@link #getOkButton()} instead */
-  @SuppressWarnings("HardCodedStringLiteral") @Deprecated
-  public static final String OK_BUTTON = "OK";
-
-  /** @deprecated Use {@link #getYesButton()} instead */
-  @SuppressWarnings("HardCodedStringLiteral") @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
-  public static final String YES_BUTTON = "&Yes";
-
-  /** @deprecated Use {@link #getNoButton()} instead */
-  @SuppressWarnings("HardCodedStringLiteral") @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
-  public static final String NO_BUTTON = "&No";
-
-  /** @deprecated Use {@link #getCancelButton()} instead */
-  @SuppressWarnings("HardCodedStringLiteral") @Deprecated
-  public static final String CANCEL_BUTTON = "Cancel";
-
-  public static @Nls String getOkButton() { return CommonBundle.getOkButtonText(); }
-  public static String getYesButton() { return CommonBundle.getYesButtonText(); }
-  public static String getNoButton() { return CommonBundle.getNoButtonText(); }
-  public static @Nls String getCancelButton() { return CommonBundle.getCancelButtonText(); }
-
-  private static final Logger LOG = Logger.getInstance(Messages.class);
-
-  public static @NotNull Icon getErrorIcon() {
-    return UIUtil.getErrorIcon();
-  }
-
-  public static @NotNull Icon getInformationIcon() {
-    return UIUtil.getInformationIcon();
-  }
-
-  public static @NotNull Icon getWarningIcon() {
-    return UIUtil.getWarningIcon();
-  }
-
-  public static @NotNull Icon getQuestionIcon() {
-    return UIUtil.getQuestionIcon();
-  }
-
-  public static void installHyperlinkSupport(JTextPane messageComponent) {
-    configureMessagePaneUi(messageComponent, "<html></html>");
-  }
+  public static final int OK = MessageConstants.OK;
+  public static final int YES = MessageConstants.YES;
+  public static final int NO = MessageConstants.NO;
+  public static final int CANCEL = MessageConstants.CANCEL;
 
   public static @NotNull JComponent wrapToScrollPaneIfNeeded(@NotNull JComponent comp, int columns, int lines) {
     return wrapToScrollPaneIfNeeded(comp, columns, lines, 4);
@@ -141,7 +83,7 @@ public class Messages {
     UIUtil.FontSize fixedFontSize = fontSize == null ? UIUtil.FontSize.NORMAL : fontSize;
     messageComponent.setFont(UIUtil.getLabelFont(fixedFontSize));
     if (BasicHTML.isHTMLString(message)) {
-      messageComponent.setEditorKit(UIUtil.getHTMLEditorKit());
+      messageComponent.setEditorKit(HTMLEditorKitBuilder.simple());
     }
     messageComponent.setText(message);
     messageComponent.setEditable(false);
@@ -152,6 +94,58 @@ public class Messages {
     messageComponent.setBackground(UIUtil.getOptionPaneBackground());
     messageComponent.setForeground(UIUtil.getLabelForeground());
     return messageComponent;
+  }
+
+  public static void installHyperlinkSupport(JTextPane messageComponent) {
+    configureMessagePaneUi(messageComponent, "<html></html>");
+  }
+
+  @MagicConstant(intValues = {YES, NO})
+  public @interface YesNoResult { }
+
+  @MagicConstant(intValues = {OK, CANCEL})
+  public @interface OkCancelResult { }
+
+  @MagicConstant(intValues = {YES, NO, CANCEL})
+  public @interface YesNoCancelResult { }
+
+  /** @deprecated Use {@link #getOkButton()} instead */
+  @SuppressWarnings("HardCodedStringLiteral") @Deprecated
+  public static final String OK_BUTTON = "OK";
+
+  /** @deprecated Use {@link #getYesButton()} instead */
+  @SuppressWarnings("HardCodedStringLiteral") @Deprecated(forRemoval = true)
+  public static final String YES_BUTTON = "&Yes";
+
+  /** @deprecated Use {@link #getNoButton()} instead */
+  @SuppressWarnings("HardCodedStringLiteral") @Deprecated(forRemoval = true)
+  public static final String NO_BUTTON = "&No";
+
+  /** @deprecated Use {@link #getCancelButton()} instead */
+  @SuppressWarnings("HardCodedStringLiteral") @Deprecated
+  public static final String CANCEL_BUTTON = "Cancel";
+
+  public static @Nls String getOkButton() { return CommonBundle.getOkButtonText(); }
+  public static String getYesButton() { return CommonBundle.getYesButtonText(); }
+  public static String getNoButton() { return CommonBundle.getNoButtonText(); }
+  public static @Nls String getCancelButton() { return CommonBundle.getCancelButtonText(); }
+
+  private static final Logger LOG = Logger.getInstance(Messages.class);
+
+  public static @NotNull Icon getErrorIcon() {
+    return UIUtil.getErrorIcon();
+  }
+
+  public static @NotNull Icon getInformationIcon() {
+    return UIUtil.getInformationIcon();
+  }
+
+  public static @NotNull Icon getWarningIcon() {
+    return UIUtil.getWarningIcon();
+  }
+
+  public static @NotNull Icon getQuestionIcon() {
+    return UIUtil.getQuestionIcon();
   }
 
   /**
@@ -166,11 +160,6 @@ public class Messages {
                                int defaultOptionIndex,
                                @Nullable Icon icon) {
     return showDialog(project, message, title, options, defaultOptionIndex, icon, null);
-  }
-
-  public static boolean isApplicationInUnitTestOrHeadless() {
-    final Application application = ApplicationManager.getApplication();
-    return application != null && (application.isUnitTestMode() || application.isHeadlessEnvironment());
   }
 
   public static @NotNull Runnable createMessageDialogRemover(@Nullable Project project) {
@@ -226,17 +215,16 @@ public class Messages {
       .showMessageDialog(project, null, message, title, options, defaultOptionIndex, -1, icon, doNotAskOption, true, null);
   }
 
+  /** @deprecated always false */
+  @Deprecated(forRemoval = true)
   public static boolean canShowMacSheetPanel() {
-    if (!SystemInfoRt.isMac || AlertMessagesManager.isEnabled()) {
-      return false;
-    }
-
-    Application app = ApplicationManager.getApplication();
-    return app != null && !app.isUnitTestMode() && !app.isHeadlessEnvironment() && Registry.is("ide.mac.message.dialogs.as.sheets", true);
+    return false;
   }
 
+  /** @deprecated always false */
+  @Deprecated(forRemoval = true)
   public static boolean isMacSheetEmulation() {
-    return SystemInfoRt.isMac && Registry.is("ide.mac.message.dialogs.as.sheets", true) && Registry.is("ide.mac.message.sheets.java.emulation", false);
+    return false;
   }
 
   /**
@@ -298,7 +286,7 @@ public class Messages {
                                int defaultOptionIndex,
                                @Nullable Icon icon,
                                @Nullable DialogWrapper.DoNotAskOption doNotAskOption) {
-    return showDialog(message, title, options, defaultOptionIndex, defaultOptionIndex, icon, doNotAskOption);
+    return showDialog(message, title, options, defaultOptionIndex, -1, icon, doNotAskOption);
   }
 
   /**
@@ -323,17 +311,6 @@ public class Messages {
                                        @DialogMessage String message,
                                        @NotNull @DialogTitle String title,
                                        @Nullable Icon icon) {
-    try {
-      if (canShowMacSheetPanel()) {
-        MacMessages.getInstance().showOkMessageDialog(title, message, getOkButton(), WindowManager.getInstance().suggestParentWindow(project));
-        return;
-      }
-    }
-    catch (MessageException ignored) {/*rollback the message and show a dialog*/}
-    catch (Exception reportThis) {
-      LOG.error(reportThis);
-    }
-
     showDialog(project, message, title, new String[]{getOkButton()}, 0, icon);
   }
 
@@ -341,17 +318,6 @@ public class Messages {
                                        @DialogMessage String message,
                                        @NotNull @DialogTitle String title,
                                        @Nullable Icon icon) {
-    try {
-      if (canShowMacSheetPanel()) {
-        MacMessages.getInstance().showOkMessageDialog(title, message, getOkButton(), SwingUtilities.getWindowAncestor(parent));
-        return;
-      }
-    }
-    catch (MessageException ignored) {/*rollback the message and show a dialog*/}
-    catch (Exception reportThis) {
-      LOG.error(reportThis);
-    }
-
     showDialog(parent, message, title, new String[]{getOkButton()}, 0, icon);
   }
 
@@ -364,17 +330,6 @@ public class Messages {
   public static void showMessageDialog(@DialogMessage String message,
                                        @NotNull @DialogTitle String title,
                                        @Nullable Icon icon) {
-    try {
-      if (canShowMacSheetPanel()) {
-        MacMessages.getInstance().showOkMessageDialog(title, message, getOkButton(), null);
-        return;
-      }
-    }
-    catch (MessageException ignored) {/*rollback the message and show a dialog*/}
-    catch (Exception reportThis) {
-      LOG.error(reportThis);
-    }
-
     showDialog(message, title, new String[]{getOkButton()}, 0, icon);
   }
 
@@ -407,8 +362,7 @@ public class Messages {
   }
 
   /** @deprecated Use {@link MessageDialogBuilder#yesNo} */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @Deprecated(forRemoval = true)
   public static int showYesNoDialog(@Nullable Project project,
                                     @DialogMessage String message,
                                     @NotNull @DialogTitle String title,
@@ -641,17 +595,6 @@ public class Messages {
   public static void showErrorDialog(@Nullable Project project,
                                      @DialogMessage String message,
                                      @NotNull @DialogTitle String title) {
-    try {
-      if (canShowMacSheetPanel()) {
-        MacMessages.getInstance().showErrorDialog(title, message, getOkButton(), WindowManager.getInstance().suggestParentWindow(project));
-        return;
-      }
-    }
-    catch (MessageException ignored) {/*rollback the message and show a dialog*/}
-    catch (Exception reportThis) {
-      LOG.error(reportThis);
-    }
-
     showDialog(project, message, title, new String[]{getOkButton()}, 0, getErrorIcon());
   }
 
@@ -663,18 +606,6 @@ public class Messages {
   }
 
   public static void showErrorDialog(@NotNull Component component, @DialogMessage String message) {
-    try {
-      if (canShowMacSheetPanel()) {
-        MacMessages.getInstance()
-          .showErrorDialog(CommonBundle.getErrorTitle(), message, getOkButton(), SwingUtilities.getWindowAncestor(component));
-        return;
-      }
-    }
-    catch (MessageException ignored) {/*rollback the message and show a dialog*/}
-    catch (Exception reportThis) {
-      LOG.error(reportThis);
-    }
-
     showDialog(component, message, CommonBundle.getErrorTitle(), new String[]{getOkButton()}, 0, getErrorIcon());
   }
 
@@ -691,34 +622,12 @@ public class Messages {
   public static void showWarningDialog(@Nullable Project project,
                                        @DialogMessage String message,
                                        @NotNull @DialogTitle String title) {
-    try {
-      if (canShowMacSheetPanel()) {
-        MacMessages.getInstance().showErrorDialog(title, message, getOkButton(), WindowManager.getInstance().suggestParentWindow(project));
-        return;
-      }
-    }
-    catch (MessageException ignored) {/*rollback the message and show a dialog*/}
-    catch (Exception reportThis) {
-      LOG.error(reportThis);
-    }
-
     showDialog(project, message, title, new String[]{getOkButton()}, 0, getWarningIcon());
   }
 
   public static void showWarningDialog(@NotNull Component component,
                                        @DialogMessage String message,
                                        @NotNull @DialogTitle String title) {
-    try {
-      if (canShowMacSheetPanel()) {
-        MacMessages.getInstance().showErrorDialog(title, message, getOkButton(), SwingUtilities.getWindowAncestor(component));
-        return;
-      }
-    }
-    catch (MessageException ignored) {/*rollback the message and show a dialog*/}
-    catch (Exception reportThis) {
-      LOG.error(reportThis);
-    }
-
     showDialog(component, message, title, new String[]{getOkButton()}, 0, getWarningIcon());
   }
 
@@ -730,17 +639,6 @@ public class Messages {
    */
   public static void showWarningDialog(@DialogMessage String message,
                                        @NotNull @DialogTitle String title) {
-    try {
-      if (canShowMacSheetPanel()) {
-        MacMessages.getInstance().showErrorDialog(title, message, getOkButton(), null);
-        return;
-      }
-    }
-    catch (MessageException ignored) {/*rollback the message and show a dialog*/}
-    catch (Exception reportThis) {
-      LOG.error(reportThis);
-    }
-
     showDialog(message, title, new String[]{getOkButton()}, 0, getWarningIcon());
   }
 
@@ -1031,17 +929,6 @@ public class Messages {
   public static void showInfoMessage(Component component,
                                      @DialogMessage String message,
                                      @NotNull @DialogTitle String title) {
-    try {
-      if (canShowMacSheetPanel()) {
-        MacMessages.getInstance().showOkMessageDialog(title, message, getOkButton(), SwingUtilities.getWindowAncestor(component));
-        return;
-      }
-    }
-    catch (MessageException ignored) {/*rollback the message and show a dialog*/}
-    catch (Exception reportThis) {
-      LOG.error(reportThis);
-    }
-
     showMessageDialog(component, message, title, getInformationIcon());
   }
 
@@ -1051,17 +938,6 @@ public class Messages {
   public static void showInfoMessage(@Nullable Project project,
                                      @DialogMessage String message,
                                      @NotNull @DialogTitle String title) {
-    try {
-      if (canShowMacSheetPanel()) {
-        MacMessages.getInstance().showOkMessageDialog(title, message, getOkButton(), WindowManager.getInstance().suggestParentWindow(project));
-        return;
-      }
-    }
-    catch (MessageException ignored) {/*rollback the message and show a dialog*/}
-    catch (Exception reportThis) {
-      LOG.error(reportThis);
-    }
-
     showMessageDialog(project, message, title, getInformationIcon());
   }
 
@@ -1075,17 +951,6 @@ public class Messages {
    */
   public static void showInfoMessage(@DialogMessage String message,
                                      @NotNull @DialogTitle String title) {
-    try {
-      if (canShowMacSheetPanel()) {
-        MacMessages.getInstance().showOkMessageDialog(title, message, getOkButton(), null);
-        return;
-      }
-    }
-    catch (MessageException ignored) {/*rollback the message and show a dialog*/}
-    catch (Exception reportThis) {
-      LOG.error(reportThis);
-    }
-
     showMessageDialog(message, title, getInformationIcon());
   }
 
@@ -1112,7 +977,7 @@ public class Messages {
     protected JTextComponent myField;
     private final InputValidator myValidator;
     private final @DetailedDescription String myComment;
-
+  
     public InputDialog(@Nullable Project project,
                        @DialogMessage String message,
                        @DialogTitle String title,
@@ -1129,7 +994,7 @@ public class Messages {
       myField.setText(initialValue);
       enableOkAction();
     }
-
+  
     public InputDialog(@Nullable Project project,
                        @DialogMessage String message,
                        @DialogTitle String title,
@@ -1140,7 +1005,7 @@ public class Messages {
                        int defaultOption) {
       this(project, message, title, icon, initialValue, validator, options, defaultOption, null);
     }
-
+  
     public InputDialog(@Nullable Project project,
                        @DialogMessage String message,
                        @DialogTitle String title,
@@ -1149,7 +1014,7 @@ public class Messages {
                        @Nullable InputValidator validator) {
       this(project, message, title, icon, initialValue, validator, new String[]{getOkButton(), getCancelButton()}, 0);
     }
-
+  
     public InputDialog(@NotNull Component parent,
                        @DialogMessage String message,
                        @DialogTitle String title,
@@ -1162,7 +1027,7 @@ public class Messages {
       myField.setText(initialValue);
       enableOkAction();
     }
-
+  
     public InputDialog(@DialogMessage String message,
                        @DialogTitle String title,
                        @Nullable Icon icon,
@@ -1174,11 +1039,11 @@ public class Messages {
       myField.setText(initialValue);
       enableOkAction();
     }
-
+  
     private void enableOkAction() {
       getOKAction().setEnabled(myValidator == null || myValidator.checkInput(myField.getText().trim()));
     }
-
+  
     @Override
     protected Action @NotNull [] createActions() {
       final Action[] actions = new Action[myOptions.length];
@@ -1187,14 +1052,14 @@ public class Messages {
         final int exitCode = i;
         if (i == 0) { // "OK" is default button. It has index 0.
           actions[0] = getOKAction();
-          actions[0].putValue(DEFAULT_ACTION, Boolean.TRUE);
+          actions[0].putValue(DialogWrapper.DEFAULT_ACTION, Boolean.TRUE);
           myField.getDocument().addDocumentListener(new DocumentAdapter() {
             @Override
             public void textChanged(@NotNull DocumentEvent event) {
               final String text = myField.getText().trim();
               actions[exitCode].setEnabled(myValidator == null || myValidator.checkInput(text));
               if (myValidator instanceof InputValidatorEx) {
-                setErrorText(((InputValidatorEx) myValidator).getErrorText(text), myField);
+                setErrorText(((InputValidatorEx)myValidator).getErrorText(text), myField);
               }
             }
           });
@@ -1210,7 +1075,7 @@ public class Messages {
       }
       return actions;
     }
-
+  
     @Override
     protected void doOKAction() {
       String inputString = myField.getText().trim();
@@ -1220,19 +1085,19 @@ public class Messages {
         close(0);
       }
     }
-
+  
     @Override
     protected JComponent createCenterPanel() {
       return null;
     }
-
+  
     @Override
     protected JComponent createNorthPanel() {
       JPanel panel = createIconPanel();
-
+  
       JPanel messagePanel = createMessagePanel();
       panel.add(messagePanel, BorderLayout.CENTER);
-
+  
       if (myComment != null) {
         return UI.PanelFactory.panel(panel).withComment(myComment).createPanel();
       }
@@ -1240,7 +1105,7 @@ public class Messages {
         return panel;
       }
     }
-
+  
     @Override
     protected @NotNull JPanel createMessagePanel() {
       JPanel messagePanel = new JPanel(new BorderLayout());
@@ -1248,17 +1113,17 @@ public class Messages {
         JComponent textComponent = createTextComponent();
         messagePanel.add(textComponent, BorderLayout.NORTH);
       }
-
+  
       myField = createTextFieldComponent();
       messagePanel.add(createScrollableTextComponent(), BorderLayout.SOUTH);
-
+  
       return messagePanel;
     }
-
+  
     protected JComponent createScrollableTextComponent() {
       return myField;
     }
-
+  
     protected JComponent createTextComponent() {
       JComponent textComponent;
       if (BasicHTML.isHTMLString(myMessage)) {
@@ -1272,65 +1137,24 @@ public class Messages {
       textComponent.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 20));
       return textComponent;
     }
-
+  
     public JTextComponent getTextField() {
       return myField;
     }
-
+  
     protected JTextComponent createTextFieldComponent() {
       JTextField field = new JTextField(INPUT_DIALOG_COLUMNS);
       field.setMargin(JBInsets.create(0, 5));
       return field;
     }
-
+  
     @Override
     public JComponent getPreferredFocusedComponent() {
       return myField;
     }
-
+  
     public @Nullable @NlsSafe String getInputString() {
       return getExitCode() == 0 ? myField.getText().trim() : null;
-    }
-  }
-
-  public static class MultilineInputDialog extends InputDialog {
-    public MultilineInputDialog(Project project,
-                                @DialogMessage String message,
-                                @DialogTitle String title,
-                                @Nullable Icon icon,
-                                @Nullable @NonNls String initialValue,
-                                @Nullable InputValidator validator,
-                                String @NotNull @NlsContexts.Button [] options,
-                                int defaultOption) {
-      super(project, message, title, icon, initialValue, validator, options, defaultOption);
-    }
-
-    @Override
-    protected JTextComponent createTextFieldComponent() {
-      return new JTextArea(7, 50);
-    }
-
-    @Override
-    protected JComponent createScrollableTextComponent() {
-      return new JBScrollPane(myField);
-    }
-
-    @Override
-    protected JComponent createNorthPanel() {
-      return null;
-    }
-
-    @Override
-    protected JComponent createCenterPanel() {
-      JPanel messagePanel = new JPanel(new BorderLayout());
-      if (myMessage != null) {
-        JComponent textComponent = createTextComponent();
-        messagePanel.add(textComponent, BorderLayout.NORTH);
-      }
-
-      myField = createTextFieldComponent();
-      messagePanel.add(createScrollableTextComponent(), BorderLayout.CENTER);
-      return messagePanel;
     }
   }
 }

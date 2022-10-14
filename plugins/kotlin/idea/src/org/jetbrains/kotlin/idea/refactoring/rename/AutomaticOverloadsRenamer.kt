@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.refactoring.rename
 
@@ -11,7 +11,7 @@ import com.intellij.usageView.UsageInfo
 import org.jetbrains.annotations.TestOnly
 import org.jetbrains.kotlin.descriptors.ClassDescriptor
 import org.jetbrains.kotlin.descriptors.FunctionDescriptor
-import org.jetbrains.kotlin.idea.KotlinBundle
+import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.caches.resolve.getResolutionFacade
 import org.jetbrains.kotlin.idea.caches.resolve.unsafeResolveToDescriptor
 import org.jetbrains.kotlin.idea.refactoring.KotlinRefactoringSettings
@@ -42,7 +42,7 @@ class AutomaticOverloadsRenamer(function: KtNamedFunction, newName: String) : Au
     }
 
     override fun getDialogTitle() = KotlinBundle.message("text.rename.overloads.title")
-    override fun getDialogDescription() = KotlinBundle.message("text.rename.overloads.to")
+    override fun getDialogDescription() = KotlinBundle.message("title.rename.overloads.to")
     override fun entityName() = KotlinBundle.message("text.overload")
     override fun isSelectedByDefault(): Boolean = true
 }

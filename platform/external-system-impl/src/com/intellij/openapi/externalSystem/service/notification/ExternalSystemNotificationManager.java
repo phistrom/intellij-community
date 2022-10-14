@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.externalSystem.service.notification;
 
 import com.intellij.build.issue.BuildIssue;
@@ -12,6 +12,7 @@ import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.components.Service;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.externalSystem.issue.BuildIssueException;
 import com.intellij.openapi.externalSystem.model.LocationAwareExternalSystemException;
@@ -45,7 +46,6 @@ import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.accessibility.ScreenReader;
 import com.intellij.util.ui.update.MergingUpdateQueue;
 import com.intellij.util.ui.update.Update;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -67,7 +67,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * @author Denis Zhdanov, Vladislav Soroka
  */
-public class ExternalSystemNotificationManager implements Disposable {
+@Service(Service.Level.PROJECT)
+public final class ExternalSystemNotificationManager implements Disposable {
   private static final Logger LOG = Logger.getInstance(ExternalSystemNotificationManager.class);
 
   private static final @NotNull Key<Pair<NotificationSource, ProjectSystemId>> CONTENT_ID_KEY = Key.create("CONTENT_ID");
@@ -148,7 +149,7 @@ public class ExternalSystemNotificationManager implements Disposable {
   private static boolean isInternalError(@NotNull Throwable error,
                                          @NotNull ProjectSystemId externalSystemId) {
     if (RemoteUtil.unwrap(error) instanceof BuildIssueException) return false;
-    return ExternalSystemNotificationExtension.EP_NAME.extensions()
+    return ExternalSystemNotificationExtension.EP_NAME.getExtensionList().stream()
       .anyMatch(extension -> externalSystemId.equals(extension.getTargetExternalSystemId()) && extension.isInternalError(error));
   }
 
@@ -207,8 +208,7 @@ public class ExternalSystemNotificationManager implements Disposable {
                     ((ExternalProjectsViewImpl)externalProjectsView).getNotificationGroup() : null;
           }
           else {
-            final NotificationGroup registeredGroup = NotificationGroup.findRegisteredGroup(notificationData.getBalloonGroup());
-            group = registeredGroup != null ? registeredGroup : NotificationGroup.balloonGroup(notificationData.getBalloonGroup());
+            group = notificationData.getBalloonGroup();
           }
           if (group == null) return;
 
@@ -239,7 +239,6 @@ public class ExternalSystemNotificationManager implements Disposable {
   }
 
   @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2020.1")
   public void clearNotifications(final @Nullable String groupName,
                                  final @NotNull NotificationSource notificationSource,
                                  final @NotNull ProjectSystemId externalSystemId) {
@@ -370,7 +369,6 @@ public class ExternalSystemNotificationManager implements Disposable {
   }
 
   @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2020.1")
   public @NotNull NewErrorTreeViewPanel prepareMessagesView(final @NotNull ProjectSystemId externalSystemId,
                                                             final @NotNull NotificationSource notificationSource,
                                                             boolean activateView) {
@@ -385,7 +383,7 @@ public class ExternalSystemNotificationManager implements Disposable {
     final MessageView messageView = myProject.getService(MessageView.class);
     if (targetContent == null || !contentIdPair.equals(targetContent.getUserData(CONTENT_ID_KEY))) {
       errorTreeView = new NewEditableErrorTreeViewPanel(myProject, null, true, true, null);
-      targetContent = ContentFactory.SERVICE.getInstance().createContent(errorTreeView, contentDisplayName, true);
+      targetContent = ContentFactory.getInstance().createContent(errorTreeView, contentDisplayName, true);
       targetContent.putUserData(CONTENT_ID_KEY, contentIdPair);
 
       messageView.getContentManager().addContent(targetContent);
@@ -418,25 +416,14 @@ public class ExternalSystemNotificationManager implements Disposable {
   }
 
   @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2020.1")
   public static @NotNull @Nls String getContentDisplayName(
     final @NotNull NotificationSource notificationSource,
     final @NotNull ProjectSystemId externalSystemId
   ) {
-    final String contentDisplayName;
-    switch (notificationSource) {
-      case PROJECT_SYNC:
-        contentDisplayName =
-          ExternalSystemBundle.message("notification.messages.project.sync.tab.name", externalSystemId.getReadableName());
-        break;
-      case TASK_EXECUTION:
-        contentDisplayName =
-          ExternalSystemBundle.message("notification.messages.task.execution.tab.name", externalSystemId.getReadableName());
-        break;
-      default:
-        throw new AssertionError("unsupported notification source found: " + notificationSource);
-    }
-    return contentDisplayName;
+    return ExternalSystemBundle.message(switch (notificationSource) {
+      case PROJECT_SYNC -> "notification.messages.project.sync.tab.name";
+      case TASK_EXECUTION -> "notification.messages.task.execution.tab.name";
+    }, externalSystemId.getReadableName());
   }
 
   @Override

@@ -22,9 +22,11 @@ import com.intellij.featureStatistics.FeatureUsageTracker;
 import com.intellij.ide.highlighter.ArchiveFileType;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.idea.ActionsBundle;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataKey;
+import com.intellij.openapi.diff.DiffBundle;
 import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.project.Project;
@@ -61,22 +63,21 @@ public class CompareFilesAction extends BaseShowDiffAction {
           text = ActionsBundle.message("action.compare.text");
         }
         else {
-          switch (types.iterator().next()) {
-            case FILE:
-              text = ActionsBundle.message("action.compare.files.text");
-              break;
-            case DIRECTORY:
-              text = ActionsBundle.message("action.CompareDirs.text");
-              break;
-            case ARCHIVE:
-              text = ActionsBundle.message("action.compare.archives.text");
-              break;
-          }
+          text = ActionsBundle.message(switch (types.iterator().next()) {
+            case FILE -> "action.compare.files.text";
+            case DIRECTORY -> "action.CompareDirs.text";
+            case ARCHIVE -> "action.compare.archives.text";
+          });
         }
       }
     }
 
     e.getPresentation().setText(text);
+  }
+
+  @Override
+  public @NotNull ActionUpdateThread getActionUpdateThread() {
+    return ActionUpdateThread.BGT;
   }
 
   @Override
@@ -162,7 +163,7 @@ public class CompareFilesAction extends BaseShowDiffAction {
       key = LAST_USED_FILE_KEY;
     }
     VirtualFile selectedFile = getDefaultSelection(project, key, file);
-    VirtualFile otherFile = FileChooser.chooseFile(descriptor, project, selectedFile);
+    VirtualFile otherFile = FileChooser.chooseFile(descriptor.withTitle(DiffBundle.message("select.file.to.compare")), project, selectedFile);
     if (otherFile != null) updateDefaultSelection(project, key, otherFile);
     return otherFile;
   }

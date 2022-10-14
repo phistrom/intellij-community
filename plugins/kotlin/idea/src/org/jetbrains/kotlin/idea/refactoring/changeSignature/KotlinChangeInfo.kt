@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.refactoring.changeSignature
 
@@ -21,10 +21,10 @@ import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
 import org.jetbrains.kotlin.descriptors.DescriptorVisibility
 import org.jetbrains.kotlin.descriptors.FunctionDescriptor
 import org.jetbrains.kotlin.idea.KotlinLanguage
+import org.jetbrains.kotlin.idea.base.facet.platform.platform
+import org.jetbrains.kotlin.idea.base.psi.unquoteKotlinIdentifier
 import org.jetbrains.kotlin.idea.caches.resolve.util.getJavaOrKotlinMemberDescriptor
-import org.jetbrains.kotlin.idea.core.unquote
 import org.jetbrains.kotlin.idea.j2k.j2k
-import org.jetbrains.kotlin.idea.project.TargetPlatformDetector
 import org.jetbrains.kotlin.idea.refactoring.changeSignature.KotlinMethodDescriptor.Kind
 import org.jetbrains.kotlin.idea.refactoring.changeSignature.usages.KotlinCallableDefinitionUsage
 import org.jetbrains.kotlin.idea.refactoring.changeSignature.usages.KotlinCallerUsage
@@ -33,6 +33,7 @@ import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.load.java.JvmAbi
 import org.jetbrains.kotlin.platform.jvm.isJvm
 import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.psiUtil.allChildren
 import org.jetbrains.kotlin.psi.psiUtil.isIdentifier
 import org.jetbrains.kotlin.psi.psiUtil.quoteIfNeeded
 import org.jetbrains.kotlin.resolve.DescriptorUtils
@@ -303,8 +304,25 @@ open class KotlinChangeInfo(
             return signatureParameters[0].getDeclarationSignature(0, inheritedCallable).text
         }
 
-        return signatureParameters.indices.joinToString(separator = ", ") { i ->
-            signatureParameters[i].getDeclarationSignature(i, inheritedCallable).text
+        return buildString {
+            val indices = signatureParameters.indices
+            val lastIndex = indices.last
+            indices.forEach { index ->
+                val parameter = signatureParameters[index].getDeclarationSignature(index, inheritedCallable)
+                if (index == lastIndex) {
+                    append(parameter.text)
+                } else {
+                    val lastCommentsOrWhiteSpaces =
+                        parameter.allChildren.toList().reversed().takeWhile { it is PsiComment || it is PsiWhiteSpace }
+                    if (lastCommentsOrWhiteSpaces.any { it is PsiComment }) {
+                        val commentsText = lastCommentsOrWhiteSpaces.reversed().joinToString(separator = "") { it.text }
+                        lastCommentsOrWhiteSpaces.forEach { it.delete() }
+                        append("${parameter.text},$commentsText\n")
+                    } else {
+                        append("${parameter.text}, ")
+                    }
+                }
+            }
         }
     }
 
@@ -405,7 +423,7 @@ open class KotlinChangeInfo(
             newReturnType: PsiType?,
             newParameters: Array<ParameterInfoImpl>
         ): JavaChangeInfo? {
-            if (!newName.unquote().isIdentifier()) return null
+            if (!newName.unquoteKotlinIdentifier().isIdentifier()) return null
 
             val newVisibility = if (isPrimaryMethodUpdated)
                 VisibilityUtil.getVisibilityModifier(currentPsiMethod.modifierList)
@@ -494,19 +512,28 @@ open class KotlinChangeInfo(
         fun createJavaChangeInfoForSetter(originalPsiMethod: PsiMethod, currentPsiMethod: PsiMethod): JavaChangeInfo? {
             val newJavaParameters = getJavaParameterInfos(originalPsiMethod, currentPsiMethod, listOfNotNull(receiverParameterInfo))
             val oldIndex = if (methodDescriptor.receiver != null) 1 else 0
+            val parameters = currentPsiMethod.parameterList.parameters
             if (isPrimaryMethodUpdated) {
                 val newIndex = if (receiverParameterInfo != null) 1 else 0
-                val setterParameter = currentPsiMethod.parameterList.parameters[newIndex]
+                val setterParameter = parameters[newIndex]
                 newJavaParameters.add(ParameterInfoImpl(oldIndex, setterParameter.name, setterParameter.type))
             } else {
-                newJavaParameters.add(ParameterInfoImpl(oldIndex, "receiver", PsiType.VOID))
+                if (receiverParameterInfo != null) {
+                    if (newJavaParameters.isEmpty()) {
+                        newJavaParameters.add(ParameterInfoImpl(oldIndex, "receiver", PsiType.VOID))
+                    }
+                }
+                if (oldIndex < parameters.size) {
+                    val setterParameter = parameters[oldIndex]
+                    newJavaParameters.add(ParameterInfoImpl(oldIndex, setterParameter.name, setterParameter.type))
+                }
             }
 
             val newName = JvmAbi.setterName(newName)
             return createJavaChangeInfo(originalPsiMethod, currentPsiMethod, newName, PsiType.VOID, newJavaParameters.toTypedArray())
         }
 
-        if (!TargetPlatformDetector.getPlatform(method.containingFile as KtFile).isJvm()) return null
+        if (!(method.containingFile as KtFile).platform.isJvm()) return null
 
         if (javaChangeInfos == null) {
             val method = method

@@ -1,11 +1,11 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.vcs.log.ui.actions.history;
 
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.changes.ui.ChangeListViewerDialog;
-import com.intellij.openapi.vcs.versionBrowser.CommittedChangeList;
+import com.intellij.openapi.vcs.changes.ui.LoadingCommittedChangeListPanel;
 import com.intellij.vcs.CommittedChangeListForRevision;
 import com.intellij.vcs.log.VcsFullCommitDetails;
 import com.intellij.vcs.log.VcsLogBundle;
@@ -22,7 +22,7 @@ public class ShowAllAffectedFromHistoryAction extends FileHistorySingleCommitAct
   @NotNull
   @Override
   protected List<VcsFullCommitDetails> getSelection(@NotNull FileHistoryUi ui) {
-    return ui.getVcsLog().getSelectedDetails();
+    return ui.getTable().getSelection().getCachedFullDetails();
   }
 
   @NotNull
@@ -37,13 +37,14 @@ public class ShowAllAffectedFromHistoryAction extends FileHistorySingleCommitAct
                                @NotNull VcsFullCommitDetails detail,
                                @NotNull AnActionEvent e) {
     FilePath file = ui.getPathInCommit(detail.getId());
-    CommittedChangeList emptyChangeList = createCommittedChangeList(detail, false);
-    ChangeListViewerDialog dialog = new ChangeListViewerDialog(project, emptyChangeList, file != null ? file.getVirtualFile() : null);
-    dialog.loadChangesInBackground(() -> {
+    String title = VcsLogBundle.message("dialog.title.paths.affected.by.commit", detail.getId().toShortString());
+
+    LoadingCommittedChangeListPanel panel = new LoadingCommittedChangeListPanel(project);
+    panel.loadChangesInBackground(() -> {
       CommittedChangeListForRevision committedChangeList = createCommittedChangeList(detail);
-      return new ChangeListViewerDialog.ChangelistData(committedChangeList, file);
+      return new LoadingCommittedChangeListPanel.ChangelistData(committedChangeList, file);
     });
-    dialog.setTitle(VcsLogBundle.message("dialog.title.paths.affected.by.commit", detail.getId().toShortString()));
-    dialog.show();
+
+    ChangeListViewerDialog.show(project, title, panel);
   }
 }

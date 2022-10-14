@@ -20,7 +20,7 @@ import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 
-public class MapIndexStorage<Key, Value> implements IndexStorage<Key, Value> {
+public class MapIndexStorage<Key, Value> implements IndexStorage<Key, Value>, MeasurableIndexStore {
   private static final Logger LOG = Logger.getInstance(MapIndexStorage.class);
   private static final boolean ENABLE_WAL = SystemProperties.getBooleanProperty("idea.index.enable.wal", false);
 
@@ -82,22 +82,22 @@ public class MapIndexStorage<Key, Value> implements IndexStorage<Key, Value> {
       @Override
       protected void onDropFromCache(final Key key, @NotNull ChangeTrackingValueContainer<Value> valueContainer) {
         assert l.isHeldByCurrentThread();
-        ChangeTrackingValueContainer<Value> storedContainer = valueContainer;
-        if (!myReadOnly && valueContainer.isDirty()) {
-          if (myKeyIsUniqueForIndexedFile) {
-            if (valueContainer.containsOnlyInvalidatedChange()) {
-              storedContainer = new ChangeTrackingValueContainer<>(null);
+        try {
+          if (!myReadOnly && valueContainer.isDirty()) {
+            if (myKeyIsUniqueForIndexedFile) {
+              if (valueContainer.containsOnlyInvalidatedChange()) {
+                map.remove(key);
+                return;
+              }
+              else if (valueContainer.containsCachedMergedData()) {
+                valueContainer.setNeedsCompacting(true);
+              }
             }
-            else if (storedContainer.containsCachedMergedData()) {
-              storedContainer.setNeedsCompacting(true);
-            }
+            map.merge(key, valueContainer);
           }
-          try {
-            map.merge(key, storedContainer);
-          }
-          catch (IOException e) {
-            throw new RuntimeException(e);
-          }
+        }
+        catch (IOException e) {
+          throw new RuntimeException(e);
         }
       }
     };
@@ -223,6 +223,11 @@ public class MapIndexStorage<Key, Value> implements IndexStorage<Key, Value> {
     });
   }
 
+  @Override
+  public int keysCountApproximately() {
+    return myMap.getStorageMap().keysCount();
+  }
+
   protected boolean compactOnClose() {
     return false;
   }
@@ -280,7 +285,7 @@ public class MapIndexStorage<Key, Value> implements IndexStorage<Key, Value> {
       return;
     }
 
-    myMap.merge(key, new ChangeTrackingValueContainer<>(null));
+    myMap.remove(key);
   }
 
   private void updateSingleValueDirectly(Key key, int inputId, Value newValue) throws IOException {

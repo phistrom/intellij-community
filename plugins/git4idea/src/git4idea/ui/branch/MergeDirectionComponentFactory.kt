@@ -13,14 +13,16 @@ import com.intellij.ui.MutableCollectionComboBoxModel
 import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.JBTextField
-import com.intellij.ui.layout.*
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.panel
 import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.NamedColorUtil
 import com.intellij.util.ui.UI
 import com.intellij.util.ui.UIUtil
 import git4idea.GitBranch
 import git4idea.GitLocalBranch
-import git4idea.GitRemoteBranch
 import git4idea.GitPushUtil.findPushTarget
+import git4idea.GitRemoteBranch
 import git4idea.i18n.GitBundle
 import net.miginfocom.layout.CC
 import net.miginfocom.layout.LC
@@ -101,7 +103,7 @@ class MergeDirectionComponentFactory<RepoMapping : GitRepositoryMappingData>(
 
       add(base, CC().minWidth("${UI.scale(30)}"))
       add(JLabel(" ${UIUtil.leftArrow()} ").apply {
-        foreground = UIUtil.getInactiveTextColor()
+        foreground = NamedColorUtil.getInactiveTextColor()
         border = JBUI.Borders.empty(0, 5)
       })
       add(head, CC().minWidth("${UI.scale(30)}"))
@@ -163,6 +165,8 @@ class MergeDirectionComponentFactory<RepoMapping : GitRepositoryMappingData>(
                                     GitBundle.message("branch.direction.panel.head.repo.label"),
                                     ComboBox(repoModel).apply {
                                       renderer = SimpleListCellRenderer.create("") { it.repositoryPath }
+                                    }.also {
+                                      ComboboxSpeedSearch.installSpeedSearch(it, GitRepositoryMappingData::repositoryPath)
                                     }) {
         applySelection(repoModel.selected, branchModel.selected)
       }
@@ -197,25 +201,24 @@ class MergeDirectionComponentFactory<RepoMapping : GitRepositoryMappingData>(
                                                   onSave: () -> Unit): JBPopup {
       var buttonHandler: ((ActionEvent) -> Unit)? = null
 
-      val branchComponent = ComboBox(branchModel).apply {
-        renderer = SimpleListCellRenderer.create<GitBranch>("", GitBranch::getName)
-      }.also {
-        ComboboxSpeedSearch.installSpeedSearch(it, GitBranch::getName)
-      }
-
-      val panel = panel(LCFlags.fill) {
+      lateinit var branchComponent: ComboBox<T>
+      val panel = panel {
         row(repoRowMessage) {
-          repoComponent(CCFlags.growX)
+          cell(repoComponent)
+            .align(AlignX.FILL)
         }
         row(GitBundle.message("branch.direction.panel.branch.label")) {
-          branchComponent(CCFlags.growX)
+          branchComponent = comboBox(branchModel, SimpleListCellRenderer.create("", GitBranch::getName))
+            .align(AlignX.FILL)
+            .also {
+              ComboboxSpeedSearch.installSpeedSearch(it.component, GitBranch::getName)
+            }
+            .component
         }
         row {
-          right {
-            button(GitBundle.message("branch.direction.panel.save.button")) {
-              buttonHandler?.invoke(it)
-            }
-          }
+          button(GitBundle.message("branch.direction.panel.save.button")) {
+            buttonHandler?.invoke(it)
+          }.align(AlignX.RIGHT)
         }
       }.apply {
         isFocusCycleRoot = true

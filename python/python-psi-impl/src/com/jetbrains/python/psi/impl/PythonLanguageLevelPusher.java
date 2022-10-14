@@ -1,7 +1,6 @@
 // Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.jetbrains.python.psi.impl;
 
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 import com.intellij.ProjectTopics;
 import com.intellij.injected.editor.VirtualFileWindow;
@@ -22,7 +21,6 @@ import com.intellij.openapi.roots.*;
 import com.intellij.openapi.roots.impl.FilePropertyPusher;
 import com.intellij.openapi.roots.impl.PushedFilePropertiesUpdater;
 import com.intellij.openapi.util.Key;
-import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileVisitor;
@@ -39,9 +37,9 @@ import com.jetbrains.python.PythonRuntimeService;
 import com.jetbrains.python.codeInsight.typing.PyTypeShed;
 import com.jetbrains.python.module.PyModuleService;
 import com.jetbrains.python.psi.LanguageLevel;
+import com.jetbrains.python.psi.PyUtil;
 import com.jetbrains.python.psi.resolve.PythonSdkPathCache;
 import com.jetbrains.python.sdk.PythonSdkUtil;
-import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
@@ -50,7 +48,6 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.*;
-import java.util.stream.Collectors;
 
 public final class PythonLanguageLevelPusher implements FilePropertyPusher<String> {
   private static final Key<String> KEY = new Key<>("python.language.level");
@@ -70,22 +67,21 @@ public final class PythonLanguageLevelPusher implements FilePropertyPusher<Strin
     levels.put(l2, l1);
   }
 
-  private final Map<Module, Sdk> myModuleSdks = ContainerUtil.createWeakMap();
+  private final Map<Module, Sdk> myModuleSdks = new WeakHashMap<>();
 
   @Override
   public void initExtra(@NotNull Project project) {
     final Map<Module, Sdk> moduleSdks = getPythonModuleSdks(project);
-    final Set<Sdk> distinctSdks = StreamEx.ofValues(moduleSdks).nonNull().collect(Collectors.toCollection(LinkedHashSet::new));
+    final Set<Sdk> distinctSdks = new LinkedHashSet<>(moduleSdks.values());
 
     myModuleSdks.putAll(moduleSdks);
     resetProjectLanguageLevel(project);
-    updateSdkLanguageLevels(project, distinctSdks);
+    updateSdkLanguageLevels(project, moduleSdks);
     guessLanguageLevelWithCaching(project, distinctSdks);
   }
 
   @Override
-  @NotNull
-  public Key<String> getFileDataKey() {
+  public @NotNull Key<String> getFileDataKey() {
     return KEY;
   }
 
@@ -95,34 +91,26 @@ public final class PythonLanguageLevelPusher implements FilePropertyPusher<Strin
   }
 
   @Override
-  @NotNull
-  public String getDefaultValue() {
+  public @NotNull String getDefaultValue() {
     return LanguageLevel.getDefault().toPythonVersion();
   }
 
   @Override
-  @Nullable
-  public String getImmediateValue(@NotNull Project project, @Nullable VirtualFile file) {
+  public @Nullable String getImmediateValue(@NotNull Project project, @Nullable VirtualFile file) {
     return null;
   }
 
-  @Nullable
-  private static Sdk getFileSdk(@NotNull Project project, @NotNull VirtualFile file) {
+  private static @Nullable Sdk getFileSdk(@NotNull Project project, @NotNull VirtualFile file) {
     final Module module = ModuleUtilCore.findModuleForFile(file, project);
     if (module != null) {
-      final Sdk sdk = PythonSdkUtil.findPythonSdk(module);
-      if (sdk != null) {
-        return sdk;
-      }
-      return null;
+      return PythonSdkUtil.findPythonSdk(module);
     }
     else {
       return findSdkForFileOutsideTheProject(project, file);
     }
   }
 
-  @Nullable
-  private static Sdk findSdkForFileOutsideTheProject(Project project, VirtualFile file) {
+  private static @Nullable Sdk findSdkForFileOutsideTheProject(Project project, VirtualFile file) {
     if (file != null) {
       final List<OrderEntry> orderEntries = ProjectRootManager.getInstance(project).getFileIndex().getOrderEntriesForFile(file);
       for (OrderEntry orderEntry : orderEntries) {
@@ -135,8 +123,7 @@ public final class PythonLanguageLevelPusher implements FilePropertyPusher<Strin
   }
 
   @Override
-  @NotNull
-  public String getImmediateValue(@NotNull Module module) {
+  public @NotNull String getImmediateValue(@NotNull Module module) {
     if (ApplicationManager.getApplication().isUnitTestMode() && LanguageLevel.FORCE_LANGUAGE_LEVEL != null) {
       return LanguageLevel.FORCE_LANGUAGE_LEVEL.toPythonVersion();
     }
@@ -164,7 +151,7 @@ public final class PythonLanguageLevelPusher implements FilePropertyPusher<Strin
   @Override
   public void persistAttribute(@NotNull Project project, @NotNull VirtualFile fileOrDir, @NotNull String value) throws IOException {
     final LanguageLevel level = LanguageLevel.fromPythonVersion(value);
-    final DataInputStream iStream = PERSISTENCE.readAttribute(fileOrDir);
+    final DataInputStream iStream = PERSISTENCE.readFileAttribute(fileOrDir);
 
     LanguageLevel oldLanguageLevel = null;
     if (iStream != null) {
@@ -178,7 +165,7 @@ public final class PythonLanguageLevelPusher implements FilePropertyPusher<Strin
       }
     }
 
-    try (DataOutputStream oStream = PERSISTENCE.writeAttribute(fileOrDir)) {
+    try (DataOutputStream oStream = PERSISTENCE.writeFileAttribute(fileOrDir)) {
       DataInputOutputUtil.writeINT(oStream, level.ordinal());
     }
 
@@ -196,7 +183,7 @@ public final class PythonLanguageLevelPusher implements FilePropertyPusher<Strin
     return PythonFileType.INSTANCE.equals(FileTypeRegistry.getInstance().getFileTypeByFileName(child.getNameSequence()));
   }
 
-  private static void clearSdkPathCache(@NotNull final VirtualFile child) {
+  private static void clearSdkPathCache(final @NotNull VirtualFile child) {
     final Project[] projects = ProjectManager.getInstance().getOpenProjects();
     for (Project project : projects) {
       final Sdk sdk = getFileSdk(project, child);
@@ -208,21 +195,20 @@ public final class PythonLanguageLevelPusher implements FilePropertyPusher<Strin
   }
 
   @Override
-  public void afterRootsChanged(@NotNull final Project project) {
+  public void afterRootsChanged(final @NotNull Project project) {
     final Map<Module, Sdk> moduleSdks = getPythonModuleSdks(project);
-    final Set<Sdk> distinctSdks = StreamEx.ofValues(moduleSdks).nonNull().collect(Collectors.toCollection(LinkedHashSet::new));
-    final boolean needToReparseOpenFiles = ContainerUtil.exists(moduleSdks.entrySet(), (entry -> {
+    final boolean needToReparseOpenFiles = ContainerUtil.exists(moduleSdks.entrySet(), entry -> {
       final Module module = entry.getKey();
       final Sdk newSdk = entry.getValue();
       final Sdk oldSdk = myModuleSdks.get(module);
       return myModuleSdks.containsKey(module) && newSdk != oldSdk;
-    }));
+    });
 
     myModuleSdks.putAll(moduleSdks);
     resetProjectLanguageLevel(project);
-    updateSdkLanguageLevels(project, distinctSdks);
+    updateSdkLanguageLevels(project, moduleSdks);
 
-    if (needToReparseOpenFiles) {
+    if (needToReparseOpenFiles) {//todo[lene] move it after updating SDKs?
       ApplicationManager.getApplication().invokeLater(() -> {
         if (project.isDisposed()) {
           return;
@@ -232,29 +218,45 @@ public final class PythonLanguageLevelPusher implements FilePropertyPusher<Strin
     }
   }
 
-  @NotNull
-  private static Map<Module, Sdk> getPythonModuleSdks(@NotNull Project project) {
-    final ModuleManager moduleManager = ModuleManager.getInstance(project);
-    if (moduleManager == null) return Collections.emptyMap();
+  private static @NotNull Map<@NotNull Module, @NotNull Sdk> getPythonModuleSdks(@NotNull Project project) {
+    ModuleManager moduleManager = ModuleManager.Companion.getInstanceIfDefined(project);
+    if (moduleManager == null) {
+      return Collections.emptyMap();
+    }
 
     final Map<Module, Sdk> result = new LinkedHashMap<>();
     for (Module module : moduleManager.getModules()) {
-      result.put(module, PythonSdkUtil.findPythonSdk(module));
+      Sdk sdk = PythonSdkUtil.findPythonSdk(module);
+      if (sdk != null) {
+        result.put(module, sdk);
+      }
     }
     return result;
   }
 
-  private void updateSdkLanguageLevels(@NotNull Project project, @NotNull Set<Sdk> sdks) {
-    if (sdks.isEmpty()) {
+  private void updateSdkLanguageLevels(@NotNull Project project, @NotNull Map<Module, Sdk> moduleSdks) {
+    if (moduleSdks.isEmpty()) {
       return;
     }
 
-    DumbService.getInstance(project).queueTask(new MyDumbModeTask(project, sdks));
+    new MyDumbModeTask(project, moduleSdks).queue(project);
   }
 
-  private List<Runnable> getRootUpdateTasks(@NotNull Project project, @NotNull Set<Sdk> sdks) {
+  private List<Runnable> getRootUpdateTasks(@NotNull Project project, @NotNull Map<Module, Sdk> moduleSdks) {
     final List<Runnable> results = new ArrayList<>();
-    for (Sdk sdk : sdks) {
+    for (Map.Entry<Module, Sdk> moduleToSdk : moduleSdks.entrySet()) {
+      final Module module = moduleToSdk.getKey();
+      if (module.isDisposed()) continue;
+
+      final Sdk sdk = moduleToSdk.getValue();
+      final LanguageLevel languageLevel =
+        PythonSdkUtil.isDisposed(sdk) ? LanguageLevel.getDefault() : PythonRuntimeService.getInstance().getLanguageLevelForSdk(sdk);
+      for (VirtualFile root : PyUtil.getSourceRoots(module)) {
+        addRootIndexingTask(root, results, project, languageLevel);
+      }
+    }
+    final LinkedHashSet<Sdk> distinctSdks = new LinkedHashSet<>(moduleSdks.values());
+    for (Sdk sdk : distinctSdks) {
       if (PythonSdkUtil.isDisposed(sdk)) continue;
 
       final LanguageLevel languageLevel = PythonRuntimeService.getInstance().getLanguageLevelForSdk(sdk);
@@ -262,16 +264,22 @@ public final class PythonLanguageLevelPusher implements FilePropertyPusher<Strin
         if (!root.isValid() || PyTypeShed.INSTANCE.isInside(root)) {
           continue;
         }
-        final VirtualFile parent = root.getParent();
-        final boolean shouldSuppressSizeLimit = parent != null && parent.getName().equals(PythonSdkUtil.SKELETON_DIR_NAME);
-        results.add(new UpdateRootTask(project, root, languageLevel, shouldSuppressSizeLimit));
+        addRootIndexingTask(root, results, project, languageLevel);
       }
     }
     return results;
   }
 
-  @NotNull
-  private static LanguageLevel guessLanguageLevelWithCaching(@NotNull Project project, @NotNull Collection<@Nullable Sdk> pythonModuleSdks) {
+  private void addRootIndexingTask(@NotNull VirtualFile root,
+                                   @NotNull List<Runnable> results,
+                                   @NotNull Project project,
+                                   @NotNull LanguageLevel languageLevel) {
+    final VirtualFile parent = root.getParent();
+    final boolean shouldSuppressSizeLimit = parent != null && parent.getName().equals(PythonSdkUtil.SKELETON_DIR_NAME);
+    results.add(new UpdateRootTask(project, root, languageLevel, shouldSuppressSizeLimit));
+  }
+
+  private static @NotNull LanguageLevel guessLanguageLevelWithCaching(@NotNull Project project, @NotNull Collection<? extends @NotNull Sdk> pythonModuleSdks) {
     LanguageLevel languageLevel = LanguageLevel.fromPythonVersion(project.getUserData(KEY));
     if (languageLevel == null) {
       languageLevel = guessLanguageLevel(pythonModuleSdks);
@@ -285,15 +293,12 @@ public final class PythonLanguageLevelPusher implements FilePropertyPusher<Strin
     project.putUserData(KEY, null);
   }
 
-  @NotNull
-  private static LanguageLevel guessLanguageLevel(@NotNull Collection<@Nullable Sdk> pythonModuleSdks) {
+  private static @NotNull LanguageLevel guessLanguageLevel(@NotNull Collection<? extends @NotNull Sdk> pythonModuleSdks) {
     LanguageLevel maxLevel = null;
     for (Sdk sdk : pythonModuleSdks) {
-      if (sdk != null) {
-        final LanguageLevel level = PythonRuntimeService.getInstance().getLanguageLevelForSdk(sdk);
-        if (maxLevel == null || maxLevel.isOlderThan(level)) {
-          maxLevel = level;
-        }
+      final LanguageLevel level = PythonRuntimeService.getInstance().getLanguageLevelForSdk(sdk);
+      if (maxLevel == null || maxLevel.isOlderThan(level)) {
+        maxLevel = level;
       }
     }
     if (maxLevel != null) {
@@ -307,8 +312,7 @@ public final class PythonLanguageLevelPusher implements FilePropertyPusher<Strin
    *
    * @see LanguageLevel#forElement
    */
-  @NotNull
-  public static LanguageLevel getLanguageLevelForVirtualFile(@NotNull Project project, @NotNull VirtualFile virtualFile) {
+  public static @NotNull LanguageLevel getLanguageLevelForVirtualFile(@NotNull Project project, @NotNull VirtualFile virtualFile) {
     if (virtualFile instanceof VirtualFileWindow) {
       virtualFile = ((VirtualFileWindow)virtualFile).getDelegate();
     }
@@ -327,9 +331,9 @@ public final class PythonLanguageLevelPusher implements FilePropertyPusher<Strin
   }
 
   private final class UpdateRootTask implements Runnable {
-    @NotNull private final Project myProject;
-    @NotNull private final VirtualFile myRoot;
-    @NotNull private final LanguageLevel myLanguageLevel;
+    private final @NotNull Project myProject;
+    private final @NotNull VirtualFile myRoot;
+    private final @NotNull LanguageLevel myLanguageLevel;
     private final boolean myShouldSuppressSizeLimit;
 
     UpdateRootTask(@NotNull Project project, @NotNull VirtualFile root, @NotNull LanguageLevel languageLevel,
@@ -389,8 +393,7 @@ public final class PythonLanguageLevelPusher implements FilePropertyPusher<Strin
     file.putUserData(KEY, languageLevel == null ? null : languageLevel.toPythonVersion());
   }
 
-  @Nullable
-  private static LanguageLevel specifiedFileLanguageLevel(@Nullable VirtualFile file) {
+  private static @Nullable LanguageLevel specifiedFileLanguageLevel(@Nullable VirtualFile file) {
     if (file == null) return null;
 
     final LanguageLevel specified = LanguageLevel.fromPythonVersion(file.getUserData(KEY));
@@ -409,14 +412,13 @@ public final class PythonLanguageLevelPusher implements FilePropertyPusher<Strin
   }
 
   private final class MyDumbModeTask extends DumbModeTask {
-    private @NotNull final Project project;
-    private @NotNull final Set<Sdk> sdks;
+    private final @NotNull Project project;
+    private final @NotNull Map<Module, Sdk> moduleSdks;
     private final SimpleMessageBusConnection connection;
 
-    private MyDumbModeTask(@NotNull Project project, @NotNull Set<Sdk> sdks) {
-      super(Pair.create(project, ImmutableSet.copyOf(sdks)));
+    private MyDumbModeTask(@NotNull Project project, @NotNull Map<Module, Sdk> moduleSdks) {
       this.project = project;
-      this.sdks = sdks;
+      this.moduleSdks = moduleSdks;
       connection = project.getMessageBus().simpleConnect();
       connection.subscribe(ProjectTopics.PROJECT_ROOTS, new ModuleRootListener() {
         @Override
@@ -440,12 +442,22 @@ public final class PythonLanguageLevelPusher implements FilePropertyPusher<Strin
       //final PerformanceWatcher.Snapshot snapshot = PerformanceWatcher.takeSnapshot();
       indicator.setIndeterminate(true);
       indicator.setText(IndexingBundle.message("progress.indexing.scanning"));
-      final List<Runnable> tasks = ReadAction.compute(() -> getRootUpdateTasks(project, sdks));
+      final List<Runnable> tasks = ReadAction.compute(() -> getRootUpdateTasks(project, moduleSdks));
       PushedFilePropertiesUpdater.getInstance(project).runConcurrentlyIfPossible(tasks);
       //if (!ApplicationManager.getApplication().isUnitTestMode()) {
       //  snapshot.logResponsivenessSinceCreation("Pushing Python language level to " + tasks.size() + " roots in " + sdks.size() +
       //                                          " SDKs");
       //}
+    }
+
+    @Override
+    public @Nullable DumbModeTask tryMergeWith(@NotNull DumbModeTask taskFromQueue) {
+      if (taskFromQueue instanceof MyDumbModeTask &&
+          ((MyDumbModeTask)taskFromQueue).project.equals(project) &&
+          ((MyDumbModeTask)taskFromQueue).moduleSdks.equals(moduleSdks)) {
+        return this;
+      }
+      return null;
     }
   }
 }

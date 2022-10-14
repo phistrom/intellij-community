@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.actions;
 
 import com.intellij.ide.lightEdit.LightEdit;
@@ -7,8 +7,8 @@ import com.intellij.idea.ActionsBundle;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx;
+import com.intellij.openapi.fileEditor.impl.EditorComposite;
 import com.intellij.openapi.fileEditor.impl.EditorWindow;
-import com.intellij.openapi.fileEditor.impl.EditorWithProviderComposite;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -18,6 +18,8 @@ import com.intellij.ui.content.ContentManager;
 import com.intellij.util.ArrayUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.List;
 
 abstract class TabNavigationActionBase extends AnAction implements DumbAware {
   private static final Logger LOG = Logger.getInstance(TabNavigationActionBase.class);
@@ -76,19 +78,17 @@ abstract class TabNavigationActionBase extends AnAction implements DumbAware {
         editorManager.getCurrentWindow ();
       }
       if (currentWindow != null) {
-        final EditorWithProviderComposite[] editors = currentWindow.getEditors();
+        final List<EditorComposite> composites = currentWindow.getAllComposites();
         switch (myNavigationType) {
-          case PREV:
-          case NEXT:
-            presentation.setEnabled(editors.length > 1);
-            break;
-          case LAST:
-            int index = ArrayUtil.indexOf(editors, currentWindow.getSelectedEditor());
-            presentation.setEnabled(index < editors.length);
-            break;
-            default:
-              int targetIndex = myNavigationType.ordinal();
-              presentation.setEnabled(targetIndex < editors.length);
+          case PREV, NEXT -> presentation.setEnabled(composites.size() > 1);
+          case LAST -> {
+            int index = composites.indexOf(currentWindow.getSelectedComposite());
+            presentation.setEnabled(index < composites.size());
+          }
+          default -> {
+            int targetIndex = myNavigationType.ordinal();
+            presentation.setEnabled(targetIndex < composites.size());
+          }
         }
       }
       return;
@@ -98,26 +98,31 @@ abstract class TabNavigationActionBase extends AnAction implements DumbAware {
     presentation.setEnabled(contentManager != null && contentManager.getContentCount() > 1 && contentManager.isSingleSelection());
   }
 
+  @Override
+  public @NotNull ActionUpdateThread getActionUpdateThread() {
+    return ActionUpdateThread.EDT;
+  }
+
   private void doNavigate(@Nullable ContentManager contentManager) {
     if (contentManager == null) return;
 
     Content targetContent = null;
     switch (myNavigationType) {
-      case PREV:
+      case PREV -> {
         contentManager.selectPreviousContent();
         return;
-      case NEXT:
+      }
+      case NEXT -> {
         contentManager.selectNextContent();
         return;
-      case LAST: {
-        targetContent = contentManager.getContent(contentManager.getContentCount() - 1);
-        break;
       }
-      default:
+      case LAST -> targetContent = contentManager.getContent(contentManager.getContentCount() - 1);
+      default -> {
         int targetIndex = myNavigationType.ordinal();
         if (contentManager.getContentCount() >= targetIndex + 1) {
           targetContent = contentManager.getContent(targetIndex);
         }
+      }
     }
     if (targetContent != null) {
       contentManager.setSelectedContent(targetContent, true);
@@ -137,20 +142,12 @@ abstract class TabNavigationActionBase extends AnAction implements DumbAware {
     final VirtualFile[] files = currentWindow.getFiles();
     int index = ArrayUtil.find(files, selectedFile);
     LOG.assertTrue(index != -1);
-    int targetIndex;
-    switch (myNavigationType) {
-      case PREV:
-        targetIndex = (index + files.length - 1) % files.length;
-        break;
-      case NEXT:
-        targetIndex = (index + files.length + 1) % files.length;
-        break;
-      case LAST:
-        targetIndex = files.length - 1;
-        break;
-      default:
-        targetIndex = myNavigationType.ordinal();
-    }
+    int targetIndex = switch (myNavigationType) {
+      case PREV -> (index + files.length - 1) % files.length;
+      case NEXT -> (index + files.length + 1) % files.length;
+      case LAST -> files.length - 1;
+      default -> myNavigationType.ordinal();
+    };
     if (targetIndex < files.length) {
       editorManager.openFile(files[targetIndex], true);
     }
@@ -166,11 +163,6 @@ abstract class TabNavigationActionBase extends AnAction implements DumbAware {
         getTemplatePresentation().setText(ActionsBundle.messagePointer("action.GoToTab.text", navigationType.ordinal() + 1));
         getTemplatePresentation().setDescription(ActionsBundle.messagePointer("action.GoToTab.description", navigationType.ordinal() + 1));
       }
-    }
-
-    @Override
-    public void update(@NotNull AnActionEvent event) {
-      super.update(event);
     }
   }
 

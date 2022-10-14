@@ -15,10 +15,7 @@
  */
 package com.jetbrains.python.inspections;
 
-import com.intellij.codeInspection.LocalInspectionToolSession;
-import com.intellij.codeInspection.LocalQuickFix;
-import com.intellij.codeInspection.ProblemDescriptor;
-import com.intellij.codeInspection.ProblemsHolder;
+import com.intellij.codeInspection.*;
 import com.intellij.codeInspection.ex.InspectionProfileModifiableModelKt;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiElementVisitor;
@@ -31,6 +28,7 @@ import com.jetbrains.python.psi.PyBinaryExpression;
 import com.jetbrains.python.psi.PyElementType;
 import com.jetbrains.python.psi.PyExpression;
 import com.jetbrains.python.psi.PyLiteralExpression;
+import com.jetbrains.python.psi.types.TypeEvalContext;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -69,10 +67,10 @@ public class PyChainedComparisonsInspection extends PyInspection {
   public PsiElementVisitor buildVisitor(@NotNull ProblemsHolder holder,
                                         boolean isOnTheFly,
                                         @NotNull LocalInspectionToolSession session) {
-    return new Visitor(holder, session, ignoreConstantInTheMiddle);
+    return new Visitor(holder, ignoreConstantInTheMiddle, PyInspectionVisitor.getContext(session));
   }
 
-  private static class Visitor extends PyInspectionVisitor {
+  private class Visitor extends PyInspectionVisitor {
     /**
      * @see ChainedComparisonsQuickFix#ChainedComparisonsQuickFix(boolean, boolean, boolean)
      */
@@ -83,8 +81,10 @@ public class PyChainedComparisonsInspection extends PyInspection {
     boolean isConstantInTheMiddle;
     boolean ignoreConstantInTheMiddle;
 
-    Visitor(@Nullable ProblemsHolder holder, @NotNull LocalInspectionToolSession session, boolean ignoreConstantInTheMiddle) {
-      super(holder, session);
+    Visitor(@Nullable ProblemsHolder holder,
+            boolean ignoreConstantInTheMiddle,
+            @NotNull TypeEvalContext context) {
+      super(holder, context);
       this.ignoreConstantInTheMiddle = ignoreConstantInTheMiddle;
     }
 
@@ -119,8 +119,12 @@ public class PyChainedComparisonsInspection extends PyInspection {
         if (applicable) {
           if (isConstantInTheMiddle) {
             if (!ignoreConstantInTheMiddle) {
-              registerProblem(node, PyPsiBundle.message("INSP.simplify.chained.comparison"), new ChainedComparisonsQuickFix(myIsLeft, myIsRight, getInnerRight),
-                              new DontSimplifyStatementsWithConstantInTheMiddleQuickFix());
+              registerProblem(node, PyPsiBundle.message("INSP.simplify.chained.comparison"),
+                              new ChainedComparisonsQuickFix(myIsLeft, myIsRight, getInnerRight),
+                              new SetInspectionOptionFix(
+                                PyChainedComparisonsInspection.this, "ignoreConstantInTheMiddle",
+                                PyPsiBundle.message("INSP.chained.comparisons.ignore.statements.with.constant.in.the.middle"),
+                                true));
             }
           }
           else {
@@ -232,23 +236,6 @@ public class PyChainedComparisonsInspection extends PyInspection {
         result = ((PyBinaryExpression)result).getRightExpression();
       }
       return result;
-    }
-  }
-
-  private static class DontSimplifyStatementsWithConstantInTheMiddleQuickFix implements LocalQuickFix {
-
-    @Nls
-    @NotNull
-    @Override
-    public String getFamilyName() {
-      return PyPsiBundle.message("INSP.chained.comparisons.ignore.statements.with.constant.in.the.middle");
-    }
-
-    @Override
-    public void applyFix(@NotNull Project project, @NotNull ProblemDescriptor descriptor) {
-      final PsiFile file = descriptor.getStartElement().getContainingFile();
-      InspectionProfileModifiableModelKt.modifyAndCommitProjectProfile(project, it ->
-        ((PyChainedComparisonsInspection)it.getUnwrappedTool(INSPECTION_SHORT_NAME, file)).ignoreConstantInTheMiddle = true);
     }
   }
 }

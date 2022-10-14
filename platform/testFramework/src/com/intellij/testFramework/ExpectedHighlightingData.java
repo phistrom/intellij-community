@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.testFramework;
 
 import com.intellij.AbstractBundle;
@@ -28,10 +28,10 @@ import com.intellij.testFramework.fixtures.CodeInsightTestFixture;
 import com.intellij.util.ArrayUtilRt;
 import com.intellij.util.DocumentUtil;
 import com.intellij.util.ThreeState;
+import com.intellij.util.containers.CollectionFactory;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.containers.HashingStrategy;
 import com.intellij.xml.util.XmlStringUtil;
-import gnu.trove.THashSet;
-import gnu.trove.TObjectHashingStrategy;
 import org.intellij.lang.annotations.JdkConstants;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -59,6 +59,7 @@ public class ExpectedHighlightingData {
   private static final String WARNING_MARKER = CodeInsightTestFixture.WARNING_MARKER;
   private static final String WEAK_WARNING_MARKER = CodeInsightTestFixture.WEAK_WARNING_MARKER;
   private static final String INFO_MARKER = CodeInsightTestFixture.INFO_MARKER;
+  private static final String TEXT_ATTRIBUTES_MARKER = CodeInsightTestFixture.TEXT_ATTRIBUTES_MARKER;
   private static final String END_LINE_HIGHLIGHT_MARKER = CodeInsightTestFixture.END_LINE_HIGHLIGHT_MARKER;
   private static final String END_LINE_WARNING_MARKER = CodeInsightTestFixture.END_LINE_WARNING_MARKER;
   private static final String INJECT_MARKER = "inject";
@@ -128,6 +129,7 @@ public class ExpectedHighlightingData {
     registerHighlightingType(HIGHLIGHT_MARKER, new ExpectedHighlightingSet(HighlightInfoType.HIGHLIGHTED_REFERENCE_SEVERITY, false, false));
     registerHighlightingType(INJECTED_SYNTAX_MARKER, new ExpectedHighlightingSet(HighlightInfoType.INJECTED_FRAGMENT_SYNTAX_SEVERITY, false, false));
     registerHighlightingType(INFO_MARKER, new ExpectedHighlightingSet(HighlightSeverity.INFORMATION, false, false));
+    registerHighlightingType(TEXT_ATTRIBUTES_MARKER, new ExpectedHighlightingSet(HighlightSeverity.TEXT_ATTRIBUTES, false, false));
     registerHighlightingType(SYMBOL_NAME_MARKER, new ExpectedHighlightingSet(HighlightInfoType.SYMBOL_TYPE_SEVERITY, false, false));
     for (SeveritiesProvider provider : SeveritiesProvider.EP_NAME.getExtensionList()) {
       for (HighlightInfoType type : provider.getSeveritiesHighlightInfoTypes()) {
@@ -164,6 +166,7 @@ public class ExpectedHighlightingData {
 
   public void checkInfos() {
     registerHighlightingType(INFO_MARKER, new ExpectedHighlightingSet(HighlightSeverity.INFORMATION, false, true));
+    registerHighlightingType(TEXT_ATTRIBUTES_MARKER, new ExpectedHighlightingSet(HighlightSeverity.TEXT_ATTRIBUTES, false, true));
     registerHighlightingType(INJECT_MARKER, new ExpectedHighlightingSet(HighlightInfoType.INJECTED_FRAGMENT_SEVERITY, false, true));
     registerHighlightingType(HIGHLIGHT_MARKER, new ExpectedHighlightingSet(HighlightInfoType.HIGHLIGHTED_REFERENCE_SEVERITY, false, true));
   }
@@ -231,7 +234,7 @@ public class ExpectedHighlightingData {
   }
 
   /**
-   * Removes highlights (bounded with <marker>...</marker>) from test case file.
+   * Removes highlights (bounded with {@code <marker>...</marker>}) from test case file.
    */
   private void extractExpectedHighlightsSet(Document document) {
     String text = document.getText();
@@ -414,7 +417,7 @@ public class ExpectedHighlightingData {
         if (failMessage.length() > 0) failMessage.append('\n');
         failMessage.append(fileName).append("extra ")
           .append(rangeString(text, info.startOffset, info.endOffset))
-          .append(": '").append(info.getLineMarkerTooltip()).append('\'');
+          .append(": '").append(sanitizedLineMarkerTooltip(info)).append('\'');
         Icon icon = info.getIcon();
         if (icon != null && !icon.toString().equals(ANY_TEXT)) {
           failMessage.append(" icon='").append(icon).append('\'');
@@ -427,7 +430,7 @@ public class ExpectedHighlightingData {
         if (failMessage.length() > 0) failMessage.append('\n');
         failMessage.append(fileName).append("missing ")
           .append(rangeString(text, expectedLineMarker.startOffset, expectedLineMarker.endOffset))
-          .append(": '").append(expectedLineMarker.getLineMarkerTooltip()).append('\'');
+          .append(": '").append(sanitizedLineMarkerTooltip(expectedLineMarker)).append('\'');
         Icon icon = expectedLineMarker.getIcon();
         if (icon != null && !icon.toString().equals(ANY_TEXT)) {
           failMessage.append(" icon='").append(icon).append('\'');
@@ -447,6 +450,10 @@ public class ExpectedHighlightingData {
     }
   }
 
+  protected String sanitizedLineMarkerTooltip(@NotNull LineMarkerInfo info) {
+    return info.getLineMarkerTooltip();
+  }
+
   @NotNull
   private String getActualLineMarkerFileText(@NotNull Collection<? extends LineMarkerInfo> markerInfos) {
     StringBuilder result = new StringBuilder();
@@ -463,7 +470,7 @@ public class ExpectedHighlightingData {
       if (info.second == expectedLineMarker.startOffset) {
         result
           .append("<lineMarker descr=\"")
-          .append(expectedLineMarker.getLineMarkerTooltip())
+          .append(sanitizedLineMarkerTooltip(expectedLineMarker))
           .append("\">");
       }
       else {
@@ -475,13 +482,12 @@ public class ExpectedHighlightingData {
     return result.toString();
   }
 
-  private static boolean containsLineMarker(LineMarkerInfo info, Collection<? extends LineMarkerInfo> where) {
-    String infoTooltip = info.getLineMarkerTooltip();
+  protected boolean containsLineMarker(@NotNull LineMarkerInfo info, Collection<? extends LineMarkerInfo> where) {
     Icon icon = info.getIcon();
     for (LineMarkerInfo markerInfo : where) {
       if (markerInfo.startOffset == info.startOffset &&
           markerInfo.endOffset == info.endOffset &&
-          matchDescriptions(false, infoTooltip, markerInfo.getLineMarkerTooltip()) &&
+          matchLineMarkersTooltip(info, markerInfo) &&
           matchIcons(icon, markerInfo.getIcon())) {
         return true;
       }
@@ -490,7 +496,11 @@ public class ExpectedHighlightingData {
     return false;
   }
 
-  private static boolean matchIcons(Icon icon1, Icon icon2) {
+  protected boolean matchLineMarkersTooltip(@NotNull LineMarkerInfo info, @NotNull LineMarkerInfo markerInfo) {
+    return matchDescriptions(false, info.getLineMarkerTooltip(), markerInfo.getLineMarkerTooltip());
+  }
+
+  protected static boolean matchIcons(Icon icon1, Icon icon2) {
     String s1 = String.valueOf(icon1);
     String s2 = String.valueOf(icon2);
     if (Comparing.strEqual(s1, s2)) return true;
@@ -504,15 +514,15 @@ public class ExpectedHighlightingData {
   public void checkResult(@Nullable PsiFile psiFile, Collection<? extends HighlightInfo> infos, String text, @Nullable String filePath) {
     StringBuilder failMessage = new StringBuilder();
 
-    Set<HighlightInfo> expectedFound = new THashSet<>(new TObjectHashingStrategy<>() {
+    Set<HighlightInfo> expectedFound = CollectionFactory.createCustomHashingStrategySet(new HashingStrategy<>() {
       @Override
-      public int computeHashCode(HighlightInfo object) {
+      public int hashCode(HighlightInfo object) {
         return object.hashCode();
       }
 
       @Override
       public boolean equals(HighlightInfo o1, HighlightInfo o2) {
-        return haveSamePresentation(o1, o2, true);
+        return o1==null||o2==null?o1==o2:haveSamePresentation(o1, o2, true);
       }
     });
     if (!myIgnoreExtraHighlighting) {
@@ -568,15 +578,15 @@ public class ExpectedHighlightingData {
 
   @NotNull
   private static Set<HighlightInfo> indexInfos(Collection<? extends HighlightInfo> infos) {
-    Set<HighlightInfo> index = new THashSet<>(new TObjectHashingStrategy<>() {
+    Set<HighlightInfo> index = CollectionFactory.createCustomHashingStrategySet(new HashingStrategy<>() {
       @Override
-      public int computeHashCode(HighlightInfo object) {
-        return Objects.hash(object.startOffset, object.endOffset); //good enough
+      public int hashCode(HighlightInfo object) {
+        return object == null ? 0 : Objects.hash(object.startOffset, object.endOffset); //good enough
       }
 
       @Override
       public boolean equals(HighlightInfo o1, HighlightInfo o2) {
-        return matchesPattern(o1, o2, false);
+        return o1==null || o2 == null ? o1 == o2 : matchesPattern(o1, o2, false);
       }
     });
     index.addAll(infos);
@@ -816,7 +826,7 @@ public class ExpectedHighlightingData {
            matchTooltips(strictMatch, info1.getToolTip(), info2.getToolTip());
   }
 
-  private static boolean matchDescriptions(boolean strictMatch, String d1, String d2) {
+  protected static boolean matchDescriptions(boolean strictMatch, String d1, String d2) {
     if (Comparing.strEqual(d1, d2)) return true;
     if (strictMatch) return false;
     if (Comparing.strEqual(ANY_TEXT, d1) || Comparing.strEqual(ANY_TEXT, d2)) return true;

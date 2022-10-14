@@ -1,5 +1,4 @@
-// COMPILER_ARGUMENTS: -XXLanguage:-NewInference
-// WITH_RUNTIME
+// WITH_STDLIB
 fun test(vararg i: Int): IntArray {
     return i.let { <caret>double(*it) }
 }

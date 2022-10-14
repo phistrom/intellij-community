@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package com.intellij.testIntegration;
 
@@ -15,6 +15,7 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Ref;
 import com.intellij.pom.Navigatable;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
@@ -53,22 +54,24 @@ public class GotoTestOrCodeHandler extends GotoTargetHandler {
             ReadAction.compute(() -> TestFinderHelper.findClassesForTest(selectedElement));
           candidates.addAll(classes);
         },
-        LangBundle.message("progress.title.searching.for.classes.for.test"), true, file.getProject())) {
+        TestFinderHelper.getSearchingForClassesForTestProgressTitle(selectedElement), true, file.getProject())) {
         return null;
       }
     }
     else {
+      final Ref<Boolean> navigateToTestImmediatelyRef = new Ref<>(false);
       if (!ProgressManager.getInstance().runProcessWithProgressSynchronously(
         () -> {
           Collection<PsiElement> tests =
             ReadAction.compute(() -> TestFinderHelper.findTestsForClass(selectedElement));
           candidates.addAll(tests);
+          navigateToTestImmediatelyRef.set(candidates.size() == 1 && TestFinderHelper.navigateToTestImmediately(candidates.get(0)));
         },
-        LangBundle.message("progress.title.searching.for.tests.for.class"), true, file.getProject())) {
+        TestFinderHelper.getSearchingForTestsForClassProgressTitle(selectedElement), true, file.getProject())) {
         return null;
       }
 
-      if (candidates.size() != 1) {
+      if (!navigateToTestImmediatelyRef.get()) {
         for (TestCreator creator : LanguageTestCreators.INSTANCE.allForLanguage(file.getLanguage())) {
           if (!creator.isAvailable(file.getProject(), editor, file)) continue;
           actions.add(new AdditionalAction() {

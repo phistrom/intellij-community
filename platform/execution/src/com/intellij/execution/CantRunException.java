@@ -1,11 +1,10 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.execution;
 
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.util.NlsContexts.DialogMessage;
 import com.intellij.openapi.util.text.StringUtil;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -29,8 +28,7 @@ public class CantRunException extends ExecutionException {
   }
 
   /** @deprecated please use {@link #jdkMisconfigured(Sdk)} instead */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @Deprecated(forRemoval = true)
   public static CantRunException jdkMisconfigured(@NotNull Sdk jdk, @NotNull Module module) {
     return jdkMisconfigured(jdk);
   }
@@ -53,5 +51,14 @@ public class CantRunException extends ExecutionException {
 
   public static CantRunException noJdkConfigured() {
     return new CantRunException(ExecutionBundle.message("project.has.no.jdk.configured.error.message"));
+  }
+
+  /**
+   * Exceptions implementing it are skipped and the notification is not shown.
+   */
+  public static class CustomProcessedCantRunException extends CantRunException {
+    public CustomProcessedCantRunException() {
+      super("");
+    }
   }
 }

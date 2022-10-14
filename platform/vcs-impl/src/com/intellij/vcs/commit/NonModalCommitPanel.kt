@@ -1,8 +1,11 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.vcs.commit
 
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionGroup
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.DataContext
+import com.intellij.openapi.actionSystem.DataProvider
 import com.intellij.openapi.actionSystem.impl.ActionButton
 import com.intellij.openapi.editor.colors.EditorColorsListener
 import com.intellij.openapi.editor.colors.EditorColorsScheme
@@ -16,12 +19,10 @@ import com.intellij.openapi.ui.popup.LightweightWindowEvent
 import com.intellij.openapi.vcs.VcsBundle.message
 import com.intellij.openapi.vcs.actions.ShowCommitOptionsAction
 import com.intellij.openapi.vcs.changes.InclusionListener
-import com.intellij.openapi.vcs.checkin.CheckinHandler
 import com.intellij.openapi.vcs.ui.CommitMessage
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.ui.JBColor
 import com.intellij.ui.awt.RelativePoint
-import com.intellij.ui.awt.RelativePoint.getNorthEastOf
 import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.panels.VerticalLayout
 import com.intellij.util.EventDispatcher
@@ -33,14 +34,12 @@ import com.intellij.util.ui.JBUI.scale
 import com.intellij.util.ui.UIUtil.getTreeBackground
 import com.intellij.util.ui.UIUtil.uiTraverser
 import com.intellij.util.ui.components.BorderLayoutPanel
-import java.awt.LayoutManager
 import java.awt.Point
 import javax.swing.JComponent
+import javax.swing.JPanel
 import javax.swing.LayoutFocusTraversalPolicy
 import javax.swing.border.Border
 import javax.swing.border.EmptyBorder
-
-private fun panel(layout: LayoutManager): JBPanel<*> = JBPanel<JBPanel<*>>(layout)
 
 abstract class NonModalCommitPanel(
   val project: Project,
@@ -58,11 +57,10 @@ abstract class NonModalCommitPanel(
   private var needUpdateCommitOptionsUi = false
 
   protected val centerPanel = simplePanel()
-  protected var bottomPanel: JBPanel<*>.() -> Unit = { }
 
   private val actions = ActionManager.getInstance().getAction("ChangesView.CommitToolbar") as ActionGroup
   val toolbar = ActionManager.getInstance().createActionToolbar(COMMIT_TOOLBAR_PLACE, actions, true).apply {
-    setTargetComponent(this@NonModalCommitPanel)
+    targetComponent = this@NonModalCommitPanel
     component.isOpaque = false
   }
 
@@ -76,7 +74,12 @@ abstract class NonModalCommitPanel(
   override fun getPreferredFocusableComponent(): JComponent = commitMessage.editorField
 
   override fun getData(dataId: String) = getDataFromProviders(dataId) ?: commitMessage.getData(dataId)
-  fun getDataFromProviders(dataId: String) = dataProviders.asSequence().mapNotNull { it.getData(dataId) }.firstOrNull()
+  fun getDataFromProviders(dataId: String): Any? {
+    for (dataProvider in dataProviders) {
+      return dataProvider.getData(dataId) ?: continue
+    }
+    return null
+  }
 
   override fun addDataProvider(provider: DataProvider) {
     dataProviders += provider
@@ -88,7 +91,7 @@ abstract class NonModalCommitPanel(
   protected fun fireInclusionChanged() = inclusionEventDispatcher.multicaster.inclusionChanged()
 
   override fun startBeforeCommitChecks() = Unit
-  override fun endBeforeCommitChecks(result: CheckinHandler.ReturnResult) = Unit
+  override fun endBeforeCommitChecks(result: CommitChecksResult) = Unit
 
   override fun dispose() = Unit
 
@@ -97,7 +100,7 @@ abstract class NonModalCommitPanel(
     commitActionsPanel.border = getButtonPanelBorder()
   }
 
-  protected fun buildLayout() {
+  protected fun buildLayout(bottomPanelBuilder: JPanel.() -> Unit) {
     commitActionsPanel.apply {
       border = getButtonPanelBorder()
       background = getButtonPanelBackground()
@@ -106,23 +109,25 @@ abstract class NonModalCommitPanel(
     }
     centerPanel
       .addToCenter(commitMessage)
-      .addToBottom(panel(VerticalLayout(0)).apply {
+      .addToBottom(JBPanel<JBPanel<*>>(VerticalLayout(0)).apply {
         background = getButtonPanelBackground()
-        bottomPanel()
+        bottomPanelBuilder()
       })
 
     addToCenter(centerPanel)
     withPreferredHeight(85)
   }
 
-  private fun getButtonPanelBorder(): Border =
-    EmptyBorder(0, scale(3), (scale(6) - commitActionsPanel.getBottomInset()).coerceAtLeast(0), 0)
+  private fun getButtonPanelBorder(): Border {
+    return EmptyBorder(0, scale(3), (scale(6) - commitActionsPanel.getBottomInset()).coerceAtLeast(0), 0)
+  }
 
-  private fun getButtonPanelBackground() =
-    JBColor { (commitMessage.editorField.editor as? EditorEx)?.backgroundColor ?: getTreeBackground() }
+  private fun getButtonPanelBackground(): JBColor? {
+    return JBColor.lazy { (commitMessage.editorField.editor as? EditorEx)?.backgroundColor ?: getTreeBackground() }
+  }
 
   override fun showCommitOptions(options: CommitOptions, actionName: String, isFromToolbar: Boolean, dataContext: DataContext) {
-    val commitOptionsPanel = CommitOptionsPanel { actionName }.apply {
+    val commitOptionsPanel = CommitOptionsPanel(actionNameSupplier = { actionName }, nonFocusable = false).apply {
       focusTraversalPolicy = LayoutFocusTraversalPolicy()
       isFocusCycleRoot = true
 
@@ -139,17 +144,29 @@ abstract class NonModalCommitPanel(
     val commitOptionsPopup = JBPopupFactory.getInstance()
       .createComponentPopupBuilder(commitOptionsPanel, focusComponent)
       .setRequestFocus(true)
+      .addListener(object : JBPopupListener {
+        override fun beforeShown(event: LightweightWindowEvent) {
+          options.restoreState()
+        }
+
+        override fun onClosed(event: LightweightWindowEvent) {
+          options.saveState()
+        }
+      })
       .createPopup()
 
     showCommitOptions(commitOptionsPopup, isFromToolbar, dataContext)
   }
 
   protected open fun showCommitOptions(popup: JBPopup, isFromToolbar: Boolean, dataContext: DataContext) =
-    if (isFromToolbar) popup.show(getNorthEastOf(toolbar.getShowCommitOptionsButton() ?: toolbar.component))
+    if (isFromToolbar) {
+      popup.showAbove(commitActionsPanel.getShowCommitOptionsButton() ?: commitActionsPanel)
+    }
     else popup.showInBestPositionFor(dataContext)
 
   companion object {
     internal const val COMMIT_TOOLBAR_PLACE: String = "ChangesView.CommitToolbar"
+    internal const val COMMIT_EDITOR_PLACE: String = "ChangesView.Editor"
 
     fun JBPopup.showAbove(component: JComponent) {
       val northWest = RelativePoint(component, Point())
@@ -167,7 +184,7 @@ abstract class NonModalCommitPanel(
   }
 }
 
-private fun ActionToolbar.getShowCommitOptionsButton(): JComponent? =
-  uiTraverser(component)
+private fun CommitActionsPanel.getShowCommitOptionsButton(): JComponent? =
+  uiTraverser(this)
     .filter(ActionButton::class.java)
     .find { it.action is ShowCommitOptionsAction }

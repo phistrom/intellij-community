@@ -25,7 +25,7 @@ import java.awt.*;
 /**
  * author: lesya
  */
-public abstract class OptionsDialog extends DialogWrapper  {
+public abstract class OptionsDialog extends DialogWrapper {
   protected final Project myProject;
 
   private class MyDoNotAsk implements DoNotAskOption {

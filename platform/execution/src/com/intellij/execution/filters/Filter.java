@@ -10,8 +10,7 @@ import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.openapi.editor.markup.HighlighterLayer;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.util.TextRange;
-import com.intellij.util.ui.UIUtil;
-import org.jetbrains.annotations.ApiStatus;
+import com.intellij.util.ui.NamedColorUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -147,16 +146,8 @@ public interface Filter {
 
     private final int highlightStartOffset;
     private final int highlightEndOffset;
-    /**
-     * @deprecated use {@link #getHighlightAttributes()} instead, the visibility of this field will be decreased.
-     */
-    @Deprecated @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
-    public final @Nullable TextAttributes highlightAttributes;
-    /**
-     * @deprecated use {@link #getHyperlinkInfo()} instead, the visibility of this field will be decreased.
-     */
-    @Deprecated @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
-    public final @Nullable HyperlinkInfo hyperlinkInfo;
+    private final @Nullable TextAttributes highlightAttributes;
+    private final @Nullable HyperlinkInfo hyperlinkInfo;
 
     private final TextAttributes myFollowedHyperlinkAttributes;
 
@@ -227,8 +218,8 @@ public interface Filter {
         TextAttributes normalHyperlinkAttrs = globalScheme.getAttributes(normalHyperlinkAttrsKey);
         if (normalHyperlinkAttrs != null) {
           grayedHyperlinkAttrs = normalHyperlinkAttrs.clone();
-          grayedHyperlinkAttrs.setForegroundColor(UIUtil.getInactiveTextColor());
-          grayedHyperlinkAttrs.setEffectColor(UIUtil.getInactiveTextColor());
+          grayedHyperlinkAttrs.setForegroundColor(NamedColorUtil.getInactiveTextColor());
+          grayedHyperlinkAttrs.setEffectColor(NamedColorUtil.getInactiveTextColor());
           GRAYED_BY_NORMAL_CACHE.put(normalHyperlinkAttrsKey, grayedHyperlinkAttrs);
         }
       }

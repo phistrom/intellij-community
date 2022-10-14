@@ -23,7 +23,7 @@ import com.intellij.ui.popup.PopupFactoryImpl
 import com.intellij.ui.popup.list.PopupListElementRenderer
 import com.intellij.util.ui.EmptyIcon
 import com.intellij.util.ui.JBUI
-import com.intellij.util.ui.UIUtil
+import com.intellij.util.ui.NamedColorUtil
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.util.function.Supplier
@@ -33,8 +33,7 @@ import javax.swing.JList
 import javax.swing.JPanel
 
 abstract class RunAnythingChooseContextAction(private val containingPanel: JPanel) : CustomComponentAction, DumbAware, ActionGroup() {
-  override fun canBePerformed(context: DataContext): Boolean = true
-  override fun isPopup(): Boolean = true
+
   override fun getChildren(e: AnActionEvent?): Array<AnAction> = EMPTY_ARRAY
 
   abstract var selectedContext: RunAnythingContext?
@@ -46,6 +45,8 @@ abstract class RunAnythingChooseContextAction(private val containingPanel: JPane
   }
 
   override fun update(e: AnActionEvent) {
+    e.presentation.isPopupGroup = true
+    e.presentation.isPerformGroup = true
     if (availableContexts.isEmpty()) {
       e.presentation.isEnabledAndVisible = false
       return
@@ -62,6 +63,8 @@ abstract class RunAnythingChooseContextAction(private val containingPanel: JPane
 
     containingPanel.revalidate()
   }
+
+  override  fun getActionUpdateThread() = ActionUpdateThread.EDT
 
   override fun actionPerformed(e: AnActionEvent) {
     val project = e.project
@@ -116,7 +119,7 @@ abstract class RunAnythingChooseContextAction(private val containingPanel: JPane
       ApplicationManager.getApplication().invokeLater {
         val project = e.project!!
         val descriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor().also { it.isForcedToUseIdeaFileChooser = true }
-        FileChooserFactory.getInstance().createPathChooser(descriptor, project, e.dataContext.getData(PlatformDataKeys.CONTEXT_COMPONENT))
+        FileChooserFactory.getInstance().createPathChooser(descriptor, project, e.dataContext.getData(PlatformCoreDataKeys.CONTEXT_COMPONENT))
           .choose(project.guessProjectDir()) {
             val recentDirectories = RunAnythingContextRecentDirectoryCache.getInstance(project).state.paths
             val path = it.single().path
@@ -139,6 +142,8 @@ abstract class RunAnythingChooseContextAction(private val containingPanel: JPane
       e.presentation.description = context.description
       e.presentation.icon = context.icon
     }
+
+    override  fun getActionUpdateThread() = ActionUpdateThread.BGT
 
     override fun actionPerformed(e: AnActionEvent) {
       selectedContext = context
@@ -173,7 +178,7 @@ abstract class RunAnythingChooseContextAction(private val containingPanel: JPane
                                         actionItem: PopupFactoryImpl.ActionItem,
                                         isSelected: Boolean) {
           val event = ActionUtil.createEmptyEvent()
-          ActionUtil.performDumbAwareUpdate(true, actionItem.action, event, false)
+          ActionUtil.performDumbAwareUpdate(actionItem.action, event, false)
 
           val description = event.presentation.description
           if (description != null) {
@@ -181,7 +186,7 @@ abstract class RunAnythingChooseContextAction(private val containingPanel: JPane
           }
 
           myTextLabel.text = event.presentation.text
-          myInfoLabel.foreground = if (isSelected) UIUtil.getListSelectionForeground(true) else UIUtil.getInactiveTextColor()
+          myInfoLabel.foreground = if (isSelected) NamedColorUtil.getListSelectionForeground(true) else NamedColorUtil.getInactiveTextColor()
         }
       }
   }

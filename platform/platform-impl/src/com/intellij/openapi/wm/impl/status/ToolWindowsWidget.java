@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.wm.impl.status;
 
 import com.intellij.icons.AllIcons;
@@ -23,16 +23,13 @@ import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.*;
-import com.intellij.openapi.wm.impl.ToolWindowEventSource;
 import com.intellij.openapi.wm.impl.ToolWindowManagerImpl;
+import com.intellij.toolWindow.ToolWindowEventSource;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBList;
 import com.intellij.ui.scale.JBUIScale;
 import com.intellij.util.Alarm;
-import com.intellij.util.ui.BaseButtonBehavior;
-import com.intellij.util.ui.JBUI;
-import com.intellij.util.ui.TimedDeadzone;
-import com.intellij.util.ui.UIUtil;
+import com.intellij.util.ui.*;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -46,8 +43,8 @@ import java.util.List;
 /**
  * @author Konstantin Bulenkov
  */
-class ToolWindowsWidget extends JLabel implements CustomStatusBarWidget, StatusBarWidget, Disposable,
-                                                  UISettingsListener, PropertyChangeListener {
+final class ToolWindowsWidget extends JLabel implements CustomStatusBarWidget, StatusBarWidget, Disposable,
+                                                        UISettingsListener, PropertyChangeListener {
 
   private final Alarm myAlarm;
   private StatusBar myStatusBar;
@@ -71,7 +68,7 @@ class ToolWindowsWidget extends JLabel implements CustomStatusBarWidget, StatusB
     }, parent);
 
     ApplicationManager.getApplication().getMessageBus().connect(this).subscribe(UISettingsListener.TOPIC, this);
-    KeyboardFocusManager.getCurrentKeyboardFocusManager().addPropertyChangeListener("focusOwner", this);
+    FocusUtil.addFocusOwnerListener(this, this);
     myAlarm = new Alarm(parent);
   }
 
@@ -132,11 +129,10 @@ class ToolWindowsWidget extends JLabel implements CustomStatusBarWidget, StatusB
         UIEventLogger.ToolWindowsWidgetPopupShown.log(project);
 
         List<ToolWindow> toolWindows = new ArrayList<>();
-        final ToolWindowManagerImpl toolWindowManager = (ToolWindowManagerImpl)ToolWindowManager.getInstance(project);
-        for (String id : toolWindowManager.getToolWindowIds()) {
-          final ToolWindow tw = toolWindowManager.getToolWindow(id);
-          if (tw.isAvailable() && tw.isShowStripeButton()) {
-            toolWindows.add(tw);
+        ToolWindowManagerImpl toolWindowManager = (ToolWindowManagerImpl)ToolWindowManager.getInstance(project);
+        for (ToolWindow toolWindow : toolWindowManager.getToolWindows()) {
+          if (toolWindow.isAvailable() && toolWindow.isShowStripeButton()) {
+            toolWindows.add(toolWindow);
           }
         }
         toolWindows.sort((o1, o2) -> StringUtil.naturalCompare(o1.getStripeTitle(), o2.getStripeTitle()));
@@ -258,7 +254,6 @@ class ToolWindowsWidget extends JLabel implements CustomStatusBarWidget, StatusB
   @Override
   public void dispose() {
     Disposer.dispose(this);
-    KeyboardFocusManager.getCurrentKeyboardFocusManager().removePropertyChangeListener("focusOwner", this);
     myStatusBar = null;
     popup = null;
   }

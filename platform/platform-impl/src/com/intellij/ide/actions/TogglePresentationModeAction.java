@@ -1,18 +1,22 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.actions;
 
 import com.intellij.ide.ui.LafManager;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.idea.ActionsBundle;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.ex.util.EditorUtil;
+import com.intellij.openapi.fileEditor.impl.zoomIndicator.ZoomIndicatorManager;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.wm.ToolWindow;
@@ -23,8 +27,6 @@ import com.intellij.openapi.wm.impl.ProjectFrameHelper;
 import com.intellij.ui.scale.JBUIScale;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.concurrency.Promise;
-import org.jetbrains.concurrency.Promises;
 
 import javax.swing.*;
 import javax.swing.plaf.FontUIResource;
@@ -32,6 +34,7 @@ import java.awt.*;
 import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * @author Konstantin Bulenkov
@@ -39,13 +42,19 @@ import java.util.Map;
 public final class TogglePresentationModeAction extends AnAction implements DumbAware {
   private static final Map<Object, Object> ourSavedValues = new LinkedHashMap<>();
   private static float ourSavedScaleFactor = JBUIScale.scale(1f);
-  private static int ourSavedConsoleFontSize;
+  private static float ourSavedConsoleFontSize;
+  private static final Logger LOG = Logger.getInstance(TogglePresentationModeAction.class);
 
   @Override
   public void update(@NotNull AnActionEvent e) {
     boolean selected = UISettings.getInstance().getPresentationMode();
     e.getPresentation().setText(selected ? ActionsBundle.message("action.TogglePresentationMode.exit")
                                          : ActionsBundle.message("action.TogglePresentationMode.enter"));
+  }
+
+  @Override
+  public @NotNull ActionUpdateThread getActionUpdateThread() {
+    return ActionUpdateThread.BGT;
   }
 
   @Override
@@ -57,26 +66,29 @@ public final class TogglePresentationModeAction extends AnAction implements Dumb
   }
 
   public static void setPresentationMode(@Nullable Project project, boolean inPresentation) {
-    final UISettings settings = UISettings.getInstance();
+    UISettings settings = UISettings.getInstance();
     settings.setPresentationMode(inPresentation);
 
-    final boolean layoutStored = storeToolWindows(project);
+    boolean layoutStored = project != null && storeToolWindows(project);
 
     tweakUIDefaults(settings, inPresentation);
 
-    Promise<?> callback = project == null ? Promises.resolvedPromise() : tweakFrameFullScreen(project, inPresentation);
-    callback.onProcessed(o -> {
+    log(String.format("Will tweak full screen mode for presentation=%b", inPresentation));
+
+    CompletableFuture<?> callback = project == null ? CompletableFuture.completedFuture(null) : tweakFrameFullScreen(project, inPresentation);
+    callback.whenComplete((o, throwable) -> {
       tweakEditorAndFireUpdateUI(settings, inPresentation);
 
-      restoreToolWindows(project, layoutStored, inPresentation);
+      if (layoutStored) {
+        restoreToolWindows(project, inPresentation);
+      }
     });
   }
 
-  @NotNull
-  private static Promise<?> tweakFrameFullScreen(Project project, boolean inPresentation) {
+  private static CompletableFuture<?> tweakFrameFullScreen(Project project, boolean inPresentation) {
     ProjectFrameHelper frame = ProjectFrameHelper.getFrameHelper(IdeFrameImpl.getActiveFrame());
     if (frame == null) {
-      return Promises.resolvedPromise();
+      return CompletableFuture.completedFuture(null);
     }
 
     PropertiesComponent propertiesComponent = PropertiesComponent.getInstance(project);
@@ -88,22 +100,27 @@ public final class TogglePresentationModeAction extends AnAction implements Dumb
       final String value = propertiesComponent.getValue("full.screen.before.presentation.mode");
       return frame.toggleFullScreen("true".equalsIgnoreCase(value));
     }
-    return Promises.resolvedPromise();
+    return CompletableFuture.completedFuture(null);
   }
 
   private static void tweakEditorAndFireUpdateUI(UISettings settings, boolean inPresentation) {
     EditorColorsScheme globalScheme = EditorColorsManager.getInstance().getGlobalScheme();
-    int fontSize = inPresentation ? settings.getPresentationModeFontSize() : globalScheme.getEditorFontSize();
+    float fontSize = inPresentation ? settings.getPresentationModeFontSize() : globalScheme.getEditorFontSize2D();
     if (inPresentation) {
-      ourSavedConsoleFontSize = globalScheme.getConsoleFontSize();
+      ourSavedConsoleFontSize = globalScheme.getConsoleFontSize2D();
       globalScheme.setConsoleFontSize(fontSize);
     }
     else {
       globalScheme.setConsoleFontSize(ourSavedConsoleFontSize);
     }
+
+    log(String.format("Will set editor font size %.1f for presentation=%b", fontSize, inPresentation));
+
     for (Editor editor : EditorFactory.getInstance().getAllEditors()) {
       if (editor instanceof EditorEx) {
-        ((EditorEx)editor).setFontSize(fontSize);
+        EditorEx editorEx = ((EditorEx)editor);
+        editorEx.putUserData(ZoomIndicatorManager.SUPPRESS_ZOOM_INDICATOR_ONCE, true);
+        editorEx.setFontSize(fontSize);
       }
     }
     UISettings.getInstance().fireUISettingsChanged();
@@ -156,23 +173,20 @@ public final class TogglePresentationModeAction extends AnAction implements Dumb
     manager.clearSideStack();
 
     boolean hasVisible = false;
-    for (String id : manager.getToolWindowIds()) {
-      ToolWindow toolWindow = manager.getToolWindow(id);
+    for (ToolWindow toolWindow : manager.getToolWindows()) {
       if (toolWindow.isVisible()) {
-        toolWindow.hide(null);
+        toolWindow.hide();
         hasVisible = true;
       }
     }
     return hasVisible;
   }
 
-  static boolean storeToolWindows(@Nullable Project project) {
-    if (project == null) return false;
+  static boolean storeToolWindows(@NotNull Project project) {
     ToolWindowManagerEx manager = ToolWindowManagerEx.getInstanceEx(project);
 
     DesktopLayout layout = manager.getLayout().copy();
     boolean hasVisible = hideAllToolWindows(manager);
-
     if (hasVisible) {
       manager.setLayoutToRestoreLater(layout);
       manager.activateEditorComponent();
@@ -180,15 +194,18 @@ public final class TogglePresentationModeAction extends AnAction implements Dumb
     return hasVisible;
   }
 
-  static void restoreToolWindows(Project project, boolean needsRestore, boolean inPresentation) {
-    if (project == null || !needsRestore) {
-      return;
-    }
+  static void restoreToolWindows(@NotNull Project project, boolean inPresentation) {
+    log(String.format("Will restore tool windows for presentation=%b", inPresentation));
 
     ToolWindowManagerEx manager = ToolWindowManagerEx.getInstanceEx(project);
     DesktopLayout restoreLayout = manager.getLayoutToRestoreLater();
     if (!inPresentation && restoreLayout != null) {
       manager.setLayout(restoreLayout);
     }
+  }
+
+  private static void log(String message) {
+    if (ApplicationManager.getApplication().isEAP()) LOG.info(message);
+    else LOG.debug(message);
   }
 }

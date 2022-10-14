@@ -1,7 +1,7 @@
 // Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.idea.maven.utils
 
-import org.jetbrains.idea.maven.MavenTestCase
+import com.intellij.maven.testFramework.MavenTestCase
 
 class FileFinderTest : MavenTestCase() {
 
@@ -20,6 +20,7 @@ class FileFinderTest : MavenTestCase() {
     val mainPom = createProjectSubFile("pom.xml", pomContent)
     createProjectSubFile(".flatten-pom.xml", pomContent)
     createProjectSubFile("pom-template.xml", pomContent)
+    createProjectSubFile("pom.xml.versionsBackup", pomContent)
     val root = mainPom.parent
     val findPomFiles = FileFinder.findPomFiles(Array(1) { root }, true, mavenProgressIndicator)
     assertTrue(findPomFiles.size == 1)

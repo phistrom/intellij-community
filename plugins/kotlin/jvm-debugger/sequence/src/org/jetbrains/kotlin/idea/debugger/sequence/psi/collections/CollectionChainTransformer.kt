@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.debugger.sequence.psi.collections
 
@@ -19,7 +19,7 @@ class CollectionChainTransformer : ChainTransformer<KtCallExpression> {
     override fun transform(chainCalls: List<KtCallExpression>, context: PsiElement): StreamChain {
         val chain = transformer.transform(chainCalls, context)
 
-        if (chainCalls.first().resolveType().isArray) {
+        if (chainCalls.first().resolveType()?.isArray == true) {
             val qualifier = WrappedQualifier(chain.qualifierExpression)
             return StreamChainImpl(qualifier, chain.intermediateCalls, chain.terminationCall, chain.context)
         }

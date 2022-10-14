@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.script.configuration
 
@@ -6,7 +6,8 @@ import com.intellij.ui.BooleanTableCellEditor
 import com.intellij.ui.BooleanTableCellRenderer
 import com.intellij.util.ui.ColumnInfo
 import com.intellij.util.ui.ListTableModel
-import org.jetbrains.kotlin.idea.KotlinBundle
+import org.jetbrains.annotations.Nls
+import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.core.script.StandardIdeScriptDefinition
 import org.jetbrains.kotlin.idea.core.script.settings.KotlinScriptingSettings
 import org.jetbrains.kotlin.scripting.definitions.ScriptDefinition
@@ -98,7 +99,7 @@ class KotlinScriptDefinitionsModel private constructor(definitions: MutableList<
     }
 }
 
-private abstract class BooleanColumn(message: String) : ColumnInfo<ModelDescriptor, Boolean>(message) {
+private abstract class BooleanColumn(@Nls message: String) : ColumnInfo<ModelDescriptor, Boolean>(message) {
     override fun getEditor(item: ModelDescriptor?) = BooleanTableCellEditor()
     override fun getRenderer(item: ModelDescriptor?) = BooleanTableCellRenderer()
     override fun getWidth(table: JTable?): Int = 90

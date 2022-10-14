@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ui
 
 import com.intellij.icons.AllIcons
@@ -50,7 +50,7 @@ import javax.swing.text.html.HTMLDocument
 import javax.swing.text.html.HTMLEditorKit
 import javax.swing.text.html.StyleSheet
 
-@Service
+@Service(Service.Level.APP)
 class GotItTooltipService {
   val isFirstRun = checkFirstRun()
 
@@ -70,35 +70,40 @@ class GotItTooltipService {
 }
 
 /**
- * id is a unique id for the tooltip that will be used to store the tooltip state in <code>PropertiesComponent</code>
- * id has the following format: place.where.used - lowercase words separated with dots.
- * GotIt tooltip usage statistics can be properly gathered if its id prefix is registered in plugin.xml (PlatformExtensions.xml)
- * with gotItTooltipAllowlist extension point. Prefix can cover a whole class of different gotit tooltips.
- * If prefix is shorter than the whole ID then all different tooltip usages will be reported in one category described by the prefix.
+ * The `id` is a unique identifier for the tooltip that will be used to store the tooltip state in [PropertiesComponent].
+ * Identifier has the following format: `place.where.used` (lowercase words separated with dots).
+ *
+ * Got It tooltip usage statistics can be properly gathered if its identifier prefix is registered in
+ * `plugin.xml` (`PlatformExtensions.xml`) with `com.intellij.statistics.gotItTooltipAllowlist` extension point.
+ * Prefix can cover a whole class of different Got It tooltips. If the prefix is shorter than the whole ID, then all different
+ * tooltip usages will be reported in one category described by the prefix.
  */
-class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val parentDisposable: Disposable) : ToolbarActionTracker<Balloon>() {
-
+class GotItTooltip(@NonNls val id: String,
+                   @Nls val text: String,
+                   parentDisposable: Disposable? = null) : ToolbarActionTracker<Balloon>() {
   @Nls
-  private var header : String = ""
+  private var header: String = ""
 
   @Nls
   private var buttonLabel: String = IdeBundle.message("got.it.button.name")
 
   private var shortcut: Shortcut? = null
   private var icon: Icon? = null
-  private var timeout : Int = -1
-  private var link : LinkLabel<Unit>? = null
-  private var linkAction : () -> Unit = {}
+  private var timeout: Int = -1
+  private var link: LinkLabel<Unit>? = null
+  private var linkAction: () -> Unit = {}
   private var maxWidth = MAX_WIDTH
   private var showCloseShortcut = false
   private var maxCount = 1
-  private var onBalloonCreated : (Balloon) -> Unit = {}
-  private var hideOnClickOutside : Boolean = false
+  private var onBalloonCreated: (Balloon) -> Unit = {}
 
-  // Ease the access (remove private or val to var) if fine tuning is needed.
-  private val savedCount : (String) -> Int = { PropertiesComponent.getInstance().getInt(it, 0) }
-  private val canShow : (String) -> Boolean = { savedCount(it) < maxCount }
-  private val gotIt : (String) -> Unit = {
+  private var useContrastColors = false
+
+  // Ease the access (remove private or val to var) if fine-tuning is needed.
+  private val savedCount: (String) -> Int = { PropertiesComponent.getInstance().getInt(it, 0) }
+  var showCondition: (String) -> Boolean = { savedCount(it) in 0 until maxCount }
+
+  private val gotIt: (String) -> Unit = {
     val count = savedCount(it)
     if (count in 0 until maxCount) PropertiesComponent.getInstance().setValue(it, (count + 1).toString())
     onGotIt()
@@ -106,13 +111,15 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
   private var onGotIt: () -> Unit = {}
 
   private val alarm = Alarm()
-  private var balloon : Balloon? = null
-  private var nextToShow : GotItTooltip? = null // Next tooltip in the global queue
+  private var balloon: Balloon? = null
+  private var nextToShow: GotItTooltip? = null // Next tooltip in the global queue
   private var pendingRefresh = false
   var position: Balloon.Position = Balloon.Position.below
 
   init {
-    Disposer.register(parentDisposable, this)
+    if (parentDisposable != null) {
+      Disposer.register(parentDisposable, this)
+    }
   }
 
   override fun assignTo(presentation: Presentation, pointProvider: (Component, Balloon) -> Point) {
@@ -122,16 +129,17 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
   }
 
   /**
-   * Add optional header to the tooltip.
+   * Add an optional header to the tooltip.
    */
-  fun withHeader(@Nls header: String) : GotItTooltip {
+  fun withHeader(@Nls header: String): GotItTooltip {
     this.header = header
     return this
   }
+
   /**
-   * Set preferred tooltip position relatively to the owner component
+   * Set preferred tooltip position relatively to the owner component.
    */
-  fun withPosition(position: Balloon.Position) : GotItTooltip {
+  fun withPosition(position: Balloon.Position): GotItTooltip {
     this.position = position
     return this
   }
@@ -139,7 +147,7 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
   /**
    * Add optional shortcut after mandatory description (text).
    */
-  fun withShortcut(shortcut: Shortcut) : GotItTooltip {
+  fun withShortcut(shortcut: Shortcut): GotItTooltip {
     this.shortcut = shortcut
     return this
   }
@@ -147,7 +155,7 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
   /**
    * Set alternative button text instead of default "Got It".
    */
-  fun withButtonLabel(@Nls label: String) : GotItTooltip {
+  fun withButtonLabel(@Nls label: String): GotItTooltip {
     this.buttonLabel = label
     return this
   }
@@ -155,16 +163,16 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
   /**
    * Add optional icon on the left of the header or description.
    */
-  fun withIcon(icon: Icon) : GotItTooltip {
+  fun withIcon(icon: Icon): GotItTooltip {
     this.icon = icon
     return this
   }
 
   /**
-   * Set close timeout. If set then tooltip appears without "Got It" button.
+   * Set the close timeout. If set, then the tooltip appears without the "Got It" button.
    */
   @JvmOverloads
-  fun withTimeout(timeout: Int = DEFAULT_TIMEOUT) : GotItTooltip {
+  fun withTimeout(timeout: Int = DEFAULT_TIMEOUT): GotItTooltip {
     if (timeout > 0) {
       this.timeout = timeout
     }
@@ -172,37 +180,37 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
   }
 
   /**
-   * Limit tooltip body width to the given value. By default it's limited to <code>MAX_WIDTH</code> pixels.
+   * Limit tooltip body width to the given value. By default, it's limited to `MAX_WIDTH` pixels.
    */
-  fun withMaxWidth(width: Int) : GotItTooltip {
+  fun withMaxWidth(width: Int): GotItTooltip {
     maxWidth = width
     return this
   }
 
   /**
-   * Add optional link to the tooltip.
+   * Add an optional link to the tooltip.
    */
-  fun withLink(@Nls linkLabel: String, action: () -> Unit) : GotItTooltip {
+  fun withLink(@Nls linkLabel: String, action: () -> Unit): GotItTooltip {
     link = object : LinkLabel<Unit>(linkLabel, null) {
-      override fun getNormal() : Color = LINK_FOREGROUND
+      override fun getNormal(): Color = JBUI.CurrentTheme.GotItTooltip.linkForeground()
     }
     linkAction = action
     return this
   }
 
   /**
-   * Add optional link to the tooltip. Java version.
+   * Add an optional link to the tooltip. Java version.
    */
-  fun withLink(@Nls linkLabel: String, action: Runnable) : GotItTooltip {
+  fun withLink(@Nls linkLabel: String, action: Runnable): GotItTooltip {
     return withLink(linkLabel) { action.run() }
   }
 
   /**
-   * Add optional browser link to the tooltip. Link is rendered with arrow icon.
+   * Add an optional browser link to the tooltip. Link is rendered with arrow icon.
    */
-  fun withBrowserLink(@Nls linkLabel: String, url: URL) : GotItTooltip {
+  fun withBrowserLink(@Nls linkLabel: String, url: URL): GotItTooltip {
     link = object : LinkLabel<Unit>(linkLabel, AllIcons.Ide.External_link_arrow) {
-      override fun getNormal() : Color = LINK_FOREGROUND
+      override fun getNormal(): Color = JBUI.CurrentTheme.GotItTooltip.linkForeground()
     }.apply { horizontalTextPosition = SwingConstants.LEFT }
     linkAction = { BrowserUtil.browse(url) }
     return this
@@ -211,50 +219,51 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
   /**
    * Set number of times the tooltip is shown.
    */
-  fun withShowCount(count: Int) : GotItTooltip {
+  fun withShowCount(count: Int): GotItTooltip {
     if (count > 0) maxCount = count
     return this
   }
 
   /**
-   * Hide popup when user clicks outside.
+   * Set whether to use contrast tooltip colors.
    */
-  fun withHideOnClickOutside() : GotItTooltip {
-    hideOnClickOutside = true
+  fun withContrastColors(contrastColors: Boolean): GotItTooltip {
+    useContrastColors = contrastColors
     return this
   }
 
   /**
-   * Optionally show close shortcut next to Got It button
+   * Show close shortcut next to the "Got It" button.
    */
-  fun andShowCloseShortcut() : GotItTooltip {
+  fun andShowCloseShortcut(): GotItTooltip {
     showCloseShortcut = true
     return this
   }
 
   /**
-   * Set notification method that's called when actual <code>Balloon</code> is created.
+   * Set the notification method that's called when actual [Balloon] is created.
    */
-  fun setOnBalloonCreated(callback: (Balloon) -> Unit) : GotItTooltip {
+  fun setOnBalloonCreated(callback: (Balloon) -> Unit): GotItTooltip {
     onBalloonCreated = callback
     return this
   }
 
   /**
-   * Returns <code>true</code> if this tooltip can be shown at the given properties settings.
+   * Returns `true` if this tooltip can be shown at the given properties settings.
    */
-  override fun canShow() : Boolean = canShow("$PROPERTY_PREFIX.$id")
+  override fun canShow(): Boolean = showCondition("$PROPERTY_PREFIX.$id")
 
   /**
    * Show tooltip for the given component and point to the component.
-   * If the component is showing (see <code>Component.isShowing</code>) and has not empty bounds then
-   * the tooltip is shown right away.
-   * If the component is showing but has empty bounds (technically not visible) then tooltip is shown asynchronously
-   * when component gets resized to not empty bounds.
-   * If the component is not showing then tooltip is shown asynchronously when component is added to the hierarchy and
-   * gets not empty bounds.
    *
-   * not for actionButton
+   * If the component is showing (see [Component.isShowing]) and has not empty bounds,
+   * then the tooltip is shown right away.
+   *
+   * If the component is showing but has empty bounds (technically not visible),
+   * then tooltip is shown asynchronously when the component gets resized to not empty bounds.
+   *
+   * If the component is not showing, then tooltip is shown asynchronously when component is added to the hierarchy
+   * and gets not empty bounds.
    */
   override fun show(component: JComponent, pointProvider: (Component, Balloon) -> Point) {
     if (canShow()) {
@@ -269,7 +278,7 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
                 showImpl(event.component as JComponent, pointProvider)
               }
             }
-          }.also{ Disposer.register(this, Disposable { component.removeComponentListener(it) }) })
+          }.also { Disposer.register(this, Disposable { component.removeComponentListener(it) }) })
         }
       }
       else {
@@ -285,7 +294,7 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
                     showImpl(componentEvent.component as JComponent, pointProvider)
                   }
                 }
-              }.also{ Disposer.register(this@GotItTooltip, Disposable { component.removeComponentListener(it) }) })
+              }.also { Disposer.register(this@GotItTooltip, Disposable { component.removeComponentListener(it) }) })
             }
           }
 
@@ -296,16 +305,16 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
             }
             balloon = null
           }
-        }.also{ Disposer.register(this, Disposable { component.removeAncestorListener(it) }) })
+        }.also { Disposer.register(this, Disposable { component.removeAncestorListener(it) }) })
       }
     }
   }
 
   private fun showImpl(component: JComponent, pointProvider: (Component, Balloon) -> Point) {
     if (canShow()) {
-      val balloonProperty = UIUtil.getClientProperty(component, BALLOON_PROPERTY)
+      val balloonProperty = ClientProperty.get(component, BALLOON_PROPERTY)
       if (balloonProperty == null) {
-        balloon = createAndShow(component, pointProvider).also { UIUtil.putClientProperty(component, BALLOON_PROPERTY, it) }
+        balloon = createAndShow(component, pointProvider).also { ClientProperty.put(component, BALLOON_PROPERTY, it) }
       }
       else if (balloonProperty is BalloonImpl && balloonProperty.isVisible) {
         balloonProperty.revalidate()
@@ -325,7 +334,7 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
   }
 
   fun createAndShow(component: JComponent, pointProvider: (Component, Balloon) -> Point): Balloon {
-    val tracker = object : PositionTracker<Balloon> (component) {
+    val tracker = object : PositionTracker<Balloon>(component) {
       override fun recalculateLocation(balloon: Balloon): RelativePoint? =
         if (getComponent().isShowing)
           RelativePoint(component, pointProvider(component, balloon))
@@ -346,14 +355,14 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
 
         override fun onClosed(event: LightweightWindowEvent) {
           HelpTooltip.setMasterPopupOpenCondition(tracker.component, null)
-          UIUtil.putClientProperty(tracker.component as JComponent, BALLOON_PROPERTY, null)
+          ClientProperty.put(tracker.component as JComponent, BALLOON_PROPERTY, null)
           Disposer.dispose(dispatcherDisposable)
 
           if (event.isOk) {
             currentlyShown?.nextToShow = null
             currentlyShown = null
 
-            gotIt("$PROPERTY_PREFIX.$id")
+            gotIt()
           }
           else {
             pendingRefresh = true
@@ -402,7 +411,7 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
             currentlyShown = this@GotItTooltip
           }
           else {
-            nextToShow?.let{ it.onGotIt() }
+            nextToShow?.let { it.onGotIt() }
           }
         }
       }
@@ -411,33 +420,33 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
     return balloon
   }
 
+  fun gotIt() = gotIt("$PROPERTY_PREFIX.$id")
+
   private fun scheduleNext(tooltip: GotItTooltip, show: () -> Unit) {
     nextToShow = tooltip
     onGotIt = show
   }
 
-  private fun createBalloon() : Balloon {
-    var button : JButton? = null
-    val balloon = JBPopupFactory.getInstance().createBalloonBuilder(createContent { button = it }).
-        setDisposable(this).
-        setHideOnAction(false).
-        setHideOnClickOutside(false).
-        setHideOnFrameResize(false).
-        setHideOnKeyOutside(false).
-        setHideOnClickOutside(hideOnClickOutside).
-        setBlockClicksThroughBalloon(true).
-        setBorderColor(BORDER_COLOR).
-        setCornerToPointerDistance(ARROW_SHIFT).
-        setFillColor(BACKGROUND_COLOR).
-        setPointerSize(JBUI.size(16, 8)).
-        createBalloon().
-      also {
-        it.setAnimationEnabled(false)
-      }
+  private fun createBalloon(): Balloon {
+    var button: JButton? = null
+    val balloon = JBPopupFactory.getInstance()
+      .createBalloonBuilder(createContent { button = it })
+      .setDisposable(this)
+      .setHideOnAction(false)
+      .setHideOnClickOutside(false)
+      .setHideOnFrameResize(false)
+      .setHideOnKeyOutside(false)
+      .setHideOnClickOutside(false)
+      .setBlockClicksThroughBalloon(true)
+      .setBorderColor(JBUI.CurrentTheme.GotItTooltip.borderColor(useContrastColors))
+      .setCornerToPointerDistance(ARROW_SHIFT)
+      .setFillColor(JBUI.CurrentTheme.GotItTooltip.background(useContrastColors))
+      .setPointerSize(JBUI.size(16, 8))
+      .createBalloon().also { it.setAnimationEnabled(false) }
 
     val collector = GotItUsageCollector.instance
 
-    link?.apply{
+    link?.apply {
       setListener(LinkListener { _, _ ->
         linkAction()
         balloon.hide(true)
@@ -455,15 +464,15 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
     if (timeout > 0) {
       alarm.cancelAllRequests()
       alarm.addRequest({
-         balloon.hide(true)
-         collector.logClose(id, GotItUsageCollectorGroup.CloseType.Timeout)
-       }, timeout)
+                         balloon.hide(true)
+                         collector.logClose(id, GotItUsageCollectorGroup.CloseType.Timeout)
+                       }, timeout)
     }
 
     return balloon
   }
 
-  private fun createContent(buttonSupplier: (JButton) -> Unit) : JComponent {
+  private fun createContent(buttonSupplier: (JButton) -> Unit): JComponent {
     val panel = JPanel(GridBagLayout())
     val gc = GridBag()
     val left = if (icon != null) 8 else 0
@@ -474,16 +483,22 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
     if (header.isNotEmpty()) {
       if (icon == null) gc.nextLine()
 
-      panel.add(JBLabel(HtmlChunk.raw(header).bold().wrapWith(HtmlChunk.font(ColorUtil.toHtmlColor(FOREGROUND_COLOR))).
-                        wrapWith(HtmlChunk.html()).toString()),
-                gc.setColumn(column).anchor(GridBagConstraints.LINE_START).insetLeft(left))
+      val finalText = HtmlChunk.raw(header)
+        .bold()
+        .wrapWith(HtmlChunk.font(ColorUtil.toHtmlColor(JBUI.CurrentTheme.GotItTooltip.foreground(useContrastColors))))
+        .wrapWith(HtmlChunk.html())
+        .toString()
+      panel.add(JBLabel(finalText), gc.setColumn(column).anchor(GridBagConstraints.LINE_START).insetLeft(left))
     }
 
     val builder = HtmlBuilder()
-    builder.append(HtmlChunk.raw(text).wrapWith(HtmlChunk.font(ColorUtil.toHtmlColor(FOREGROUND_COLOR))))
+    builder.append(HtmlChunk.raw(text).wrapWith(HtmlChunk.font(ColorUtil.toHtmlColor(
+      JBUI.CurrentTheme.GotItTooltip.foreground(useContrastColors)))))
     shortcut?.let {
-      builder.append(HtmlChunk.nbsp()).append(HtmlChunk.nbsp()).
-              append(HtmlChunk.text(KeymapUtil.getShortcutText(it)).wrapWith(HtmlChunk.font(ColorUtil.toHtmlColor(SHORTCUT_COLOR))))
+      builder.append(HtmlChunk.nbsp())
+        .append(HtmlChunk.nbsp())
+        .append(HtmlChunk.text(KeymapUtil.getShortcutText(it))
+                  .wrapWith(HtmlChunk.font(ColorUtil.toHtmlColor(JBUI.CurrentTheme.GotItTooltip.shortcutForeground(useContrastColors)))))
     }
 
     if (icon == null || header.isNotEmpty()) gc.nextLine()
@@ -495,21 +510,30 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
     }
 
     if (timeout <= 0) {
-      val button = JButton(buttonLabel).apply{
+      val button = JButton(buttonLabel).apply {
         isFocusable = false
         isOpaque = false
         putClientProperty("gotItButton", true)
+        if (useContrastColors) {
+          border = JBUI.Borders.empty(0, 0, 5, 0)
+          background = Color(0, true)
+          putClientProperty("JButton.backgroundColor", JBUI.CurrentTheme.GotItTooltip.buttonBackgroundContrast())
+          putClientProperty("ActionToolbar.smallVariant", true) // remove shadow in darcula
+
+          foreground = JBUI.CurrentTheme.GotItTooltip.buttonForegroundContrast()
+        }
       }
       buttonSupplier(button)
 
       if (showCloseShortcut) {
-        val buttonPanel = JPanel().apply{ isOpaque = false }
+        val buttonPanel = JPanel().apply { isOpaque = false }
         buttonPanel.layout = BoxLayout(buttonPanel, BoxLayout.X_AXIS)
         buttonPanel.add(button)
         buttonPanel.add(Box.createHorizontalStrut(JBUIScale.scale(UIUtil.DEFAULT_HGAP)))
 
-        @Suppress("HardCodedStringLiteral")
-        val closeShortcut = JLabel(KeymapUtil.getShortcutText(CLOSE_ACTION_NAME)).apply { foreground = SHORTCUT_COLOR }
+        val closeShortcut = JLabel(KeymapUtil.getShortcutText(CLOSE_ACTION_NAME)).apply {
+          foreground = JBUI.CurrentTheme.GotItTooltip.shortcutForeground(useContrastColors)
+        }
         buttonPanel.add(closeShortcut)
 
         panel.add(buttonPanel, gc.nextLine().setColumn(column).insets(11, left, 0, 0).anchor(GridBagConstraints.LINE_START))
@@ -519,7 +543,7 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
       }
     }
 
-    panel.background = BACKGROUND_COLOR
+    panel.background = JBUI.CurrentTheme.GotItTooltip.background(useContrastColors)
     panel.border = PANEL_MARGINS
 
     return panel
@@ -534,7 +558,7 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
     if (currentlyShown === this) currentlyShown = nextToShow
     else {
       var tooltip = currentlyShown
-      while(tooltip != null) {
+      while (tooltip != null) {
         if (tooltip.nextToShow === this) {
           tooltip.nextToShow = nextToShow
           break
@@ -570,35 +594,12 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
 
     private const val DEFAULT_TIMEOUT = 5000 // milliseconds
     private const val CLOSE_ACTION_NAME = "CloseGotItTooltip"
-    private val MAX_WIDTH   = JBUIScale.scale(280)
-    private val FOREGROUND_COLOR = JBColor.namedColor("GotItTooltip.foreground", UIUtil.getToolTipForeground())
-    private val SHORTCUT_COLOR = JBColor.namedColor("GotItTooltip.shortcutForeground", JBUI.CurrentTheme.Tooltip.shortcutForeground())
-    private val BACKGROUND_COLOR = JBColor.namedColor("GotItTooltip.background", UIUtil.getToolTipBackground())
-    private val BORDER_COLOR = JBColor.namedColor("GotItTooltip.borderColor", JBUI.CurrentTheme.Tooltip.borderColor())
-    private val LINK_FOREGROUND = JBColor.namedColor("GotItTooltip.linkForeground", JBUI.CurrentTheme.Link.Foreground.ENABLED)
+    private val MAX_WIDTH = JBUIScale.scale(280)
 
     private val PANEL_MARGINS = JBUI.Borders.empty(7, 4, 9, 9)
 
-    private val iconClasses = hashMapOf<String, Class<*>>()
-
-    internal fun findIcon(src: String) : Icon? {
-      val iconClassName = src.split(".")[0]
-      val iconClass = iconClasses[iconClassName] ?: AllIcons::class.java
-      return IconLoader.findIcon(src, iconClass)
-    }
-
-    /**
-     * Register icon class that's used for resolving icons from icon tags.
-     * parentDisposable should be disposed on plugin removal.
-     * AllIcons is used by default if corresponding icons class hasn't been registered or found so
-     * there is not need to explicitly register it.
-     */
-    fun registerIconClass(iconClass: Class<*>, parentDisposable: Disposable) {
-      iconClasses[iconClass.simpleName] = iconClass
-
-      Disposer.register(parentDisposable) {
-        iconClasses.remove(iconClass.simpleName)
-      }
+    internal fun findIcon(src: String): Icon? {
+      return IconLoader.findIcon(src, GotItTooltip::class.java.classLoader)
     }
 
     // Frequently used point providers
@@ -622,8 +623,8 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val pa
   }
 }
 
-private class LimitedWidthLabel(htmlBuilder: HtmlBuilder, limit: Int) : JLabel() {
-  val htmlView : View
+private class LimitedWidthLabel (htmlBuilder: HtmlBuilder, limit: Int) : JLabel() {
+  val htmlView: View
 
   init {
     var htmlText = htmlBuilder.wrapWith(HtmlChunk.div()).wrapWith(HtmlChunk.html()).toString()
@@ -647,13 +648,13 @@ private class LimitedWidthLabel(htmlBuilder: HtmlBuilder, limit: Int) : JLabel()
     JBInsets.removeFrom(rect, insets)
     htmlView.paint(g, rect)
   }
-  
-  private fun rows(root: View) : Collection<View> {
+
+  private fun rows(root: View): Collection<View> {
     return ArrayList<View>().also { visit(root, it) }
   }
 
   private fun visit(view: View, collection: MutableCollection<View>) {
-    val cname : String? = view.javaClass.canonicalName
+    val cname: String? = view.javaClass.canonicalName
     cname?.let { if (it.contains("ParagraphView.Row")) collection.add(view) }
 
     for (i in 0 until view.viewCount) {
@@ -662,10 +663,10 @@ private class LimitedWidthLabel(htmlBuilder: HtmlBuilder, limit: Int) : JLabel()
   }
 
   companion object {
-    val editorKit = GotItEditorKit()
+    private val editorKit = GotItEditorKit()
 
-    private fun createHTMLView(component: JComponent, html: String) : View {
-      val document = editorKit.createDocument(component.font, component.foreground)
+    private fun createHTMLView(component: JComponent, html: String): View {
+      val document = editorKit.createDocument(component.font, component.foreground ?: UIUtil.getLabelForeground())
       StringReader(html).use { editorKit.read(it, document, 0) }
 
       val factory = editorKit.viewFactory
@@ -679,8 +680,9 @@ private class LimitedWidthLabel(htmlBuilder: HtmlBuilder, limit: Int) : JLabel()
                                  "body { margin-top: 0; margin-bottom: 0; margin-left: 0; margin-right: 0 }"
     }
 
+    //TODO: refactor to com.intellij.util.ui.ExtendableHTMLViewFactory
     private val viewFactory = object : HTMLFactory() {
-      override fun create(elem: Element) : View {
+      override fun create(elem: Element): View {
         val attr = elem.attributes
         if ("icon" == elem.name) {
           val src = attr.getAttribute(HTML.Attribute.SRC) as String
@@ -707,7 +709,7 @@ private class LimitedWidthLabel(htmlBuilder: HtmlBuilder, limit: Int) : JLabel()
 
     override fun getViewFactory(): ViewFactory = viewFactory
 
-    fun createDocument(font: Font, foreground: Color) : Document {
+    fun createDocument(font: Font, foreground: Color): Document {
       val s = StyleSheet().also {
         it.addStyleSheet(styleSheet)
         it.addRule(displayPropertiesToCSS(font, foreground))
@@ -754,7 +756,8 @@ private class LimitedWidthLabel(htmlBuilder: HtmlBuilder, limit: Int) : JLabel()
       (if (axis == X_AXIS) icon.iconWidth else icon.iconHeight).toFloat()
 
     override fun getToolTipText(x: Float, y: Float, allocation: Shape): String? =
-      if (icon is IconWithToolTip) icon.getToolTip(true) else
+      if (icon is IconWithToolTip) icon.getToolTip(true)
+      else
         element.attributes.getAttribute(HTML.Attribute.ALT) as String?
 
     override fun paint(g: Graphics, allocation: Shape) {
@@ -762,7 +765,7 @@ private class LimitedWidthLabel(htmlBuilder: HtmlBuilder, limit: Int) : JLabel()
     }
 
     override fun modelToView(pos: Int, a: Shape, b: Position.Bias?): Shape {
-      if (pos in startOffset .. endOffset) {
+      if (pos in startOffset..endOffset) {
         val rect = a.bounds
         if (pos == endOffset) {
           rect.x += rect.width
@@ -787,8 +790,8 @@ private class LimitedWidthLabel(htmlBuilder: HtmlBuilder, limit: Int) : JLabel()
     }
   }
 
-  private class RootView(private val host : JComponent, private val factory: ViewFactory, private val view : View) : View(null) {
-    private var width : Float = 0.0f
+  private class RootView(private val host: JComponent, private val factory: ViewFactory, private val view: View) : View(null) {
+    private var width: Float = 0.0f
 
     init {
       view.parent = this

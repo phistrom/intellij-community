@@ -46,6 +46,12 @@ public class PyFormatterTest extends PyTestCase {
     doTest();
   }
 
+  // PY-35936
+  public void testPep8MultipleStatementsOnOneLine() {
+    getPythonCodeStyleSettings().NEW_LINE_AFTER_COLON = true;
+    doTest();
+  }
+
   public void testUnaryMinus() {
     doTest();
   }
@@ -293,29 +299,32 @@ public class PyFormatterTest extends PyTestCase {
 
   public void testPsiFormatting() { // IDEA-69724
     String initial =
-      "def method_name(\n" +
-      "   desired_impulse_response,\n" +
-      " desired_response_parameters,\n" +
-      " inverse_filter_length, \n" +
-      " observed_impulse_response):\n" +
-      " # Extract from here to ...\n" +
-      "   desired_impulse_response = {'dirac, 'gaussian', logistic_derivative'}\n" +
-      "return desired,                o";
+      """
+        def method_name(
+           desired_impulse_response,
+         desired_response_parameters,
+         inverse_filter_length,\s
+         observed_impulse_response):
+         # Extract from here to ...
+           desired_impulse_response = {'dirac, 'gaussian', logistic_derivative'}
+        return desired,                o""";
 
     final PsiFile file = PyElementGenerator.getInstance(myFixture.getProject()).createDummyFile(LanguageLevel.getLatest(), initial);
     final PsiElement reformatted = CodeStyleManager.getInstance(myFixture.getProject()).reformat(file);
 
     String expected =
-      "def method_name(\n" +
-      "        desired_impulse_response,\n" +
-      "        desired_response_parameters,\n" +
-      "        inverse_filter_length,\n" +
-      "        observed_impulse_response):\n" +
-      "    # Extract from here to ...\n" +
-      "    desired_impulse_response = {'dirac, '\n" +
-      "    gaussian\n" +
-      "    ', logistic_derivative'}\n" +
-      "    return desired, o";
+      """
+        def method_name(
+                desired_impulse_response,
+                desired_response_parameters,
+                inverse_filter_length,
+                observed_impulse_response):
+            # Extract from here to ...
+            desired_impulse_response = {'dirac, '
+            gaussian
+            ', logistic_derivative'}
+            return desired, o
+        """;
     assertEquals(expected, reformatted.getText());
   }
 
@@ -1209,6 +1218,77 @@ public class PyFormatterTest extends PyTestCase {
   // PY-48009
   public void testSpacesAroundEqualSignsInKeywordPatterns() {
     getPythonCodeStyleSettings().SPACE_AROUND_EQ_IN_KEYWORD_ARGUMENT = true;
+    doTest();
+  }
+
+  // PY-52930
+  public void testSpaceAfterStarredExcept() {
+    doTest();
+  }
+
+  // PY-42200
+  public void testParenthesizedWithItems() {
+    doTest();
+  }
+
+  // PY-42200
+  public void testHangingClosingBracketInParenthesizedWithItems() {
+    getPythonCodeStyleSettings().HANG_CLOSING_BRACKETS = true;
+    doTest();
+  }
+
+  // PY-42200
+  public void testParenthesizedWithItemsHangingIndentProcessedSimilarlyToCollectionsInStatementHeaders() {
+    doTest();
+  }
+
+  // PY-42200
+  public void testParenthesizedWithItemsWrapping() {
+    getCodeStyleSettings().setRightMargin(PythonLanguage.getInstance(), 20);
+    doTest();
+  }
+
+  // PY-28496
+  public void testHangingIndentsInMultilineCallChainInParenthesis() {
+    doTest();
+  }
+
+  // PY-27660
+  public void testHangingIndentsInMultilineCallChainInSquareBrackets() {
+    doTest();
+  }
+
+  public void testMultiLineCallChainSplitByBackslashes() {
+    doTest();
+  }
+
+  // PY-24792
+  public void testNoAlignmentForMultilineBinaryExpressionInReturnStatement() {
+    doTest();
+  }
+
+  // PY-24792
+  public void testNoAlignmentForMultilineBinaryExpressionInYieldStatement() {
+    doTest();
+  }
+
+  // PY-24792
+  public void testNoAlignmentForPartlyParenthesizedMultiLineReturnStatement() {
+    doTest();
+  }
+
+  // PY-24792
+  public void testNoAlignmentForSplitByBackslashesTupleInReturnStatement() {
+    doTest();
+  }
+
+  // PY-24792
+  public void testNoAlignmentForSplitByBackslashesTupleInAssignmentStatement() {
+    doTest();
+  }
+
+  // PY-24792
+  public void testNoAlignmentForSplitByBackslashesTupleInYieldStatement() {
     doTest();
   }
 }

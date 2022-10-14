@@ -20,7 +20,8 @@ import com.intellij.openapi.util.Computable;
 import com.intellij.util.indexing.ValueContainer;
 import com.intellij.util.io.DataExternalizer;
 import com.intellij.util.io.DataInputOutputUtil;
-import gnu.trove.TIntHashSet;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import it.unimi.dsi.fastutil.ints.IntSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -33,7 +34,7 @@ import java.io.IOException;
 public class ChangeTrackingValueContainer<Value> extends UpdatableValueContainer<Value>{
   // there is no volatile as we modify under write lock and read under read lock
   protected ValueContainerImpl<Value> myAdded;
-  protected TIntHashSet myInvalidated;
+  protected IntSet myInvalidated;
   protected volatile ValueContainerImpl<Value> myMerged;
   private final @Nullable Computable<? extends ValueContainer<Value>> myInitializer;
   
@@ -48,21 +49,29 @@ public class ChangeTrackingValueContainer<Value> extends UpdatableValueContainer
       merged.addValue(inputId, value);
     }
 
-    if (myAdded == null) myAdded = new ValueContainerImpl<>();
+    if (myAdded == null) {
+      myAdded = new ValueContainerImpl<>();
+    }
     myAdded.addValue(inputId, value);
   }
 
   @Override
-  public void removeAssociatedValue(int inputId) {
+  public boolean removeAssociatedValue(int inputId) {
     ValueContainerImpl<Value> merged = myMerged;
     if (merged != null) {
       merged.removeAssociatedValue(inputId);
     }
 
-    if (myAdded != null) myAdded.removeAssociatedValue(inputId);
+    if (removeFromAdded(inputId)) {
+      return true;
+    }
 
-    if (myInvalidated == null) myInvalidated = new TIntHashSet(1);
+    if (myInvalidated == null) myInvalidated = new IntOpenHashSet(1);
     myInvalidated.add(inputId);
+    return true;
+  }
+  protected boolean removeFromAdded(int inputId) {
+    return myAdded != null && myAdded.removeAssociatedValue(inputId);
   }
 
   @Override
@@ -93,44 +102,45 @@ public class ChangeTrackingValueContainer<Value> extends UpdatableValueContainer
         return merged;
       }
 
-      FileId2ValueMapping<Value> fileId2ValueMapping = null;
-      final ValueContainer<Value> fromDisk = myInitializer.compute();
-      final ValueContainerImpl<Value> newMerged;
+      ValueContainer<Value> fromDisk = myInitializer.compute();
+      ValueContainerImpl<Value> newMerged = fromDisk instanceof ValueContainerImpl
+                                            ? ((ValueContainerImpl<Value>)fromDisk).clone()
+                                            : ((ChangeTrackingValueContainer<Value>)fromDisk).getMergedData().clone();
 
-      if (fromDisk instanceof ValueContainerImpl) {
-        newMerged = ((ValueContainerImpl<Value>)fromDisk).clone();
-      } else {
-        newMerged = ((ChangeTrackingValueContainer<Value>)fromDisk).getMergedData().clone();
-      }
-
+      FileId2ValueMapping<Value> fileId2ValueMapping;
       if ((myAdded != null || myInvalidated != null) &&
           (newMerged.size() > ValueContainerImpl.NUMBER_OF_VALUES_THRESHOLD ||
            (myAdded != null && myAdded.size() > ValueContainerImpl.NUMBER_OF_VALUES_THRESHOLD))) {
         // Calculate file ids that have Value mapped to avoid O(NumberOfValuesInMerged) during removal
         fileId2ValueMapping = new FileId2ValueMapping<>(newMerged);
       }
-      final FileId2ValueMapping<Value> finalFileId2ValueMapping = fileId2ValueMapping;
+      else {
+        fileId2ValueMapping = null;
+      }
+
       if (myInvalidated != null) {
         myInvalidated.forEach(inputId -> {
-          if (finalFileId2ValueMapping != null) finalFileId2ValueMapping.removeFileId(inputId);
-          else newMerged.removeAssociatedValue(inputId);
-          return true;
+          if (fileId2ValueMapping != null) {
+            fileId2ValueMapping.removeFileId(inputId);
+          }
+          else {
+            newMerged.removeAssociatedValue(inputId);
+          }
         });
       }
 
       if (myAdded != null) {
-        if (fileId2ValueMapping != null) {
-          // there is no sense for value per file validation because we have fileId -> value mapping and we are enforcing it here
-          fileId2ValueMapping.disableOneValuePerFileValidation();
-        }
-
         myAdded.forEach((inputId, value) -> {
           // enforcing "one-value-per-file for particular key" invariant
-          if (finalFileId2ValueMapping != null) finalFileId2ValueMapping.removeFileId(inputId);
-          else newMerged.removeAssociatedValue(inputId);
+          if (fileId2ValueMapping != null) {
+            fileId2ValueMapping.removeFileId(inputId);
+            fileId2ValueMapping.associateFileIdToValue(inputId, value);
+          }
+          else {
+            newMerged.removeAssociatedValue(inputId);
+            newMerged.addValue(inputId, value);
+          }
 
-          newMerged.addValue(inputId, value);
-          if (finalFileId2ValueMapping != null) finalFileId2ValueMapping.associateFileIdToValue(inputId, value);
           return true;
         });
       }
@@ -161,10 +171,11 @@ public class ChangeTrackingValueContainer<Value> extends UpdatableValueContainer
   public void saveTo(DataOutput out, DataExternalizer<? super Value> externalizer) throws IOException {
     if (needsCompacting()) {
       getMergedData().saveTo(out, externalizer);
-    } else {
-      final TIntHashSet set = myInvalidated;
+    }
+    else {
+      IntSet set = myInvalidated;
       if (set != null && set.size() > 0) {
-        for (int inputId : set.toArray()) {
+        for (int inputId : myInvalidated.toIntArray()) {
           DataInputOutputUtil.writeINT(out, -inputId); // mark inputId as invalid, to be processed on load in ValueContainerImpl.readFrom
         }
       }
@@ -175,5 +186,4 @@ public class ChangeTrackingValueContainer<Value> extends UpdatableValueContainer
       }
     }
   }
-
 }

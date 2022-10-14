@@ -15,6 +15,7 @@
  */
 package com.siyeh.ig.bugs;
 
+import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.util.ConstantExpressionUtil;
@@ -24,6 +25,7 @@ import com.intellij.psi.util.PsiUtil;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.psiutils.ExpressionUtils;
 import com.siyeh.ig.psiutils.FormatUtils;
+import com.siyeh.ig.psiutils.TypeUtils;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -51,17 +53,17 @@ public final class FormatDecode {
   private static final int PREVIOUS = 128; // '<'
 
   private static int flag(char c) {
-    switch (c) {
-      case '-': return LEFT_JUSTIFY;
-      case '#': return ALTERNATE;
-      case '+': return PLUS;
-      case ' ': return LEADING_SPACE;
-      case '0': return ZERO_PAD;
-      case ',': return GROUP;
-      case '(': return PARENTHESES;
-      case '<': return PREVIOUS;
-      default: return -1;
-    }
+    return switch (c) {
+      case '-' -> LEFT_JUSTIFY;
+      case '#' -> ALTERNATE;
+      case '+' -> PLUS;
+      case ' ' -> LEADING_SPACE;
+      case '0' -> ZERO_PAD;
+      case ',' -> GROUP;
+      case '(' -> PARENTHESES;
+      case '<' -> PREVIOUS;
+      default -> -1;
+    };
   }
 
   private static String flagString(int flags) {
@@ -183,55 +185,43 @@ public final class FormatDecode {
       }
       else {
         switch (conversion.charAt(0)) {
-          case 'b': // boolean (general)
-          case 'B':
-          case 'h': // Integer hex string (general
-          case 'H':
+          case 'b', 'B', 'h', 'H' -> { // boolean (general); Integer hex string (general)
             checkFlags(flagBits, LEFT_JUSTIFY | PREVIOUS, specifier);
             allowed = ALL_VALIDATOR;
-            break;
-          case 's': // formatted string (general)
-          case 'S':
+          }
+          case 's', 'S' -> { // formatted string (general)
             checkFlags(flagBits, LEFT_JUSTIFY | ALTERNATE | PREVIOUS, specifier);
             allowed = (flagBits & ALTERNATE) != 0 ? new FormattableValidator(specifier) : ALL_VALIDATOR;
-            break;
-          case 'c': // unicode character
-          case 'C':
+          }
+          case 'c', 'C' -> { // unicode character
             checkFlags(flagBits, LEFT_JUSTIFY | PREVIOUS, specifier);
             checkNoPrecision(precision, specifier);
             allowed = new CharValidator(specifier);
-            break;
-          case 'd': // decimal integer
+          }
+          case 'd' -> { // decimal integer
             checkFlags(flagBits, ~ALTERNATE, specifier);
             allowed = new IntValidator(specifier);
-            break;
-          case 'o': // octal integer
-          case 'x': // hexadecimal integer
-          case 'X':
+          }
+          case 'o', 'x', 'X' -> { // octal integer, hexadecimal integer
             checkFlags(flagBits, ~(PLUS | LEADING_SPACE | GROUP), specifier);
             checkNoPrecision(precision, specifier);
             allowed = new IntValidator(specifier);
-            break;
-          case 'a': // hexadecimal floating-point number
-          case 'A':
+          }
+          case 'a', 'A' -> { // hexadecimal floating-point number
             checkFlags(flagBits, ~(PARENTHESES | GROUP), specifier);
             allowed = new FloatValidator(specifier);
-            break;
-          case 'e': // floating point -> decimal number in computerized scientific notation
-          case 'E':
+          }
+          case 'e', 'E' -> { // floating point -> decimal number in computerized scientific notation
             checkFlags(flagBits, ~GROUP, specifier);
             allowed = new FloatValidator(specifier);
-            break;
-          case 'g': // scientific notation
-          case 'G':
+          }
+          case 'g', 'G' -> { // scientific notation
             checkFlags(flagBits, ~ALTERNATE, specifier);
             allowed = new FloatValidator(specifier);
-            break;
-          case 'f': // floating point -> decimal number
+          }
+          case 'f' -> // floating point -> decimal number
             allowed = new FloatValidator(specifier);
-            break;
-          default:
-            throw new IllegalFormatException(InspectionGadgetsBundle.message("format.string.error.unknown.conversion", specifier));
+          default -> throw new IllegalFormatException(InspectionGadgetsBundle.message("format.string.error.unknown.conversion", specifier));
         }
       }
       if (precision != null && precision.length() < 2) {
@@ -330,6 +320,11 @@ public final class FormatDecode {
     int idx = IntStream.range(0, arguments.length)
       .filter(i -> PsiTreeUtil.isAncestor(arguments[i], cast, false)).findFirst()
       .orElse(-1);
+
+    if (idx < formatArgumentIndex) {
+      return false;
+    }
+    
     Validator validator = validators[idx - formatArgumentIndex];
     PsiTypeElement castType = cast.getCastType();
     return validator.valid(Objects.requireNonNull(castType).getType()) &&
@@ -497,19 +492,21 @@ public final class FormatDecode {
       return myExpression;
     }
     
-    public static FormatArgument extract(PsiMethodCallExpression expression, List<String> methodNames, List<String> classNames) {
+    public static FormatArgument extract(@NotNull PsiCallExpression expression, List<String> methodNames, List<String> classNames) {
       final PsiExpressionList argumentList = expression.getArgumentList();
+      if (argumentList == null) return null;
       PsiExpression[] arguments = argumentList.getExpressions();
 
       final PsiExpression formatArgument;
       int formatArgumentIndex;
-      if (FormatUtils.STRING_FORMATTED.matches(expression)) {
-        formatArgument = expression.getMethodExpression().getQualifierExpression();
+      if (expression instanceof PsiMethodCallExpression && FormatUtils.STRING_FORMATTED.matches(expression)) {
+        formatArgument = ((PsiMethodCallExpression)expression).getMethodExpression().getQualifierExpression();
         formatArgumentIndex = 0;
       }
       else {
-        if (!FormatUtils.isFormatCall(expression, methodNames, classNames)) {
-          return null;
+        if (!(expression instanceof PsiMethodCallExpression) ||
+            !FormatUtils.isFormatCall((PsiMethodCallExpression)expression, methodNames, classNames)) {
+          return fromPrintFormatAnnotation(expression);
         }
 
         formatArgumentIndex = IntStream.range(0, arguments.length).filter(i -> ExpressionUtils.hasStringType(arguments[i])).findFirst().orElse(-1);
@@ -525,7 +522,28 @@ public final class FormatDecode {
       }
       return new FormatArgument(formatArgumentIndex, formatArgument);
     }
-    
+
+    private static FormatArgument fromPrintFormatAnnotation(@NotNull PsiCallExpression call) {
+      PsiExpressionList argList = call.getArgumentList();
+      if (argList == null || argList.isEmpty()) return null;
+      PsiMethod method = call.resolveMethod();
+      if (method == null) return null;
+      PsiParameter[] parameters = method.getParameterList().getParameters();
+      if (parameters.length < 2) return null;
+      PsiType lastParameterType = parameters[parameters.length - 1].getType();
+      if (lastParameterType instanceof PsiArrayType && TypeUtils.isJavaLangObject(((PsiArrayType)lastParameterType).getComponentType())) {
+        int formatIndex = parameters.length - 2;
+        PsiParameter maybeFormat = parameters[formatIndex];
+        if (TypeUtils.isJavaLangString(maybeFormat.getType()) &&
+            AnnotationUtil.isAnnotated(maybeFormat, "org.intellij.lang.annotations.PrintFormat", AnnotationUtil.CHECK_EXTERNAL)) {
+          PsiExpression[] args = argList.getExpressions();
+          if (args.length <= formatIndex) return null;
+          return new FormatArgument(formatIndex + 1, args[formatIndex]);
+        }
+      }
+      return null;
+    }
+
     public String calculateValue() {
        final PsiType formatType = myExpression.getType();
       if (formatType == null) {

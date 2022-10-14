@@ -1,7 +1,6 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.jps.build;
 
-import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.LowMemoryWatcherManager;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.util.ArrayUtilRt;
@@ -189,11 +188,11 @@ public class Standalone {
     final BuildRunner buildRunner = new BuildRunner(loader);
     ProjectDescriptor descriptor = buildRunner.load(messageHandler, dataStorageRoot, new BuildFSState(true));
     try {
-      buildRunner.runBuild(descriptor, CanceledStatus.NULL, null, messageHandler, BuildType.BUILD, scopes, includeDependenciesToScope);
+      buildRunner.runBuild(descriptor, CanceledStatus.NULL, messageHandler, BuildType.BUILD, scopes, includeDependenciesToScope);
     }
     finally {
       descriptor.release();
-      Disposer.dispose(memWatcher);
+      memWatcher.shutdown();
     }
   }
 

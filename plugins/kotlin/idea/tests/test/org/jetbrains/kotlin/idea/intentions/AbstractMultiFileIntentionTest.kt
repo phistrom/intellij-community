@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.intentions
 
@@ -31,7 +31,7 @@ abstract class AbstractMultiFileIntentionTest : KotlinLightCodeInsightFixtureTes
         val config = JsonParser().parse(FileUtil.loadFile(testFile, true)) as JsonObject
         val withRuntime = config["withRuntime"]?.asBoolean ?: false
         return if (withRuntime)
-            KotlinWithJdkAndRuntimeLightProjectDescriptor.INSTANCE
+            KotlinWithJdkAndRuntimeLightProjectDescriptor.getInstance()
         else
             KotlinLightProjectDescriptor.INSTANCE
     }
@@ -71,12 +71,13 @@ abstract class AbstractMultiFileIntentionTest : KotlinLightCodeInsightFixtureTes
     }
 
     protected fun doTest(path: String, action: (VirtualFile) -> Unit) {
-        val beforeDir = path.removePrefix(testDataPath).substringBeforeLast('/') + "/before"
+        val relativePath = FileUtil.getRelativePath(testDataDirectory, File(path)) ?: error("$path is not under $testDataDirectory")
+        val beforeDir = FileUtil.toSystemIndependentName(relativePath).substringBeforeLast('/') + "/before"
         val beforeVFile = myFixture.copyDirectoryToProject(beforeDir, "")
         PsiDocumentManager.getInstance(myFixture.project).commitAllDocuments()
 
         val afterDir = beforeDir.substringBeforeLast("/") + "/after"
-        val afterDirIOFile = File(testDataPath, afterDir)
+        val afterDirIOFile = File(testDataDirectory, afterDir)
         val afterVFile = LocalFileSystem.getInstance().findFileByIoFile(afterDirIOFile)!!
         UsefulTestCase.refreshRecursively(afterVFile)
 

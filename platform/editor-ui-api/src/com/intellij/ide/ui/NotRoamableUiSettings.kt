@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.ui
 
 import com.intellij.openapi.components.*
@@ -29,10 +29,10 @@ class NotRoamableUiSettings : PersistentStateComponent<NotRoamableUiOptions> {
 
     // 1. Sometimes system font cannot display standard ASCII symbols. If so we have
     // find any other suitable font withing "preferred" fonts first.
-    var fontIsValid = FontUtil.isValidFont(Font(state.fontFace, Font.PLAIN, state.fontSize))
+    var fontIsValid = FontUtil.isValidFont(Font(state.fontFace, Font.PLAIN, 1).deriveFont(state.fontSize))
     if (!fontIsValid) {
       for (preferredFont in arrayOf("dialog", "Arial", "Tahoma")) {
-        if (FontUtil.isValidFont(Font(preferredFont, Font.PLAIN, state.fontSize))) {
+        if (FontUtil.isValidFont(Font(preferredFont, Font.PLAIN, 1).deriveFont(state.fontSize))) {
           state.fontFace = preferredFont
           fontIsValid = true
           break
@@ -64,15 +64,15 @@ class NotRoamableUiOptions : BaseState() {
   var fontFace by string()
 
   @get:Property(filter = FontFilter::class)
-  var fontSize by property(0)
+  var fontSize by property(0f)
 
   @get:Property(filter = FontFilter::class)
   var fontScale by property(0f)
 
   init {
     val fontData = JBUIScale.getSystemFontData(null)
-    fontFace = fontData.key
-    fontSize = fontData.value
+    fontFace = fontData.first
+    fontSize = fontData.second.toFloat()
     fontScale = UISettings.defFontScale
   }
 }
@@ -82,10 +82,10 @@ private class FontFilter : SerializationFilter {
     val settings = bean as NotRoamableUiOptions
     val fontData = JBUIScale.getSystemFontData(null)
     if ("fontFace" == accessor.name) {
-      return fontData.key != settings.fontFace
+      return fontData.first != settings.fontFace
     }
     // fontSize/fontScale should either be stored in pair or not stored at all
     // otherwise the fontSize restore logic gets broken (see loadState)
-    return !(fontData.value == settings.fontSize && 1f == settings.fontScale)
+    return !(fontData.second.toFloat() == settings.fontSize && 1f == settings.fontScale)
   }
 }

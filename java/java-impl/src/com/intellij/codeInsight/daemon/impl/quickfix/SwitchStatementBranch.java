@@ -16,8 +16,8 @@
 package com.intellij.codeInsight.daemon.impl.quickfix;
 
 import com.intellij.psi.*;
-import com.intellij.util.containers.ContainerUtil;
 import com.siyeh.ig.psiutils.ControlFlowUtils;
+import com.siyeh.ig.psiutils.ExpressionUtils;
 
 import java.util.*;
 
@@ -31,16 +31,12 @@ class SwitchStatementBranch {
   private boolean myHasStatements;
   private boolean myAlwaysExecuted;
 
-  public void addCaseValue(PsiElement caseElement) {
-    myCaseElements.add(caseElement);
-  }
-
-  public void addStatement(PsiStatement statement) {
+  void addStatement(PsiStatement statement) {
     myHasStatements = myHasStatements || !ControlFlowUtils.isEmpty(statement, false, true);
     addElement(statement);
   }
 
-  public void addComment(PsiElement comment) {
+  void addComment(PsiElement comment) {
     addElement(comment);
   }
 
@@ -50,41 +46,33 @@ class SwitchStatementBranch {
     myBodyElements.add(element);
   }
 
-  public void addWhiteSpace(PsiElement statement) {
+  void addWhiteSpace(PsiElement statement) {
     if (!myBodyElements.isEmpty()) {
       myPendingWhiteSpace.add(statement);
     }
   }
 
-  public List<PsiElement> getCaseElements() {
+  List<PsiElement> getCaseElements() {
     return Collections.unmodifiableList(myCaseElements);
   }
 
-  public List<PsiElement> getBodyElements() {
+  List<PsiElement> getBodyElements() {
     return Collections.unmodifiableList(myBodyElements);
   }
 
-  public boolean isDefault() {
+  boolean isDefault() {
     return myDefault;
-  }
-
-  public void setDefault() {
-    myDefault = true;
   }
 
   boolean isAlwaysExecuted() {
     return myAlwaysExecuted;
   }
 
-  void setAlwaysExecuted(boolean alwaysExecuted) {
-    myAlwaysExecuted = alwaysExecuted;
-  }
-
-  public boolean hasStatements() {
+  boolean hasStatements() {
     return myHasStatements;
   }
 
-  public void addPendingDeclarations(Set<? extends PsiElement> vars) {
+  void addPendingDeclarations(Set<? extends PsiElement> vars) {
     myPendingDeclarations.addAll(vars);
   }
 
@@ -93,24 +81,29 @@ class SwitchStatementBranch {
   }
 
   void addCaseValues(PsiSwitchLabelStatementBase label, boolean defaultAlwaysExecuted) {
-    if (isDefaultLabel(label)) {
-      setDefault();
-      setAlwaysExecuted(defaultAlwaysExecuted);
-    }
-    else {
+    if (label.isDefaultCase()) {
+      myDefault = true;
+      myAlwaysExecuted = defaultAlwaysExecuted;
+    } else {
+      PsiExpression nullCase = null;
       PsiCaseLabelElementList labelElementList = label.getCaseLabelElementList();
       if (labelElementList != null) {
         for (PsiCaseLabelElement labelElement : labelElementList.getElements()) {
-          addCaseValue(labelElement);
+          if (labelElement instanceof PsiDefaultCaseLabelElement) {
+            myDefault = true;
+            myAlwaysExecuted = defaultAlwaysExecuted;
+            break;
+          }
+          else if (labelElement instanceof PsiExpression expression && ExpressionUtils.isNullLiteral(expression)) {
+            nullCase = expression;
+          }
+        }
+        if (!myDefault) {
+          Collections.addAll(myCaseElements, labelElementList.getElements());
+        } else if (nullCase != null) {
+          myCaseElements.add(nullCase);
         }
       }
     }
-  }
-
-  private static boolean isDefaultLabel(PsiSwitchLabelStatementBase label) {
-    if (label.isDefaultCase()) return true;
-    PsiCaseLabelElementList labelElementList = label.getCaseLabelElementList();
-    if (labelElementList == null) return false;
-    return ContainerUtil.exists(labelElementList.getElements(), element -> element instanceof PsiDefaultCaseLabelElement);
   }
 }

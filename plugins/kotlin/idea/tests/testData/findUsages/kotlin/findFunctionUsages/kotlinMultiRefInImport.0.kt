@@ -6,6 +6,7 @@ fun <caret>foo() {
 
 }
 
+@JvmName("IntFoo")
 fun Int.foo() {
 
 }
@@ -14,5 +15,6 @@ fun foo(n: Int) {
 
 }
 
-val foo: Int
-// DISABLE-ERRORS
+val foo: Int = 42
+
+// FIR_COMPARISON

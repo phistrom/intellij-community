@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ui;
 
 import com.intellij.AbstractBundle;
@@ -24,6 +24,7 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -36,11 +37,71 @@ import java.util.function.Supplier;
 public final class CoreIconManager implements IconManager, CoreAwareIconManager {
   private static final List<IconLayer> iconLayers = new CopyOnWriteArrayList<>();
   private static final int FLAGS_LOCKED = 0x800;
-  private static final Logger LOG = Logger.getInstance(CoreIconManager.class);
 
   @Override
-  public @NotNull Icon getStubIcon() {
-    return AllIcons.Actions.Stub;
+  public @NotNull Icon getPlatformIcon(@NotNull PlatformIcons id) {
+    return switch (id) {
+      case Public -> AllIcons.Nodes.Public;
+      case Private -> AllIcons.Nodes.C_private;
+      case Protected -> AllIcons.Nodes.C_protected;
+      case Local -> AllIcons.Nodes.C_plocal;
+
+      case TodoDefault -> AllIcons.General.TodoDefault;
+      case TodoQuestion -> AllIcons.General.TodoQuestion;
+      case TodoImportant -> AllIcons.General.TodoImportant;
+
+      case NodePlaceholder -> AllIcons.Nodes.NodePlaceholder;
+      case WarningDialog -> AllIcons.General.WarningDialog;
+      case Copy -> AllIcons.Actions.Copy;
+      case Import -> AllIcons.ToolbarDecorator.Import;
+      case Export -> AllIcons.ToolbarDecorator.Export;
+      case Stub -> AllIcons.Actions.Stub;
+      case TestStateRun -> AllIcons.RunConfigurations.TestState.Run;
+
+      case Package -> AllIcons.Nodes.Package;
+      case Folder -> AllIcons.Nodes.Folder;
+      case IdeaModule -> AllIcons.Nodes.IdeaModule;
+
+      case TextFileType -> AllIcons.FileTypes.Text;
+      case ArchiveFileType -> AllIcons.FileTypes.Archive;
+      case UnknownFileType -> AllIcons.FileTypes.Unknown;
+      case CustomFileType -> AllIcons.FileTypes.Custom;
+      case JavaClassFileType -> AllIcons.FileTypes.JavaClass;
+      case JspFileType -> AllIcons.FileTypes.Jsp;
+      case JavaFileType -> AllIcons.FileTypes.Java;
+      case PropertiesFileType -> AllIcons.FileTypes.Properties;
+
+      case JavaModule -> AllIcons.Nodes.JavaModule;
+      case Variable -> AllIcons.Nodes.Variable;
+      case Field -> AllIcons.Nodes.Field;
+      case Method -> AllIcons.Nodes.Method;
+      case Class -> AllIcons.Nodes.Class;
+      case AbstractClass -> AllIcons.Nodes.AbstractClass;
+      case AbstractException -> AllIcons.Nodes.AbstractException;
+      case AnonymousClass -> AllIcons.Nodes.AnonymousClass;
+      case Enum -> AllIcons.Nodes.Enum;
+      case Aspect -> AllIcons.Nodes.Aspect;
+      case Annotation -> AllIcons.Nodes.Annotationtype;
+      case Function -> AllIcons.Nodes.Function;
+      case Interface -> AllIcons.Nodes.Interface;
+      case AbstractMethod -> AllIcons.Nodes.AbstractMethod;
+      case MethodReference -> AllIcons.Nodes.MethodReference;
+      case Property -> AllIcons.Nodes.Property;
+      case Parameter -> AllIcons.Nodes.Parameter;
+      case Lambda -> AllIcons.Nodes.Lambda;
+      case Record -> AllIcons.Nodes.Record;
+      case Tag -> AllIcons.Nodes.Tag;
+      case ExceptionClass -> AllIcons.Nodes.ExceptionClass;
+      case ClassInitializer -> AllIcons.Nodes.ClassInitializer;
+      case Plugin -> AllIcons.Nodes.Plugin;
+      case PpWeb -> AllIcons.Nodes.PpWeb;
+
+      case StaticMark -> AllIcons.Nodes.StaticMark;
+      case FinalMark -> AllIcons.Nodes.FinalMark;
+      case TestMark -> AllIcons.RunConfigurations.TestMark;
+      case JunitTestMark -> AllIcons.Nodes.JunitTestMark;
+      case RunnableMark -> AllIcons.Nodes.RunnableMark;
+    };
   }
 
   @Override
@@ -56,7 +117,7 @@ public final class CoreIconManager implements IconManager, CoreAwareIconManager 
   }
 
   @Override
-  public @NotNull Icon loadRasterizedIcon(@NotNull String path, @NotNull ClassLoader classLoader, long cacheKey, int flags) {
+  public @NotNull Icon loadRasterizedIcon(@NotNull String path, @NotNull ClassLoader classLoader, int cacheKey, int flags) {
     assert !path.isEmpty() && path.charAt(0) != '/';
     return new IconWithToolTipImpl(path, createRasterizedImageDataLoader(path, classLoader, cacheKey, flags));
   }
@@ -64,19 +125,21 @@ public final class CoreIconManager implements IconManager, CoreAwareIconManager 
   // reflective path is not supported
   // result is not cached
   @SuppressWarnings("DuplicatedCode")
-  private static @NotNull ImageDataLoader createRasterizedImageDataLoader(@NotNull String path, @NotNull ClassLoader classLoader, long cacheKey, int imageFlags) {
+  private static @NotNull ImageDataLoader createRasterizedImageDataLoader(@NotNull String path,
+                                                                          @NotNull ClassLoader classLoader,
+                                                                          int cacheKey,
+                                                                          int imageFlags) {
     long startTime = StartUpMeasurer.getCurrentTimeIfEnabled();
     Pair<String, ClassLoader> patchedPath = IconLoader.patchPath(path, classLoader);
-    String effectivePath = path;
-    if (patchedPath != null) {
-      // not safe for now to decide should patchPath return path with leading slash or not
-      effectivePath = patchedPath.first.startsWith("/") ? patchedPath.first.substring(1) : patchedPath.first;
-      if (patchedPath.second != null) {
-        classLoader = patchedPath.second;
-      }
+    ImageDataLoader resolver;
+    WeakReference<ClassLoader> classLoaderWeakRef = new WeakReference<>(classLoader);
+    if (patchedPath == null) {
+      resolver = new RasterizedImageDataLoader(path, classLoaderWeakRef, path, classLoaderWeakRef, cacheKey, imageFlags);
     }
-
-    ImageDataLoader resolver = new RasterizedImageDataLoader(effectivePath, classLoader, cacheKey, imageFlags);
+    else {
+      // not safe for now to decide should patchPath return path with leading slash or not
+      resolver = RasterizedImageDataLoaderKt.createPatched(path, classLoaderWeakRef, patchedPath, cacheKey, imageFlags);
+    }
     if (startTime != -1) {
       IconLoadMeasurer.findIcon.end(startTime);
     }
@@ -87,7 +150,7 @@ public final class CoreIconManager implements IconManager, CoreAwareIconManager 
     private String result;
     private boolean isTooltipCalculated;
 
-    IconWithToolTipImpl(@NotNull String originalPath, @NotNull ImageDataLoader resolver) {
+    private IconWithToolTipImpl(@NotNull String originalPath, @NotNull ImageDataLoader resolver) {
       super(originalPath, resolver, null, null);
     }
 
@@ -197,7 +260,7 @@ public final class CoreIconManager implements IconManager, CoreAwareIconManager 
     private final int flagMask;
     private final @NotNull Icon icon;
 
-    private IconLayer(final int flagMask, @NotNull Icon icon) {
+    private IconLayer(int flagMask, @NotNull Icon icon) {
       BitUtil.assertOneBitMask(flagMask);
       this.flagMask = flagMask;
       this.icon = icon;
@@ -205,21 +268,21 @@ public final class CoreIconManager implements IconManager, CoreAwareIconManager 
   }
 
   private static final class IconDescriptionLoader implements Supplier<String> {
-    private final String myPath;
-    private String myResult;
-    private boolean myCalculated;
+    private final String path;
+    private String result;
+    private boolean isCalculated;
 
     private IconDescriptionLoader(String path) {
-      myPath = path;
+      this.path = path;
     }
 
     @Override
     public String get() {
-      if (!myCalculated) {
-        myResult = findIconDescription(myPath);
-        myCalculated = true;
+      if (!isCalculated) {
+        result = findIconDescription(path);
+        isCalculated = true;
       }
-      return myResult;
+      return result;
     }
   }
 
@@ -232,15 +295,20 @@ public final class CoreIconManager implements IconManager, CoreAwareIconManager 
       if (classLoader == null) {
         classLoader = CoreIconManager.class.getClassLoader();
       }
-      ResourceBundle bundle = DynamicBundle.INSTANCE.getResourceBundle(ep.resourceBundle, classLoader);
+      ResourceBundle bundle = DynamicBundle.getResourceBundle(classLoader, ep.resourceBundle);
       String description = AbstractBundle.messageOrNull(bundle, key);
       if (description != null) {
         result.set(description);
       }
     });
     if (result.get() == null && Registry.is("ide.icon.tooltips.trace.missing", false)) {
-      LOG.info("Icon tooltip requested but not found for " + path);
+      Logger.getInstance(CoreIconManager.class).info("Icon tooltip requested but not found for " + path);
     }
     return result.get();
+  }
+
+  @Override
+  public @NotNull Icon withIconBadge(@NotNull Icon icon, @NotNull Paint color) {
+    return new BadgeIcon(icon, color);
   }
 }

@@ -1,5 +1,6 @@
+// IGNORE_FE10_BINDING_BY_FIR
 // PROBLEM: none
-// WITH_RUNTIME
+// WITH_STDLIB
 
 object Foo {
     val f: suspend SequenceScope<Int>.(low: Int, high: Int) -> Unit = { low, high ->

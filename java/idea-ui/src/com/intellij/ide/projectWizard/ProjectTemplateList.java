@@ -2,6 +2,7 @@
 package com.intellij.ide.projectWizard;
 
 import com.intellij.ide.util.PropertiesComponent;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.popup.ListItemDescriptorAdapter;
 import com.intellij.openapi.util.Comparing;
@@ -25,6 +26,7 @@ import javax.swing.*;
 import javax.swing.event.ListSelectionListener;
 import java.awt.*;
 import java.util.List;
+import java.util.StringJoiner;
 
 /**
  * @author Dmitry Avdeev
@@ -69,7 +71,9 @@ public class ProjectTemplateList extends JPanel {
     myList.setCellRenderer(renderer);
     myList.getSelectionModel().addListSelectionListener(__ -> updateSelection());
 
-    Messages.installHyperlinkSupport(myDescriptionPane);
+    if (!ApplicationManager.getApplication().isUnitTestMode()) {
+      Messages.installHyperlinkSupport(myDescriptionPane);
+    }
   }
 
   private void updateSelection() {
@@ -159,5 +163,15 @@ public class ProjectTemplateList extends JPanel {
     }
 
     return false;
+  }
+
+  @TestOnly
+  public String availableProjectTemplatesToString() {
+    ListModel<ProjectTemplate> model = myList.getModel();
+    StringJoiner builder = new StringJoiner(", ");
+    for (int i = 0; i < model.getSize(); i++) {
+      builder.add(model.getElementAt(i).getName());
+    }
+    return builder.toString();
   }
 }

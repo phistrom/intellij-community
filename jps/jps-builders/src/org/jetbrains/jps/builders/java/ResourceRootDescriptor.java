@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2021 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package org.jetbrains.jps.builders.java;
 
 import com.intellij.openapi.util.io.FileFilters;
 import com.intellij.openapi.util.io.FileUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.jps.builders.BuildRootDescriptor;
 import org.jetbrains.jps.incremental.ResourcesTarget;
@@ -39,6 +40,8 @@ public class ResourceRootDescriptor extends BuildRootDescriptor {
    * @deprecated use {@link #ResourceRootDescriptor(File, ResourcesTarget, String, Set, FileFilter)} instead; this method doesn't honor
    * excluded patterns which may be specified for the module.
    */
+  @Deprecated
+  @ApiStatus.ScheduledForRemoval
   public ResourceRootDescriptor(@NotNull File root,
                                 @NotNull ResourcesTarget target,
                                 @NotNull String packagePrefix,
@@ -86,11 +89,6 @@ public class ResourceRootDescriptor extends BuildRootDescriptor {
     final JpsProject project = getTarget().getModule().getProject();
     final JpsCompilerExcludes excludes = JpsJavaExtensionService.getInstance().getCompilerConfiguration(project).getCompilerExcludes();
     return file -> !excludes.isExcluded(file) && myFilterForExcludedPatterns.accept(file);
-  }
-
-  @Override
-  public boolean isGenerated() {
-    return false;
   }
 
   @Override

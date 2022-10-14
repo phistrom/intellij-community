@@ -1,18 +1,17 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.refactoring.move.moveDeclarations.ui
 
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.IdeActions
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.fileChooser.FileChooserFactory
 import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.options.ConfigurationException
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
-import com.intellij.openapi.ui.TextComponentAccessor
+import com.intellij.openapi.ui.TextComponentAccessors
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.psi.PsiDirectory
@@ -30,12 +29,13 @@ import com.intellij.ui.TextFieldWithHistoryWithBrowseButton
 import com.intellij.ui.components.JBLabelDecorator
 import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.UIUtil
-import org.jetbrains.kotlin.idea.KotlinBundle
+import org.jetbrains.kotlin.idea.base.util.onTextChange
+import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.core.packageMatchesDirectoryOrImplicit
-import org.jetbrains.kotlin.idea.core.util.onTextChange
 import org.jetbrains.kotlin.idea.refactoring.isInKotlinAwareSourceRoot
 import org.jetbrains.kotlin.idea.refactoring.move.logFusForMoveRefactoring
 import org.jetbrains.kotlin.idea.util.application.executeCommand
+import org.jetbrains.kotlin.idea.util.application.isUnitTestMode
 import org.jetbrains.kotlin.psi.KtFile
 import javax.swing.JComponent
 
@@ -53,13 +53,13 @@ class KotlinAwareMoveFilesOrDirectoriesDialog(
         private const val HELP_ID = "refactoring.moveFile"
 
         private fun setConfigurationValue(id: String, value: Boolean, defaultValue: Boolean) {
-            if (!ApplicationManager.getApplication().isUnitTestMode) {
+            if (!isUnitTestMode()) {
                 PropertiesComponent.getInstance().setValue(id, value, defaultValue)
             }
         }
 
         private fun getConfigurationValue(id: String, defaultValue: Boolean) =
-            !ApplicationManager.getApplication().isUnitTestMode && PropertiesComponent.getInstance().getBoolean(id, defaultValue)
+            !isUnitTestMode() && PropertiesComponent.getInstance().getBoolean(id, defaultValue)
     }
 
     private data class CheckboxesState(
@@ -108,7 +108,7 @@ class KotlinAwareMoveFilesOrDirectoriesDialog(
             RefactoringBundle.message("the.file.will.be.moved.to.this.directory"),
             project,
             descriptor,
-            TextComponentAccessor.TEXT_FIELD_WITH_HISTORY_WHOLE_TEXT
+            TextComponentAccessors.TEXT_FIELD_WITH_HISTORY_WHOLE_TEXT
         )
         val textField = targetDirectoryField.childComponent.textEditor
         FileChooserFactory.getInstance().installFileCompletion(textField, descriptor, true, disposable)

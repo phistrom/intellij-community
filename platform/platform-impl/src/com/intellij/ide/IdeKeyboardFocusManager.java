@@ -1,56 +1,83 @@
-/*
- * Copyright 2000-2016 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide;
 
-import com.intellij.openapi.application.AccessToken;
-import org.jetbrains.annotations.NotNull;
-import sun.awt.AppContext;
+import com.intellij.openapi.diagnostic.Logger;
 
+import javax.swing.FocusManager;
+import javax.swing.*;
 import java.awt.*;
-import java.awt.event.KeyEvent;
 import java.beans.PropertyChangeListener;
-import java.util.function.Consumer;
+import java.beans.VetoableChangeListener;
+import java.lang.reflect.Method;
+import java.util.List;
 
-class IdeKeyboardFocusManager extends DefaultKeyboardFocusManager {
-  private Consumer<KeyEvent> onTypeaheadFinished = __ -> {};
+/**
+ * We extend the obsolete {@link DefaultFocusManager} class here instead of {@link KeyboardFocusManager} to prevent unwanted overwriting of
+ * the default focus traversal policy by careless clients. In case they use the obsolete {@link FocusManager#getCurrentManager} method
+ * instead of {@link KeyboardFocusManager#getCurrentKeyboardFocusManager()}, the former will override the default focus traversal policy,
+ * if current focus manager doesn't extend {@link FocusManager}. We choose to extend {@link DefaultFocusManager}, not just
+ * {@link FocusManager} for the reasons described in {@link DelegatingDefaultFocusManager}'s javadoc - just in case some legacy code expects
+ * it.
+ */
+final class IdeKeyboardFocusManager extends DefaultFocusManager /* see javadoc above */ {
+  private static final Logger LOG = Logger.getInstance(IdeKeyboardFocusManager.class);
 
-  public void setTypeaheadHandler(@NotNull Consumer<KeyEvent> onTypeaheadFinished) {
-    this.onTypeaheadFinished = onTypeaheadFinished;
-  }
-
-  @NotNull
-  protected Consumer<KeyEvent> getOnTypeaheadFinishedHandler () {
-    return onTypeaheadFinished;
-  }
+  // Don't inline this field, it's here to prevent policy override by parent's constructor. Don't make it final either.
+  @SuppressWarnings({"FieldCanBeLocal", "FieldMayBeFinal"}) private boolean parentConstructorExecuted = true;
 
   @Override
   public boolean dispatchEvent(AWTEvent e) {
-    try (AccessToken ignore = EventQueue.isDispatchThread() ? IdeEventQueue.startActivity(e) : null) {
+    if (EventQueue.isDispatchThread()) {
+      boolean[] result = {false};
+      IdeEventQueue.performActivity(e, () -> result[0] = super.dispatchEvent(e));
+      return result[0];
+    }
+    else {
       return super.dispatchEvent(e);
     }
   }
 
-  @NotNull
-  static IdeKeyboardFocusManager replaceDefault() {
+  @Override
+  public void setDefaultFocusTraversalPolicy(FocusTraversalPolicy defaultPolicy) {
+    if (parentConstructorExecuted) {
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("setDefaultFocusTraversalPolicy: " + defaultPolicy, new Throwable());
+      }
+      super.setDefaultFocusTraversalPolicy(defaultPolicy);
+    }
+  }
+
+  static void replaceDefault() {
     KeyboardFocusManager kfm = getCurrentKeyboardFocusManager();
     IdeKeyboardFocusManager ideKfm = new IdeKeyboardFocusManager();
     for (PropertyChangeListener l : kfm.getPropertyChangeListeners()) {
       ideKfm.addPropertyChangeListener(l);
     }
-    AppContext.getAppContext().put(KeyboardFocusManager.class, ideKfm);
-    return (IdeKeyboardFocusManager)getCurrentKeyboardFocusManager();
+    for (VetoableChangeListener l : kfm.getVetoableChangeListeners()) {
+      ideKfm.addVetoableChangeListener(l);
+    }
+    try {
+      Method getDispatchersMethod = KeyboardFocusManager.class.getDeclaredMethod("getKeyEventDispatchers");
+      getDispatchersMethod.setAccessible(true);
+      @SuppressWarnings("unchecked") List<KeyEventDispatcher> dispatchers = (List<KeyEventDispatcher>)getDispatchersMethod.invoke(kfm);
+      if (dispatchers != null) {
+        for (KeyEventDispatcher d : dispatchers) {
+          ideKfm.addKeyEventDispatcher(d);
+        }
+      }
+      Method getPostProcessorsMethod = KeyboardFocusManager.class.getDeclaredMethod("getKeyEventPostProcessors");
+      getPostProcessorsMethod.setAccessible(true);
+      @SuppressWarnings("unchecked") List<KeyEventPostProcessor> postProcessors =
+        (List<KeyEventPostProcessor>)getPostProcessorsMethod.invoke(kfm);
+      if (postProcessors != null) {
+        for (KeyEventPostProcessor p : postProcessors) {
+          ideKfm.addKeyEventPostProcessor(p);
+        }
+      }
+    }
+    catch (Exception e) {
+      LOG.error(e);
+    }
+    KeyboardFocusManager.setCurrentKeyboardFocusManager(ideKfm);
   }
 }

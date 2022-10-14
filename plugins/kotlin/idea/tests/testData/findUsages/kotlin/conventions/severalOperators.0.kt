@@ -2,13 +2,14 @@
 // OPTIONS: usages
 
 open class Diction {
-    operator fun <caret>minus(other: Diction): Diction { return Diction() }
-    operator fun plus(other: Diction): Diction { return Diction() }
+    operator fun <caret>minus(other: Diction): Diction = Diction()
+    operator fun plus(other: Diction): Diction = Diction()
 }
 
 operator fun Diction.times(other: Diction) = Diction()
 
 class A
+
 operator fun A.div(other: A) = Diction()
 
 fun indirectDiction() = A() / A()
@@ -37,3 +38,6 @@ fun test3() {
 fun test4() {
     tt() - tt()
 }
+
+// FIR_COMPARISON
+// IGNORE_FIR_LOG

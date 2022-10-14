@@ -1,5 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
-@file:Suppress("MayBeConstant")
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package com.intellij.codeInsight.daemon.impl
 
@@ -27,11 +26,9 @@ import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.NlsSafe
 import com.intellij.openapi.util.SystemInfo
-import com.intellij.openapi.util.text.StringUtil
 import com.intellij.ui.*
 import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.*
-import org.jetbrains.annotations.Nls
 import java.awt.*
 import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
@@ -319,6 +316,8 @@ internal class DaemonTooltipWithActionRenderer(@NlsContexts.Tooltip text: String
       return isShowActions()
     }
 
+    override fun getActionUpdateThread() = ActionUpdateThread.BGT
+
     override fun setSelected(e: AnActionEvent, state: Boolean) {
       setShowActions(state)
       reloader.reload(myCurrentWidth > 0)
@@ -344,6 +343,8 @@ internal class DaemonTooltipWithActionRenderer(@NlsContexts.Tooltip text: String
     override fun isSelected(e: AnActionEvent): Boolean {
       return myCurrentWidth > 0
     }
+
+    override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
     override fun setSelected(e: AnActionEvent, state: Boolean) {
       TooltipActionsLogger.logShowDescription(e.project, TooltipActionsLogger.Source.Gear, e.inputEvent, e.place)
@@ -388,7 +389,7 @@ private fun getActionFont(): Font? {
   if (toolTipFont == null || SystemInfo.isWindows) return toolTipFont
 
   //if font was changed from default we dont have a good heuristic to customize it
-  if (JBFont.label() != toolTipFont || UISettings.instance.overrideLafFonts) return toolTipFont
+  if (JBFont.label() != toolTipFont || UISettings.getInstance().overrideLafFonts) return toolTipFont
 
   if (SystemInfo.isMac) {
     return toolTipFont.deriveFont(toolTipFont.size - 1f)

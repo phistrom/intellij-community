@@ -10,11 +10,13 @@ import com.intellij.psi.PsiReference;
 import com.intellij.psi.ResolveResult;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.ObjectUtils;
+import com.intellij.util.ThreeState;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
 import com.jetbrains.python.PyNames;
 import com.jetbrains.python.PythonRuntimeService;
 import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
+import com.jetbrains.python.codeInsight.typing.PyTypingTypeProvider;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.references.PyReferenceImpl;
 import com.jetbrains.python.psi.resolve.*;
@@ -125,8 +127,8 @@ public final class PyCallExpressionHelper {
         final PyType typeFromProviders =
           Ref.deref(PyReferenceExpressionImpl.getReferenceTypeFromProviders(element, resolveContext.getTypeEvalContext(), call));
 
-        if (typeFromProviders instanceof PyCallableType) {
-          callableTypes.add(typeFromProviders);
+        if (PyTypeUtil.toStream(typeFromProviders).allMatch(it -> it instanceof PyCallableType)) {
+          PyTypeUtil.toStream(typeFromProviders).forEachOrdered(callableTypes::add);
           continue;
         }
       }
@@ -485,25 +487,28 @@ public final class PyCallExpressionHelper {
       return true; // unqualified + method = implicit constructor call
     }
     for (PyExpression qualifier : qualifiers) {
-      if (qualifier != null && isQualifiedByInstance(resolved, qualifier, context)) {
-        return true;
+      if (qualifier != null) {
+        ThreeState byInstance = isQualifiedByInstance(resolved, qualifier, context);
+        if (byInstance != ThreeState.UNSURE) {
+          return byInstance.toBoolean();
+        }
       }
     }
-    return false;
+    return true;
   }
 
-  private static boolean isQualifiedByInstance(@Nullable PyCallable resolved,
-                                               @NotNull PyExpression qualifier,
-                                               @NotNull TypeEvalContext context) {
+  private static @NotNull ThreeState isQualifiedByInstance(@Nullable PyCallable resolved,
+                                                           @NotNull PyExpression qualifier,
+                                                           @NotNull TypeEvalContext context) {
     if (isQualifiedByClass(resolved, qualifier, context)) {
-      return false;
+      return ThreeState.NO;
     }
     final PyType qualifierType = context.getType(qualifier);
-    if (qualifierType != null) {
-      // TODO: handle UnionType
-      if (qualifierType instanceof PyModuleType) return false; // qualified by module, not instance.
+    // TODO: handle UnionType
+    if (qualifierType instanceof PyModuleType) {
+      return ThreeState.UNSURE;
     }
-    return true; // NOTE. best guess: unknown qualifier is more probably an instance.
+    return ThreeState.YES; // NOTE. best guess: unknown qualifier is more probably an instance.
   }
 
   private static boolean isQualifiedByClass(@Nullable PyCallable resolved,
@@ -572,6 +577,12 @@ public final class PyCallExpressionHelper {
             return null;
           }
         }
+      }
+    }
+    if (callee instanceof PySubscriptionExpression) {
+      final PyType parametrizedType = Ref.deref(PyTypingTypeProvider.getType(callee, context));
+      if (parametrizedType != null) {
+        return parametrizedType;
       }
     }
     final PyResolveContext resolveContext = PyResolveContext.defaultContext(context);
@@ -755,7 +766,7 @@ public final class PyCallExpressionHelper {
     final int safeImplicitOffset = Math.min(callableType.getImplicitOffset(), parameters.size());
     final List<PyCallableParameter> explicitParameters = parameters.subList(safeImplicitOffset, parameters.size());
     final List<PyCallableParameter> implicitParameters = parameters.subList(0, safeImplicitOffset);
-    final ArgumentMappingResults mappingResults = analyzeArguments(arguments, explicitParameters);
+    final ArgumentMappingResults mappingResults = analyzeArguments(arguments, explicitParameters, context);
 
     return new PyCallExpression.PyArgumentsMapping(callSite,
                                                    callableType,
@@ -822,7 +833,7 @@ public final class PyCallExpressionHelper {
     final List<PyCallableParameter> explicitParameters = filterExplicitParameters(parameters, callable, callSite, resolveContext);
     final List<PyCallableParameter> implicitParameters = parameters.subList(0, parameters.size() - explicitParameters.size());
 
-    final ArgumentMappingResults mappingResults = analyzeArguments(arguments, explicitParameters);
+    final ArgumentMappingResults mappingResults = analyzeArguments(arguments, explicitParameters, context);
 
     return new PyCallExpression.PyArgumentsMapping(callSite,
                                                    callableType,
@@ -952,8 +963,9 @@ public final class PyCallExpressionHelper {
   }
 
   @NotNull
-  private static ArgumentMappingResults analyzeArguments(@NotNull List<PyExpression> arguments,
-                                                         @NotNull List<PyCallableParameter> parameters) {
+  public static ArgumentMappingResults analyzeArguments(@NotNull List<PyExpression> arguments,
+                                                         @NotNull List<PyCallableParameter> parameters,
+                                                         @NotNull TypeEvalContext context) {
     boolean positionalOnlyMode = ContainerUtil.exists(parameters, p -> p.getParameter() instanceof PySlashParameter);
     boolean seenSingleStar = false;
     boolean mappedVariadicArgumentsToParameters = false;
@@ -1014,6 +1026,15 @@ public final class PyCallExpressionHelper {
             parametersMappedToVariadicKeywordArguments.add(parameter);
             mappedVariadicArgumentsToParameters = true;
           }
+        }
+        else if (isParamSpecOrConcatenate(parameter, context)) {
+          for (var argument: arguments) {
+            mappedParameters.put(argument, parameter);
+          }
+          allPositionalArguments.clear();
+          keywordArguments.clear();
+          variadicPositionalArguments.clear();
+          variadicKeywordArguments.clear();
         }
         else {
           if (positionalOnlyMode) {
@@ -1102,6 +1123,11 @@ public final class PyCallExpressionHelper {
                                       tupleMappedParameters);
   }
 
+  private static boolean isParamSpecOrConcatenate(@NotNull PyCallableParameter parameter, @NotNull TypeEvalContext context) {
+    final var type = parameter.getType(context);
+    return type instanceof PyParamSpecType || type instanceof PyConcatenateType;
+  }
+
   @NotNull
   private static List<PsiElement> forEveryScopeTakeOverloadsOtherwiseImplementations(@NotNull List<? extends ResolveResult> results,
                                                                                      @NotNull TypeEvalContext context) {
@@ -1166,7 +1192,7 @@ public final class PyCallExpressionHelper {
   }
 
   private static @NotNull <E> List<@NotNull E> dropNotMatchedOverloadsOrLeaveAsIs(@NotNull List<@NotNull E> elements,
-                                                                                  @NotNull Function<@NotNull ? super E, @Nullable PsiElement> mapper,
+                                                                                  @NotNull Function<? super @NotNull E, ? extends @Nullable PsiElement> mapper,
                                                                                   @NotNull PyCallSiteExpression callSite,
                                                                                   @NotNull TypeEvalContext context) {
     final List<E> filtered = ContainerUtil.filter(elements, it -> !notMatchedOverload(mapper.apply(it), callSite, context));
@@ -1194,10 +1220,10 @@ public final class PyCallExpressionHelper {
     }
     allMappedParameters.putAll(mappedExplicitParameters);
 
-    return PyTypeChecker.unifyGenericCall(receiver, allMappedParameters, context) == null;
+    return PyTypeChecker.unifyGenericCallWithParamSpecs(receiver, allMappedParameters, context) == null;
   }
 
-  private static class ArgumentMappingResults {
+  public static class ArgumentMappingResults {
     @NotNull private final Map<PyExpression, PyCallableParameter> myMappedParameters;
     @NotNull private final List<PyCallableParameter> myUnmappedParameters;
     @NotNull private final List<PyExpression> myUnmappedArguments;

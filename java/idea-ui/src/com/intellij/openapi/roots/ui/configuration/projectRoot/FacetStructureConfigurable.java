@@ -22,9 +22,7 @@ import com.intellij.openapi.roots.ui.configuration.projectRoot.daemon.ProjectStr
 import com.intellij.openapi.ui.DetailsComponent;
 import com.intellij.openapi.ui.NamedConfigurable;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.ui.treeStructure.filtered.FilteringTreeBuilder;
 import com.intellij.util.ui.tree.TreeUtil;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -53,8 +51,7 @@ public class FacetStructureConfigurable extends BaseStructureConfigurable {
   /**
    * @deprecated use {@link ProjectStructureConfigurable#getFacetStructureConfigurable()} instead
    */
-  @ApiStatus.ScheduledForRemoval(inVersion = "2022.1")
-  @Deprecated
+  @Deprecated(forRemoval = true)
   public static FacetStructureConfigurable getInstance(final @NotNull Project project) {
     return ProjectStructureConfigurable.getInstance(project).getFacetStructureConfigurable();
   }
@@ -105,7 +102,7 @@ public class FacetStructureConfigurable extends BaseStructureConfigurable {
   }
 
   private void revalidateTree() {
-    FilteringTreeBuilder.revalidateTree(myTree);
+    TreeUtil.invalidateCacheAndRepaint(myTree.getUI());
   }
 
   @Override
@@ -337,7 +334,7 @@ public class FacetStructureConfigurable extends BaseStructureConfigurable {
 
   @Override
   public String getHelpTopic() {
-    final Component component = PlatformDataKeys.CONTEXT_COMPONENT.getData(DataManager.getInstance().getDataContext());
+    final Component component = PlatformCoreDataKeys.CONTEXT_COMPONENT.getData(DataManager.getInstance().getDataContext());
     if (myTree.equals(component)) {
       final NamedConfigurable selectedConfigurable = getSelectedConfigurable();
       if (selectedConfigurable instanceof FacetTypeConfigurable) {
@@ -415,6 +412,10 @@ public class FacetStructureConfigurable extends BaseStructureConfigurable {
       e.getPresentation().setEnabled(selected instanceof FacetConfigurable);
     }
 
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
+    }
     @Override
     public void actionPerformed(@NotNull final AnActionEvent e) {
       NamedConfigurable selected = getSelectedConfigurable();

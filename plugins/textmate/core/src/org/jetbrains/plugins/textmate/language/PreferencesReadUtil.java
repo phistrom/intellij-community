@@ -4,8 +4,8 @@ import com.intellij.util.containers.Interner;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.textmate.Constants;
-import org.jetbrains.plugins.textmate.language.preferences.TextMateBracePair;
-import org.jetbrains.plugins.textmate.language.preferences.TextMateSnippet;
+import org.jetbrains.plugins.textmate.language.preferences.*;
+import org.jetbrains.plugins.textmate.language.syntax.lexer.TextMateScope;
 import org.jetbrains.plugins.textmate.plist.PListValue;
 import org.jetbrains.plugins.textmate.plist.Plist;
 
@@ -14,7 +14,6 @@ import java.util.*;
 
 public final class PreferencesReadUtil {
   /**
-   * @param rootPlist
    * @return pair <scopeName, settingsPlist> or null if rootPlist doesn't contain 'settings' child
    * or scopeName is null or empty
    */
@@ -97,5 +96,51 @@ public final class PreferencesReadUtil {
     return snippetFile.getName().endsWith("." + Constants.SUBLIME_SNIPPET_EXTENSION)
            ? null //not supported yet
            : loadTextMateSnippet(plist, snippetFile.getAbsolutePath(), interner);
+  }
+
+  @Nullable
+  private static String getPattern(@NotNull String name, @NotNull Plist from) {
+    final PListValue value = from.getPlistValue(name);
+    if (value == null) return null;
+    return value.getString();
+  }
+
+  @NotNull
+  public static IndentationRules loadIndentationRules(@NotNull Plist plist) {
+    final PListValue rulesValue = plist.getPlistValue(Constants.INDENTATION_RULES);
+    if (rulesValue == null) return IndentationRules.empty();
+    final Plist rules = rulesValue.getPlist();
+    return new IndentationRules(
+      getPattern(Constants.INCREASE_INDENT_PATTERN, rules),
+      getPattern(Constants.DECREASE_INDENT_PATTERN, rules),
+      getPattern(Constants.INDENT_NEXT_LINE_PATTERN, rules),
+      getPattern(Constants.UNINDENTED_LINE_PATTERN, rules)
+    );
+  }
+
+  @NotNull
+  public static TextMateCommentPrefixes readCommentPrefixes(@NotNull final ShellVariablesRegistry registry,
+                                                                      @NotNull final TextMateScope scope) {
+
+    String lineCommentPrefix = null;
+    TextMateBlockCommentPair blockCommentPair = null;
+    int index = 1;
+    while (lineCommentPrefix == null || blockCommentPair == null) {
+      String variableSuffix = index > 1 ? "_" + index : "";
+      TextMateShellVariable start = registry.getVariableValue(Constants.COMMENT_START_VARIABLE + variableSuffix, scope);
+      TextMateShellVariable end = registry.getVariableValue(Constants.COMMENT_END_VARIABLE + variableSuffix, scope);
+
+      index++;
+
+      if (start == null) break;
+      if ((end == null || !end.scopeName.equals(start.scopeName)) && lineCommentPrefix == null) {
+        lineCommentPrefix = start.value;
+      }
+      if ((end != null && end.scopeName.equals(start.scopeName)) && blockCommentPair == null) {
+        blockCommentPair = new TextMateBlockCommentPair(start.value, end.value);
+      }
+    }
+
+    return new TextMateCommentPrefixes(lineCommentPrefix, blockCommentPair);
   }
 }

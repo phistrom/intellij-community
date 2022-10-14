@@ -1,11 +1,10 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.externalSystem.autolink
 
 import com.intellij.CommonBundle
 import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
-import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.PersistentStateComponent
@@ -38,7 +37,7 @@ class UnlinkedProjectNotificationAware(private val project: Project) : Persisten
 
     if (systemId.id in disabledNotifications) return
     if (projectId in notifiedNotifications) {
-      LOG.debug("Unlinked ${projectId.readableName} project notification is already notified")
+      LOG.debug("Unlinked ${projectId.debugName} project notification is already notified")
       return
     }
 
@@ -48,6 +47,7 @@ class UnlinkedProjectNotificationAware(private val project: Project) : Persisten
       message("unlinked.project.notification.title", systemName),
       NotificationType.INFORMATION
     )
+    notification.setSuggestionType(true)
 
     val notificationDisposable = createExtensionDisposable(project, unlinkedProjectAware)
     notifiedNotifications.add(projectId, notificationDisposable)
@@ -74,7 +74,7 @@ class UnlinkedProjectNotificationAware(private val project: Project) : Persisten
 
     notification.notify(project)
 
-    LOG.debug("Notified unlinked ${projectId.readableName} project notification")
+    LOG.debug("Notified unlinked ${projectId.debugName} project notification")
   }
 
   @TestOnly

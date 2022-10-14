@@ -1,15 +1,13 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.intention.impl
 
 import com.intellij.codeInsight.daemon.impl.quickfix.ModifierFix
+import com.intellij.codeInsight.intention.AddAnnotationPsiFix
 import com.intellij.codeInsight.intention.FileModifier
 import com.intellij.codeInsight.intention.IntentionAction
 import com.intellij.lang.java.JavaLanguage
 import com.intellij.lang.java.actions.*
-import com.intellij.lang.jvm.JvmClass
-import com.intellij.lang.jvm.JvmMethod
-import com.intellij.lang.jvm.JvmModifier
-import com.intellij.lang.jvm.JvmModifiersOwner
+import com.intellij.lang.jvm.*
 import com.intellij.lang.jvm.actions.*
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
@@ -19,7 +17,6 @@ import org.jetbrains.uast.UDeclaration
 import java.util.*
 
 class JavaElementActionsFactory : JvmElementActionsFactory() {
-
   override fun createChangeModifierActions(target: JvmModifiersOwner, request: ChangeModifierRequest): List<IntentionAction> {
     val declaration = if (target is UDeclaration) target.javaPsi as PsiModifierListOwner else target as PsiModifierListOwner
     if (declaration.language != JavaLanguage.INSTANCE) return emptyList()
@@ -41,6 +38,10 @@ class JavaElementActionsFactory : JvmElementActionsFactory() {
   override fun createAddAnnotationActions(target: JvmModifiersOwner, request: AnnotationRequest): List<IntentionAction> {
     val declaration = target as? PsiModifierListOwner ?: return emptyList()
     if (declaration.language != JavaLanguage.INSTANCE) return emptyList()
+
+    if (!AddAnnotationPsiFix.isAvailable(target, request.qualifiedName)) {
+      return emptyList()
+    }
     return listOf(CreateAnnotationAction(declaration, request))
   }
 
@@ -49,14 +50,14 @@ class JavaElementActionsFactory : JvmElementActionsFactory() {
 
     val constantRequested = request.isConstant || javaClass.isInterface || javaClass.isRecord || request.modifiers.containsAll(constantModifiers)
     val result = ArrayList<IntentionAction>()
-    if (constantRequested || request.fieldName.toUpperCase(Locale.ENGLISH) == request.fieldName) {
+    if (canCreateEnumConstant(javaClass, request)) {
+      result += CreateEnumConstantAction(javaClass, request)
+    }
+    if (constantRequested || request.fieldName.uppercase(Locale.ENGLISH) == request.fieldName) {
       result += CreateConstantAction(javaClass, request)
     }
     if (!constantRequested) {
       result += CreateFieldAction(javaClass, request)
-    }
-    if (canCreateEnumConstant(javaClass, request)) {
-      result += CreateEnumConstantAction(javaClass, request)
     }
     return result
   }
@@ -99,5 +100,19 @@ class JavaElementActionsFactory : JvmElementActionsFactory() {
     if (request.expectedParameters.any { it.expectedTypes.isEmpty() || it.semanticNames.isEmpty() }) return emptyList()
 
     return listOf(ChangeMethodParameters(psiMethod, request))
+  }
+
+  override fun createChangeTypeActions(target: JvmMethod, request: ChangeTypeRequest): List<IntentionAction> {
+    val psiMethod = target as? PsiMethod ?: return emptyList()
+    if (psiMethod.language != JavaLanguage.INSTANCE) return emptyList()
+    val typeElement = psiMethod.returnTypeElement ?: return emptyList()
+    return listOf(ChangeType(typeElement, request))
+  }
+
+  override fun createChangeTypeActions(target: JvmParameter, request: ChangeTypeRequest): List<IntentionAction> {
+    val psiParameter = target as? PsiParameter ?: return emptyList()
+    if (psiParameter.language != JavaLanguage.INSTANCE) return emptyList()
+    val typeElement = psiParameter.typeElement ?: return emptyList()
+    return listOf(ChangeType(typeElement, request))
   }
 }

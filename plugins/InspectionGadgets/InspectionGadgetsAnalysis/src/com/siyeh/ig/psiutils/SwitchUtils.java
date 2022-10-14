@@ -24,8 +24,11 @@ import com.intellij.psi.util.JavaPsiPatternUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.TypeConversionUtil;
+import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.ObjectUtils;
+import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
+import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -57,38 +60,65 @@ public final class SwitchUtils {
    * @return a negative number if a default case was encountered.
    */
   public static int calculateBranchCount(@NotNull PsiSwitchBlock block) {
+    List<PsiElement> switchBranches = getSwitchBranches(block);
+    if (switchBranches.isEmpty()) return 0;
+    int branches = 0;
+    boolean defaultFound = false;
+    for (PsiElement branch : switchBranches) {
+      if (branch instanceof PsiSwitchLabelStatementBase) {
+        if (((PsiSwitchLabelStatementBase)branch).isDefaultCase()) {
+          defaultFound = true;
+        }
+      }
+      else if (branch instanceof PsiCaseLabelElement) {
+        if (branch instanceof PsiDefaultCaseLabelElement) {
+          defaultFound = true;
+        }
+        else {
+          branches++;
+        }
+      }
+    }
     final PsiCodeBlock body = block.getBody();
     if (body == null) {
       return 0;
     }
-    int branches = 0;
-    boolean defaultFound = false;
-    for (final PsiSwitchLabelStatementBase child : PsiTreeUtil.getChildrenOfTypeAsList(body, PsiSwitchLabelStatementBase.class)) {
+    return defaultFound ? -branches - 1 : branches;
+  }
+
+  /**
+   * @param block the switch block
+   * @return a list of switch branches consisting of either {@link PsiSwitchLabelStatementBase} or {@link PsiCaseLabelElement}
+   */
+  @NotNull
+  public static List<PsiElement> getSwitchBranches(@NotNull PsiSwitchBlock block) {
+    final PsiCodeBlock body = block.getBody();
+    if (body == null) return Collections.emptyList();
+    List<PsiElement> result = new SmartList<>();
+    for (PsiSwitchLabelStatementBase child : PsiTreeUtil.getChildrenOfTypeAsList(body, PsiSwitchLabelStatementBase.class)) {
       if (child.isDefaultCase()) {
-        defaultFound = true;
+        result.add(child);
       }
       else {
         PsiCaseLabelElementList labelElementList = child.getCaseLabelElementList();
         if (labelElementList == null) continue;
-        for (PsiCaseLabelElement labelElement : labelElementList.getElements()) {
-          if (labelElement instanceof PsiDefaultCaseLabelElement) {
-            defaultFound = true;
-          }
-          else {
-            branches++;
-          }
-        }
+        Collections.addAll(result, labelElementList.getElements());
       }
     }
-    return defaultFound ? -branches - 1 : branches;
+    return result;
   }
 
   public static boolean canBeSwitchCase(PsiExpression expression, PsiExpression switchExpression, LanguageLevel languageLevel,
                                         Set<Object> existingCaseValues, boolean isPatternMatch) {
     expression = PsiUtil.skipParenthesizedExprDown(expression);
     if (isPatternMatch) {
-      if(canBePatternSwitchCase(expression, switchExpression)) {
-        final PsiPattern pattern = createPatternFromExpression(expression);
+      if (canBePatternSwitchCase(expression, switchExpression)) {
+        final PsiPattern pattern;
+        try {
+          pattern = createPatternFromExpression(expression);
+        } catch (IncorrectOperationException ignore) {
+          return false;
+        }
         if (pattern == null) return true;
         for (Object caseValue : existingCaseValues) {
           if (caseValue instanceof PsiPattern && JavaPsiPatternUtil.dominates((PsiPattern) caseValue, pattern)) {
@@ -118,10 +148,9 @@ public final class SwitchUtils {
         return EquivalenceChecker.getCanonicalPsiEquivalence().expressionsAreEquivalent(switchExpression, left);
       }
     }
-    if (!(expression instanceof PsiPolyadicExpression)) {
+    if (!(expression instanceof PsiPolyadicExpression polyadicExpression)) {
       return false;
     }
-    final PsiPolyadicExpression polyadicExpression = (PsiPolyadicExpression)expression;
     final IElementType operation = polyadicExpression.getOperationTokenType();
     final PsiExpression[] operands = polyadicExpression.getOperands();
     if (operation.equals(JavaTokenType.OROR)) {
@@ -154,9 +183,9 @@ public final class SwitchUtils {
    * Returns true if given switch block has a rule-based format (like 'case 0 ->')
    * @param block a switch block to test
    * @return true if given switch block has a rule-based format; false if it has conventional label-based format (like 'case 0:')
-   * If switch body has no labels yet and language level permits,
-   * the rule-based format is assumed if the switch block is of the {@link PsiSwitchExpression} type.
+   * If switch body has no labels yet and language level permits the rule-based format is assumed.
    */
+  @Contract(pure = true)
   public static boolean isRuleFormatSwitch(@NotNull PsiSwitchBlock block) {
     if (!HighlightingFeature.ENHANCED_SWITCH.isAvailable(block)) {
       return false;
@@ -165,13 +194,26 @@ public final class SwitchUtils {
     final PsiCodeBlock switchBody = block.getBody();
     if (switchBody != null) {
       for (var child = switchBody.getFirstChild(); child != null; child = child.getNextSibling()) {
-        if (child instanceof PsiSwitchLabelStatementBase && !(child.getLastChild() instanceof PsiErrorElement)) {
+        if (child instanceof PsiSwitchLabelStatementBase && !isBeingCompleted((PsiSwitchLabelStatementBase)child)) {
           return child instanceof PsiSwitchLabeledRuleStatement;
         }
       }
     }
 
-    return block instanceof PsiSwitchExpression;
+    return true;
+  }
+
+  /**
+   * Checks if the label is being completed and there are no other case label elements in the list of the case label's elements
+   * @param label the label to analyze
+   * @return true if the label is currently being completed
+   */
+  @Contract(pure = true)
+  private static boolean isBeingCompleted(@NotNull PsiSwitchLabelStatementBase label) {
+    if (!(label.getLastChild() instanceof PsiErrorElement)) return false;
+
+    final PsiCaseLabelElementList list = label.getCaseLabelElementList();
+    return list != null && list.getElements().length == 1;
   }
 
   public static boolean canBeSwitchSelectorExpression(PsiExpression expression, LanguageLevel languageLevel) {
@@ -233,10 +275,9 @@ public final class SwitchUtils {
       final PsiExpression patternSwitchExpression = findPatternSwitchExpression(expression);
       if (patternSwitchExpression != null) return patternSwitchExpression;
     }
-    if (!(expression instanceof PsiPolyadicExpression)) {
+    if (!(expression instanceof PsiPolyadicExpression polyadicExpression)) {
       return null;
     }
-    final PsiPolyadicExpression polyadicExpression = (PsiPolyadicExpression)expression;
     final IElementType operation = polyadicExpression.getOperationTokenType();
     final PsiExpression[] operands = polyadicExpression.getOperands();
     if (operation.equals(JavaTokenType.OROR) && operands.length > 0) {
@@ -259,8 +300,7 @@ public final class SwitchUtils {
     if (expression instanceof PsiInstanceOfExpression) {
       return ((PsiInstanceOfExpression)expression).getOperand();
     }
-    if (expression instanceof PsiPolyadicExpression) {
-      final PsiPolyadicExpression polyadicExpression = (PsiPolyadicExpression)expression;
+    if (expression instanceof PsiPolyadicExpression polyadicExpression) {
       final IElementType operationToken = polyadicExpression.getOperationTokenType();
       final PsiExpression[] operands = polyadicExpression.getOperands();
       if (JavaTokenType.ANDAND.equals(operationToken)) {
@@ -282,8 +322,7 @@ public final class SwitchUtils {
     if (patternOperand != null) return patternOperand;
     final PsiExpression nullCheckedOperand = findNullCheckedOperand(expression);
     if (nullCheckedOperand != null) return nullCheckedOperand;
-    if (expression instanceof PsiPolyadicExpression) {
-      final PsiPolyadicExpression polyadicExpression = (PsiPolyadicExpression)expression;
+    if (expression instanceof PsiPolyadicExpression polyadicExpression) {
       final IElementType operationToken = polyadicExpression.getOperationTokenType();
       if (JavaTokenType.OROR.equals(operationToken)) {
         final PsiExpression[] operands = polyadicExpression.getOperands();
@@ -314,8 +353,7 @@ public final class SwitchUtils {
   }
 
   public static @Nullable PsiExpression findNullCheckedOperand(PsiExpression expression){
-    if (!(expression instanceof PsiBinaryExpression)) return null;
-    final PsiBinaryExpression binaryExpression = (PsiBinaryExpression)expression;
+    if (!(expression instanceof PsiBinaryExpression binaryExpression)) return null;
     if (! JavaTokenType.EQEQ.equals(binaryExpression.getOperationTokenType())) return null;
     if (ExpressionUtils.isNullLiteral(binaryExpression.getLOperand())) {
       return binaryExpression.getROperand();
@@ -327,6 +365,7 @@ public final class SwitchUtils {
   }
 
   /**
+   * @param switchBlock a switch statement or expression
    * @return either default switch label statement {@link PsiSwitchLabelStatementBase}, or {@link PsiDefaultCaseLabelElement},
    * or null, if nothing was found.
    */
@@ -337,40 +376,49 @@ public final class SwitchUtils {
     for (PsiStatement statement : body.getStatements()) {
       PsiSwitchLabelStatementBase switchLabelStatement = ObjectUtils.tryCast(statement, PsiSwitchLabelStatementBase.class);
       if (switchLabelStatement == null) continue;
-      if (switchLabelStatement.isDefaultCase()) return switchLabelStatement;
-      PsiCaseLabelElementList labelElementList = switchLabelStatement.getCaseLabelElementList();
-      if (labelElementList == null) return null;
-      PsiCaseLabelElement defaultElement = ContainerUtil.find(labelElementList.getElements(),
-                                                              labelElement -> labelElement instanceof PsiDefaultCaseLabelElement);
+      PsiElement defaultElement = findDefaultElement(switchLabelStatement);
       if (defaultElement != null) return defaultElement;
     }
     return null;
   }
 
+  /**
+   * @param label a switch label statement
+   * @return either default switch label statement {@link PsiSwitchLabelStatementBase}, or {@link PsiDefaultCaseLabelElement},
+   * or null, if nothing was found.
+   */
+  @Nullable
+  public static PsiElement findDefaultElement(@NotNull PsiSwitchLabelStatementBase label) {
+    if (label.isDefaultCase()) return label;
+    PsiCaseLabelElementList labelElementList = label.getCaseLabelElementList();
+    if (labelElementList == null) return null;
+    return ContainerUtil.find(labelElementList.getElements(),
+                              labelElement -> labelElement instanceof PsiDefaultCaseLabelElement);
+  }
+
   public static @Nullable @NonNls String createPatternCaseText(PsiExpression expression){
     expression = PsiUtil.skipParenthesizedExprDown(expression);
-    if (expression instanceof PsiInstanceOfExpression) {
-      final PsiInstanceOfExpression instanceOf = (PsiInstanceOfExpression)expression;
+    if (expression instanceof PsiInstanceOfExpression instanceOf) {
       final PsiPrimaryPattern pattern = instanceOf.getPattern();
       if (pattern != null) return pattern.getText();
       final PsiTypeElement typeElement = instanceOf.getCheckType();
       final PsiType type = typeElement != null ? typeElement.getType() : null;
+      String name = new VariableNameGenerator(instanceOf, VariableKind.LOCAL_VARIABLE).byType(type).generate(true);
       String typeText = typeElement != null ? typeElement.getText() : CommonClassNames.JAVA_LANG_OBJECT;
-      VariableNameGenerator nameGenerator = new VariableNameGenerator(expression, VariableKind.LOCAL_VARIABLE);
-      String variableName = nameGenerator.byName(typeText.substring(0, 1)).byType(type).generate(true);
-      return typeText + " " + variableName;
+      return typeText + " " + name;
     }
-    if (expression instanceof PsiPolyadicExpression) {
-      final PsiPolyadicExpression polyadicExpression = (PsiPolyadicExpression)expression;
+    if (expression instanceof PsiPolyadicExpression polyadicExpression) {
       final IElementType operationToken = polyadicExpression.getOperationTokenType();
       if (JavaTokenType.ANDAND.equals(operationToken)){
         final PsiExpression[] operands = polyadicExpression.getOperands();
-        final PsiExpression instanceOf = ContainerUtil.find(operands, (operand) -> operand instanceof PsiInstanceOfExpression);
+        final PsiExpression instanceOf = ContainerUtil.find(operands, operand -> operand instanceof PsiInstanceOfExpression);
         StringBuilder builder = new StringBuilder();
         builder.append(createPatternCaseText(instanceOf));
+        boolean needAppendWhen = HighlightingFeature.PATTERN_GUARDS_AND_RECORD_PATTERNS.isAvailable(expression);
         for (PsiExpression operand : operands) {
           if (operand != instanceOf) {
-            builder.append(" && ").append(operand.getText());
+            builder.append(needAppendWhen ? " when " : " && ").append(operand.getText());
+            needAppendWhen = false;
           }
         }
         return builder.toString();
@@ -415,7 +463,7 @@ public final class SwitchUtils {
     }
     final PsiType type = expression.getType();
     if ((!languageLevel.isAtLeast(LanguageLevel.JDK_1_7) || !TypeUtils.isJavaLangString(type)) &&
-        ((!PsiType.INT.equals(type) && !PsiType.SHORT.equals(type) && !PsiType.BYTE.equals(type) && !PsiType.CHAR.equals(type)))) {
+        !PsiType.INT.equals(type) && !PsiType.SHORT.equals(type) && !PsiType.BYTE.equals(type) && !PsiType.CHAR.equals(type)) {
       return false;
     }
     final Object value = ExpressionUtils.computeConstantExpression(expression);
@@ -462,6 +510,10 @@ public final class SwitchUtils {
     }
     List<PsiEnumConstant> constants = new ArrayList<>();
     for (PsiCaseLabelElement labelElement : list.getElements()) {
+      if (labelElement instanceof PsiDefaultCaseLabelElement ||
+          ExpressionUtils.isNullLiteral(ObjectUtils.tryCast(labelElement, PsiExpression.class))) {
+        continue;
+      }
       if (labelElement instanceof PsiReferenceExpression) {
         final PsiElement target = ((PsiReferenceExpression)labelElement).resolve();
         if (target instanceof PsiEnumConstant) {
@@ -472,6 +524,58 @@ public final class SwitchUtils {
       return Collections.emptyList();
     }
     return constants;
+  }
+
+  /**
+   * Checks if the given switch label statement contains a {@code default} case
+   *
+   * @param label a switch label statement to test
+   * @return {@code true} if the given switch label statement contains a {@code default} case, {@code false} otherwise
+   */
+  public static boolean isDefaultLabel(@Nullable PsiSwitchLabelStatementBase label) {
+    if (label == null) return false;
+    if (label.isDefaultCase()) return true;
+    PsiCaseLabelElementList labelElementList = label.getCaseLabelElementList();
+    if (labelElementList == null) return false;
+    return ContainerUtil.exists(labelElementList.getElements(), element -> element instanceof PsiDefaultCaseLabelElement);
+  }
+
+  /**
+   * Checks if the given switch label statement contains only a {@code default} case and nothing else
+   *
+   * @param label a switch label statement to test
+   * @return {@code true} if the given switch label statement contains only a {@code default} case and nothing else,
+   * {@code false} otherwise.
+   */
+  public static boolean hasOnlyDefaultCase(@Nullable PsiSwitchLabelStatementBase label) {
+    if (label == null) return false;
+    if (label.isDefaultCase()) return true;
+    PsiCaseLabelElementList labelElementList = label.getCaseLabelElementList();
+    return labelElementList != null &&
+           labelElementList.getElementCount() == 1 &&
+           labelElementList.getElements()[0] instanceof PsiDefaultCaseLabelElement;
+  }
+
+  /**
+   * Checks if the given switch label statement contains a {@code default} case or a total pattern
+   *
+   * @param label a switch label statement to test
+   * @return {@code true} if the given switch label statement contains a {@code default} case or a total pattern,
+   * {@code false} otherwise.
+   */
+  public static boolean isTotalLabel(@Nullable PsiSwitchLabelStatementBase label) {
+    if (label == null) return false;
+    if (isDefaultLabel(label)) return true;
+    PsiSwitchBlock switchBlock = label.getEnclosingSwitchBlock();
+    if (switchBlock == null) return false;
+    PsiExpression expression = switchBlock.getExpression();
+    if (expression == null) return false;
+    PsiType type = expression.getType();
+    if (type == null) return false;
+    PsiCaseLabelElementList labelElementList = label.getCaseLabelElementList();
+    if (labelElementList == null) return false;
+    return StreamEx.of(labelElementList.getElements()).select(PsiPattern.class)
+      .anyMatch(pattern -> JavaPsiPatternUtil.isTotalForType(pattern, type));
   }
 
   private static class LabelSearchVisitor extends JavaRecursiveElementWalkingVisitor {
@@ -492,7 +596,7 @@ public final class SwitchUtils {
     }
 
     @Override
-    public void visitLabeledStatement(PsiLabeledStatement statement) {
+    public void visitLabeledStatement(@NotNull PsiLabeledStatement statement) {
       final PsiIdentifier labelIdentifier = statement.getLabelIdentifier();
       final String labelText = labelIdentifier.getText();
       if (labelText.equals(m_labelName)) {
@@ -569,8 +673,7 @@ public final class SwitchUtils {
       if (statement == null) {
         return;
       }
-      if (statement instanceof PsiDeclarationStatement) {
-        final PsiDeclarationStatement declarationStatement = (PsiDeclarationStatement)statement;
+      if (statement instanceof PsiDeclarationStatement declarationStatement) {
         final PsiElement[] elements = declarationStatement.getDeclaredElements();
         for (PsiElement element : elements) {
           final PsiVariable variable = (PsiVariable)element;
@@ -578,8 +681,7 @@ public final class SwitchUtils {
           topLevelVariables.add(varName);
         }
       }
-      else if (statement instanceof PsiBlockStatement) {
-        final PsiBlockStatement block = (PsiBlockStatement)statement;
+      else if (statement instanceof PsiBlockStatement block) {
         final PsiCodeBlock codeBlock = block.getCodeBlock();
         final PsiStatement[] statements = codeBlock.getStatements();
         for (PsiStatement statement1 : statements) {

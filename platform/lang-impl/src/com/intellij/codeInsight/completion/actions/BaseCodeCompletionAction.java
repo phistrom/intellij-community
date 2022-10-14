@@ -4,6 +4,7 @@ package com.intellij.codeInsight.completion.actions;
 import com.intellij.codeInsight.completion.CodeCompletionHandlerBase;
 import com.intellij.codeInsight.completion.CompletionType;
 import com.intellij.codeInsight.hint.HintManagerImpl;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataContext;
@@ -17,9 +18,6 @@ import org.jetbrains.annotations.NotNull;
 
 import java.awt.event.InputEvent;
 
-/**
- * @author peter
- */
 public abstract class BaseCodeCompletionAction extends DumbAwareAction implements HintManagerImpl.ActionToIgnore {
 
   protected BaseCodeCompletionAction() {
@@ -43,6 +41,11 @@ public abstract class BaseCodeCompletionAction extends DumbAwareAction implement
   }
 
   @Override
+  public @NotNull ActionUpdateThread getActionUpdateThread() {
+    return ActionUpdateThread.BGT;
+  }
+
+  @Override
   public void update(@NotNull AnActionEvent e) {
     DataContext dataContext = e.getDataContext();
     e.getPresentation().setEnabled(false);
@@ -54,7 +57,6 @@ public abstract class BaseCodeCompletionAction extends DumbAwareAction implement
     PsiFile psiFile = project == null ? null : PsiUtilBase.getPsiFileInEditor(editor, project);
     if (psiFile == null) return;
 
-    if (!UIUtil.isShowing(editor.getContentComponent())) return;
     e.getPresentation().setEnabled(true);
   }
 }

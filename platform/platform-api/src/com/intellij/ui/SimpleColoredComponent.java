@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ui;
 
 import com.intellij.ide.BrowserUtil;
@@ -14,9 +14,9 @@ import com.intellij.ui.paint.EffectPainter;
 import com.intellij.ui.scale.JBUIScale;
 import com.intellij.util.IconUtil;
 import com.intellij.util.ObjectUtils;
+import com.intellij.util.containers.SLRUMap;
 import com.intellij.util.ui.*;
 import org.intellij.lang.annotations.JdkConstants;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -34,7 +34,6 @@ import java.awt.font.TextAttribute;
 import java.awt.font.TextLayout;
 import java.awt.geom.Rectangle2D;
 import java.awt.geom.RoundRectangle2D;
-import java.text.AttributedCharacterIterator;
 import java.text.AttributedString;
 import java.text.CharacterIterator;
 import java.util.ArrayList;
@@ -46,8 +45,6 @@ import java.util.Objects;
  * This is high performance Swing component which represents an icon
  * with a colored text. The text consists of fragments. Each
  * text fragment has its own color (foreground) and font style.
- *
- * @author Vladimir Kondratyev
  */
 @SuppressWarnings({"NonPrivateFieldAccessedInSynchronizedContext", "FieldAccessedSynchronizedAndUnsynchronized"})
 public class SimpleColoredComponent extends JComponent implements Accessible, ColoredTextContainer {
@@ -55,6 +52,7 @@ public class SimpleColoredComponent extends JComponent implements Accessible, Co
 
   public static final int FRAGMENT_ICON = -2;
 
+  private static final SLRUMap<WidthKey, Float> ourWidthCache = new SLRUMap<>(128, 128);
   private final List<ColoredFragment> myFragments;
   private ColoredFragment myCurrentFragment;
   private Font myLayoutFont;
@@ -130,7 +128,6 @@ public class SimpleColoredComponent extends JComponent implements Accessible, Co
     return iterator;
   }
 
-  @SuppressWarnings("unused")
   public boolean isIconOnTheRight() {
     return myIconOnTheRight;
   }
@@ -408,7 +405,7 @@ public class SimpleColoredComponent extends JComponent implements Accessible, Co
         width += myIcon.getIconWidth() + myIconTextGap;
       }
 
-      final Insets borderInsets = myBorder != null ? myBorder.getBorderInsets(this) : JBUI.emptyInsets();
+      final Insets borderInsets = myBorder != null ? myBorder.getBorderInsets(this) : JBInsets.emptyInsets();
       width += borderInsets.left;
 
       Font font = getBaseFont();
@@ -436,7 +433,7 @@ public class SimpleColoredComponent extends JComponent implements Accessible, Co
     final FontMetrics metrics = getFontMetrics(font);
     int textHeight = Math.max(getMinHeight(), metrics.getHeight()); //avoid too narrow rows
 
-    Insets borderInsets = myBorder != null ? myBorder.getBorderInsets(this) : JBUI.emptyInsets();
+    Insets borderInsets = myBorder != null ? myBorder.getBorderInsets(this) : JBInsets.emptyInsets();
     textHeight += borderInsets.top + borderInsets.bottom;
 
     height += myIcon == null ? textHeight : Math.max(myIcon.getIconHeight(), textHeight);
@@ -486,7 +483,7 @@ public class SimpleColoredComponent extends JComponent implements Accessible, Co
   }
 
   @NotNull
-  private Font getBaseFont() {
+  protected Font getBaseFont() {
     Font font = getFont();
     if (font == null) font = StartupUiUtil.getLabelFont();
     return font;
@@ -531,36 +528,44 @@ public class SimpleColoredComponent extends JComponent implements Accessible, Co
   }
 
   private static float getFragmentWidth(@NotNull ColoredFragment fragment, Font font, FontRenderContext frc) {
-    return fragment.getAndCacheRenderer(font, frc).getWidth();
+    WidthKey key = new WidthKey(fragment.text, fragment.attributes, font, frc);
+    Float result;
+    synchronized (ourWidthCache) {
+      result = ourWidthCache.get(key);
+      if (result != null) {
+        return result;
+      }
+      result = fragment.getAndCacheRenderer(font, frc).getWidth();
+      ourWidthCache.put(key, result);
+    }
+    return result;
   }
 
   @NotNull
   private static TextLayout createTextLayout(String text, Font basefont, FontRenderContext fontRenderContext) {
     AttributedString string = new AttributedString(text);
-    int start = 0;
-    int end = text.length();
-    AttributedCharacterIterator it = string.getIterator(new AttributedCharacterIterator.Attribute[0], start, end);
+    int length = text.length();
     Font currentFont = basefont;
-    int currentIndex = start;
-    for(char c = it.first(); c != CharacterIterator.DONE; c = it.next()) {
+    int currentIndex = 0;
+    for(int pos = 0; pos < length; pos = text.offsetByCodePoints(pos, 1)) {
+      int codePoint = text.codePointAt(pos);
       Font font = basefont;
-      if (!font.canDisplay(c)) {
+      if (!font.canDisplay(codePoint)) {
         for (SuitableFontProvider provider : SuitableFontProvider.EP_NAME.getExtensionsIfPointIsRegistered()) {
-          font = provider.getFontAbleToDisplay(c, basefont.getSize(), basefont.getStyle(), basefont.getFamily());
+          font = provider.getFontAbleToDisplay(codePoint, basefont.getSize(), basefont.getStyle(), basefont.getFamily());
           if (font != null) break;
         }
       }
-      int i = it.getIndex();
       if (!Comparing.equal(currentFont, font)) {
-        if (i > currentIndex) {
-          string.addAttribute(TextAttribute.FONT, currentFont, currentIndex, i);
+        if (pos > currentIndex) {
+          string.addAttribute(TextAttribute.FONT, currentFont, currentIndex, pos);
         }
         currentFont = font;
-        currentIndex = i;
+        currentIndex = pos;
       }
     }
-    if (currentIndex < end) {
-      string.addAttribute(TextAttribute.FONT, currentFont, currentIndex, end);
+    if (currentIndex < length) {
+      string.addAttribute(TextAttribute.FONT, currentFont, currentIndex, length);
     }
     return new TextLayout(string.getIterator(), fontRenderContext);
   }
@@ -577,7 +582,7 @@ public class SimpleColoredComponent extends JComponent implements Accessible, Co
    * @return the index of the fragment, {@link #FRAGMENT_ICON} if the icon is at the offset, or -1 if nothing is there.
    */
   public int findFragmentAt(int x) {
-    float curX = myIpad.left;
+    float curX = myIpad.left; //added even if no icon, see com.intellij.ui.SimpleColoredComponent.doPaintText
     if (myBorder != null) {
       curX += myBorder.getBorderInsets(this).left;
     }
@@ -620,7 +625,7 @@ public class SimpleColoredComponent extends JComponent implements Accessible, Co
     }
 
     if (myIcon != null && myIconOnTheRight) {
-      curX += myIconTextGap;
+      curX += myIconTextGap + myIpad.left;
       if (x >= curX && x < curX + myIcon.getIconWidth()) {
         return FRAGMENT_ICON;
       }
@@ -841,7 +846,8 @@ public class SimpleColoredComponent extends JComponent implements Accessible, Co
           doPaintFragmentBackground(g, i, bgColor, (int)offset, 0, (int)fragmentWidth, height);
         }
 
-        Color color = isEnabled() ? getActiveTextColor(attributes.getFgColor()) : UIUtil.getInactiveTextColor();
+        Color color;
+        color = isEnabled() ? getActiveTextColor(attributes.getFgColor()) : NamedColorUtil.getInactiveTextColor();
         g.setColor(color);
 
         final int fragmentAlignment = fragment.alignment;
@@ -1045,15 +1051,6 @@ public class SimpleColoredComponent extends JComponent implements Accessible, Co
     return 0;
   }
 
-  /**
-   * @deprecated and won't be used anymore
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
-  protected boolean shouldDrawMacShadow() {
-    return false;
-  }
-
   protected boolean shouldDrawDimmed() {
     return false;
   }
@@ -1102,7 +1099,7 @@ public class SimpleColoredComponent extends JComponent implements Accessible, Co
 
   public static int getTextBaseLine(@NotNull FontMetrics metrics, final int height) {
     // adding leading to ascent, just like in editor (leads to bad presentation for certain fonts with Oracle JDK, see IDEA-167541)
-    return (height - metrics.getHeight()) / 2 + metrics.getAscent() +
+    return (height - metrics.getHeight() + 1) / 2 + metrics.getAscent() +
            (SystemInfo.isJetBrainsJvm ? metrics.getLeading() : 0);
   }
 
@@ -1415,6 +1412,49 @@ public class SimpleColoredComponent extends JComponent implements Accessible, Co
     @Override
     public void draw(Graphics2D g2, float x, float y) {
       g2.drawString(myText, x, y);
+    }
+  }
+
+  private static class WidthKey {
+    private final String text;
+    private final Font font;
+    private final FontRenderContext frc;
+    private final int style;
+
+    private WidthKey(@NotNull String text,
+                     @NotNull SimpleTextAttributes attributes,
+                     Font font,
+                     FontRenderContext frc) {
+      this.text = text;
+      this.font = font;
+      this.frc = frc;
+      // colors in attributes are mutable, ignore them since they don't affect text width
+      this.style = attributes.getStyle();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+      WidthKey key = (WidthKey)o;
+      return style == key.style &&
+             Objects.equals(text, key.text) &&
+             Objects.equals(font, key.font) &&
+             Objects.equals(frc, key.frc);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(text, font, frc, style);
+    }
+
+    @Override
+    public String toString() {
+      return "WidthKey{text='" + text + '\'' +
+             ", font=" + font +
+             ", frc=" + frc +
+             ", style=" + style +
+             '}';
     }
   }
 }

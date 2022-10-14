@@ -15,16 +15,20 @@ import com.intellij.workspaceModel.ide.impl.legacyBridge.library.ProjectLibraryT
 import com.intellij.workspaceModel.ide.impl.legacyBridge.library.ProjectLibraryTableBridgeImpl.Companion.mutableLibraryMap
 import com.intellij.workspaceModel.ide.legacyBridge.ProjectModifiableLibraryTableBridge
 import com.intellij.workspaceModel.storage.CachedValue
-import com.intellij.workspaceModel.storage.WorkspaceEntityStorage
-import com.intellij.workspaceModel.storage.WorkspaceEntityStorageBuilder
-import com.intellij.workspaceModel.storage.bridgeEntities.*
+import com.intellij.workspaceModel.storage.EntityStorage
+import com.intellij.workspaceModel.storage.MutableEntityStorage
+import com.intellij.workspaceModel.storage.bridgeEntities.addLibraryEntity
+import com.intellij.workspaceModel.storage.bridgeEntities.addLibraryPropertiesEntity
+import com.intellij.workspaceModel.storage.bridgeEntities.api.LibraryEntity
+import com.intellij.workspaceModel.storage.bridgeEntities.api.LibraryId
+import com.intellij.workspaceModel.storage.bridgeEntities.api.LibraryTableId
 import org.jetbrains.jps.model.serialization.library.JpsLibraryTableSerializer
 
 internal class ProjectModifiableLibraryTableBridgeImpl(
-  originalStorage: WorkspaceEntityStorage,
+  originalStorage: EntityStorage,
   private val libraryTable: ProjectLibraryTableBridgeImpl,
   private val project: Project,
-  diff: WorkspaceEntityStorageBuilder = WorkspaceEntityStorageBuilder.from(originalStorage),
+  diff: MutableEntityStorage = MutableEntityStorage.from(originalStorage),
   cacheStorageResult: Boolean = true
 ) : LegacyBridgeModifiableBase(diff, cacheStorageResult), ProjectModifiableLibraryTableBridge {
 
@@ -106,7 +110,7 @@ internal class ProjectModifiableLibraryTableBridgeImpl(
     modelIsCommittedOrDisposed = true
     val storage = WorkspaceModel.getInstance(project).entityStorage.current
     myAddedLibraries.forEach { library ->
-      if (storage.resolve(library.libraryId) != null) {
+      if (library.libraryId in storage) {
         // it may happen that actual library table already has a library with such name (e.g. when multiple projects are imported in parallel)
         // in such case we need to skip the new library to avoid exceptions.
         diff.removeEntity(diff.libraryMap.getEntities(library).first())
@@ -132,5 +136,5 @@ internal class ProjectModifiableLibraryTableBridgeImpl(
     myAddedLibraries.clear()
   }
 
-  override fun isChanged(): Boolean = !diff.isEmpty()
+  override fun isChanged(): Boolean = diff.hasChanges()
 }

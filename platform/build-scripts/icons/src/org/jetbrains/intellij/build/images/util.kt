@@ -22,10 +22,8 @@ internal val File.children: List<File>
 internal fun isImage(file: Path, iconsOnly: Boolean): Boolean {
   return if (iconsOnly) isIcon(file) else isImage(file)
 }
-
-private val androidIcons by lazy {
-  Paths.get(PathManager.getCommunityHomePath(), "android/artwork/resources")
-}
+// allow other project path setups to generate Android Icons
+var androidIcons: Path = Paths.get(PathManager.getCommunityHomePath(), "android/artwork/resources")
 
 internal fun isIcon(file: Path): Boolean {
   if (!isImage(file)) {
@@ -92,7 +90,7 @@ internal fun md5(file: Path): String {
 }
 
 internal enum class ImageType(private val suffix: String) {
-  BASIC(""), RETINA("@2x"), DARCULA("_dark"), RETINA_DARCULA("@2x_dark");
+  BASIC(""), RETINA("@2x"), DARCULA("_dark"), RETINA_DARCULA("@2x_dark"), STROKE("_stroke");
 
   companion object {
     fun getBasicName(suffix: String, prefix: String): String {
@@ -108,6 +106,7 @@ internal enum class ImageType(private val suffix: String) {
         name.endsWith(RETINA_DARCULA.suffix) -> RETINA_DARCULA
         name.endsWith(RETINA.suffix) -> RETINA
         name.endsWith(DARCULA.suffix) -> DARCULA
+        name.endsWith(STROKE.suffix) -> STROKE
         else -> BASIC
       }
     }

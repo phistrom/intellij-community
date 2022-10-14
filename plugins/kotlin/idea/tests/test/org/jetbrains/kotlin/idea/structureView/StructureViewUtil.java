@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.structureView;
 
@@ -26,12 +26,12 @@ public class StructureViewUtil {
     @Nullable
     protected static String toString(@Nullable Object node, @Nullable Queryable.PrintInfo printInfo) {
         if (node instanceof AbstractTreeNode) {
-            return ((AbstractTreeNode) node).toTestString(printInfo);
+            return ((AbstractTreeNode<?>) node).toTestString(printInfo);
         }
 
         FilteringTreeStructure.FilteringNode filteringNode = tryCast(node, FilteringTreeStructure.FilteringNode.class);
         if (filteringNode != null && filteringNode.getDelegate() instanceof AbstractTreeNode) {
-            return ((AbstractTreeNode) filteringNode.getDelegate()).toTestString(printInfo);
+            return ((AbstractTreeNode<?>) filteringNode.getDelegate()).toTestString(printInfo);
         }
 
         if (node == null) {

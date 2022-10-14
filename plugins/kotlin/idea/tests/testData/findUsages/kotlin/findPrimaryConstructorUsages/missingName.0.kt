@@ -5,4 +5,6 @@ class <caret>() {
 
 }
 
+// DISABLE-ERRORS
 // FIR_IGNORE
+// FIR_COMPARISON

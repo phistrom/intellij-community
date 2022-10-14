@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.tools.projectWizard.moduleConfigurators
 
@@ -19,7 +19,7 @@ import org.jetbrains.kotlin.tools.projectWizard.moduleConfigurators.JSConfigurat
 import org.jetbrains.kotlin.tools.projectWizard.moduleConfigurators.JSConfigurator.Companion.kind
 import org.jetbrains.kotlin.tools.projectWizard.moduleConfigurators.JsBrowserBasedConfigurator.Companion.browserSubTarget
 import org.jetbrains.kotlin.tools.projectWizard.moduleConfigurators.JsNodeBasedConfigurator.Companion.nodejsSubTarget
-import org.jetbrains.kotlin.tools.projectWizard.moduleConfigurators.ModuleConfiguratorWithTests.Companion.testFramework
+import org.jetbrains.kotlin.tools.projectWizard.moduleConfigurators.JvmModuleConfigurator.Companion.testFramework
 import org.jetbrains.kotlin.tools.projectWizard.plugins.buildSystem.buildSystemType
 import org.jetbrains.kotlin.tools.projectWizard.plugins.buildSystem.isGradle
 import org.jetbrains.kotlin.tools.projectWizard.plugins.kotlin.ModuleSubType
@@ -69,7 +69,7 @@ internal fun Module.createTargetAccessIr(
 ) =
     TargetAccessIR(
         moduleSubType,
-        name.takeIf { it != moduleSubType.name },
+        name.takeIf { it != moduleSubType.toString() },
         additionalParams.filterNotNull()
     )
 
@@ -81,15 +81,15 @@ enum class JsTargetKind(override val text: String) : DisplayableSettingItem {
     APPLICATION(KotlinNewProjectWizardBundle.message("module.configurator.js.target.settings.kind.application"))
 }
 
-enum class JsCompiler(override val text: String) : DisplayableSettingItem {
-    IR("IR"),
-    LEGACY("LEGACY"),
-    BOTH("BOTH")
+enum class JsCompiler(override val text: String, val scriptValue: String) : DisplayableSettingItem {
+    IR(KotlinNewProjectWizardBundle.message("module.configurator.js.target.settings.compiler.ir"), "IR"),
+    LEGACY(KotlinNewProjectWizardBundle.message("module.configurator.js.target.settings.compiler.legacy"), "LEGACY"),
+    BOTH(KotlinNewProjectWizardBundle.message("module.configurator.js.target.settings.compiler.both"), "BOTH")
 }
 
 abstract class AbstractBrowserTargetConfigurator: JsTargetConfigurator, ModuleConfiguratorWithTests {
     override fun getConfiguratorSettings(): List<ModuleConfiguratorSetting<*, *>> =
-        super<ModuleConfiguratorWithTests>.getConfiguratorSettings() + super<JsTargetConfigurator>.getConfiguratorSettings()
+         super<JsTargetConfigurator>.getConfiguratorSettings()
 
     override val text = KotlinNewProjectWizardBundle.message("module.configurator.js.browser")
 
@@ -152,6 +152,8 @@ object CommonTargetConfigurator : TargetConfiguratorWithTests(), SimpleTargetCon
     override val text: String = KotlinNewProjectWizardBundle.message("module.configurator.common")
 
     override fun defaultTestFramework(): KotlinTestFramework = KotlinTestFramework.COMMON
+
+    override fun getConfiguratorSettings(): List<ModuleConfiguratorSetting<*, *>> = emptyList()
 }
 
 object JvmTargetConfigurator : JvmModuleConfigurator,
@@ -181,7 +183,7 @@ object JvmTargetConfigurator : JvmModuleConfigurator,
                     "withJava"()
                 }
             }
-            val testFramework = inContextOfModuleConfigurator(module) { testFramework.reference.settingValue }
+            val testFramework = inContextOfModuleConfigurator(module) { getTestFramework(module) }
             if (testFramework != KotlinTestFramework.NONE) {
                 testFramework.usePlatform?.let { usePlatform ->
                     "testRuns[\"test\"].executionTask.configure" {

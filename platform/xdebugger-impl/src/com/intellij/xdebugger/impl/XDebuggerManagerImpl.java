@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.xdebugger.impl;
 
 import com.intellij.AppTopics;
@@ -29,15 +29,15 @@ import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.components.StoragePathMacros;
-import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.Editor;
-import com.intellij.openapi.editor.EditorFactory;
+import com.intellij.openapi.editor.*;
 import com.intellij.openapi.editor.event.*;
 import com.intellij.openapi.editor.ex.EditorEx;
+import com.intellij.openapi.editor.ex.EditorGutterComponentEx;
 import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.editor.impl.EditorImpl;
 import com.intellij.openapi.editor.markup.GutterIconRenderer;
 import com.intellij.openapi.editor.markup.RangeHighlighter;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.FileDocumentManagerListener;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.FileEditorManagerListener;
@@ -46,17 +46,20 @@ import com.intellij.openapi.ui.popup.Balloon;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.IdeGlassPaneUtil;
 import com.intellij.openapi.wm.ToolWindowId;
+import com.intellij.ui.ExperimentalUI;
 import com.intellij.ui.HintHint;
 import com.intellij.ui.awt.RelativePoint;
+import com.intellij.util.DocumentUtil;
+import com.intellij.util.ObjectUtils;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.xdebugger.*;
-import com.intellij.xdebugger.breakpoints.XBreakpoint;
-import com.intellij.xdebugger.breakpoints.XBreakpointListener;
-import com.intellij.xdebugger.breakpoints.XLineBreakpoint;
+import com.intellij.xdebugger.breakpoints.*;
 import com.intellij.xdebugger.impl.actions.XDebuggerActions;
 import com.intellij.xdebugger.impl.breakpoints.XBreakpointBase;
 import com.intellij.xdebugger.impl.breakpoints.XBreakpointManagerImpl;
+import com.intellij.xdebugger.impl.breakpoints.XBreakpointUtil;
 import com.intellij.xdebugger.impl.evaluate.quick.common.ValueLookupManager;
 import com.intellij.xdebugger.impl.pinned.items.XDebuggerPinToTopManager;
 import com.intellij.xdebugger.impl.settings.XDebuggerSettingManagerImpl;
@@ -64,17 +67,14 @@ import com.intellij.xdebugger.impl.ui.ExecutionPointHighlighter;
 import com.intellij.xdebugger.impl.ui.XDebugSessionTab;
 import com.intellij.xdebugger.ui.DebuggerColors;
 import one.util.streamex.StreamEx;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.MouseEvent;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 @State(name = "XDebuggerManager", storages = @Storage(StoragePathMacros.WORKSPACE_FILE))
@@ -82,8 +82,7 @@ public final class XDebuggerManagerImpl extends XDebuggerManager implements Pers
   /**
    * @deprecated Use {@link #getNotificationGroup()}
    */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval
+  @Deprecated(forRemoval = true)
   public static final NotificationGroup NOTIFICATION_GROUP = getNotificationGroup();
 
   private final Project myProject;
@@ -181,9 +180,11 @@ public final class XDebuggerManagerImpl extends XDebuggerManager implements Pers
     });
 
     DebuggerEditorListener listener = new DebuggerEditorListener();
+    BreakpointPromoterEditorListener bpPromoter = new BreakpointPromoterEditorListener();
     EditorEventMulticaster eventMulticaster = EditorFactory.getInstance().getEventMulticaster();
     eventMulticaster.addEditorMouseMotionListener(listener, this);
     eventMulticaster.addEditorMouseListener(listener, this);
+    eventMulticaster.addEditorMouseMotionListener(bpPromoter, this);
   }
 
   @Override
@@ -406,11 +407,74 @@ public final class XDebuggerManagerImpl extends XDebuggerManager implements Pers
     return NotificationGroupManager.getInstance().getNotificationGroup("Debugger messages");
   }
 
+  private final class BreakpointPromoterEditorListener implements EditorMouseMotionListener, EditorMouseListener {
+    private XSourcePositionImpl myLastPosition = null;
+    private Icon myLastIcon = null;
+
+    @Override
+    public void mouseMoved(@NotNull EditorMouseEvent e) {
+      if (!ExperimentalUI.isNewUI()) return;
+      Editor editor = e.getEditor();
+      if (editor.getProject() != myProject || editor.getEditorKind() != EditorKind.MAIN_EDITOR) return;
+      EditorGutter editorGutter = editor.getGutter();
+      if (editorGutter instanceof EditorGutterComponentEx) {
+        EditorGutterComponentEx gutter = (EditorGutterComponentEx)editorGutter;
+        if (e.getArea() == EditorMouseEventArea.LINE_NUMBERS_AREA) {
+          int line = EditorUtil.yToLogicalLineNoCustomRenderers(editor, e.getMouseEvent().getY());
+          Document document = editor.getDocument();
+          if (DocumentUtil.isValidLine(line, document)) {
+            XSourcePositionImpl position = XSourcePositionImpl.create(FileDocumentManager.getInstance().getFile(document), line);
+            if (position != null) {
+              if (myLastPosition == null || !myLastPosition.getFile().equals(position.getFile()) || myLastPosition.getLine() != line) {
+                List<XLineBreakpointType> types = XBreakpointUtil.getAvailableLineBreakpointTypes(myProject, position, editor);
+                myLastPosition = position;
+                myLastIcon = ObjectUtils.doIfNotNull(ContainerUtil.getFirstItem(types), XBreakpointType::getEnabledIcon);
+              }
+              if (myLastIcon != null) {
+                gutter.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                updateActiveLineNumberIcon(gutter, myLastIcon, e.getLogicalPosition().line);
+              }
+              else {
+                updateActiveLineNumberIcon(gutter, null, null);
+              }
+              return;
+            }
+          }
+        }
+        myLastPosition = null;
+        myLastIcon = null;
+        updateActiveLineNumberIcon(gutter, null, null);
+      }
+    }
+
+    private void updateActiveLineNumberIcon(@NotNull EditorGutterComponentEx gutter, @Nullable Icon icon, @Nullable Integer line) {
+      if (gutter.getClientProperty("editor.gutter.context.menu") != null) return;
+      boolean requireRepaint = false;
+      if (gutter.getClientProperty("line.number.hover.icon") != icon) {
+        gutter.putClientProperty("line.number.hover.icon", icon);
+        gutter.putClientProperty("line.number.hover.icon.context.menu", icon == null ? null
+                                                                                     : ActionManager.getInstance().getAction("XDebugger.Hover.Breakpoint.Context.Menu"));
+        requireRepaint = true;
+      }
+      if (!Objects.equals(gutter.getClientProperty("active.line.number"), line)) {
+        gutter.putClientProperty("active.line.number", line);
+        requireRepaint = true;
+      }
+      if (requireRepaint) {
+        gutter.repaint();
+      }
+    }
+  }
+
   private final class DebuggerEditorListener implements EditorMouseMotionListener, EditorMouseListener {
     RangeHighlighter myCurrentHighlighter;
 
     boolean isEnabled(@NotNull EditorMouseEvent e) {
       Editor editor = e.getEditor();
+      if (ExperimentalUI.isNewUI()) {
+        //todo[kb] make it possible to do run to cursor by clicking on the gutter
+        return false;
+      }
       if (e.getArea() != EditorMouseEventArea.LINE_NUMBERS_AREA ||
           editor.getProject() != myProject ||
           !EditorUtil.isRealFileEditor(editor) ||

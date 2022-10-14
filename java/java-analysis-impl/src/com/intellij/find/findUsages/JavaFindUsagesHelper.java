@@ -138,7 +138,7 @@ public final class JavaFindUsagesHelper {
       if (!addClassesUsages((PsiPackage)element, (JavaPackageFindUsagesOptions)options, processor)) return false;
     }
 
-    if (options instanceof JavaClassFindUsagesOptions) {
+    if (options instanceof JavaClassFindUsagesOptions && element instanceof PsiClass) {
       JavaClassFindUsagesOptions classOptions = (JavaClassFindUsagesOptions)options;
       PsiClass psiClass = (PsiClass)element;
       PsiManager manager = ReadAction.compute(psiClass::getManager);
@@ -491,7 +491,7 @@ public final class JavaFindUsagesHelper {
   private static boolean addResult(@NotNull PsiReference ref, @NotNull FindUsagesOptions options, @NotNull Processor<? super UsageInfo> processor) {
     if (acceptUsage(ref.getElement(), options)) {
       TextRange rangeInElement = ref.getRangeInElement();
-      return processor.process(new UsageInfo(ref.getElement(), rangeInElement.getStartOffset(), rangeInElement.getEndOffset(), false));
+      return processor.process(new UsageInfo(ref.getElement(), rangeInElement, false));
     }
     return true;
   }

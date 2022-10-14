@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.debugger.engine;
 
 import com.intellij.Patches;
@@ -109,7 +109,7 @@ public abstract class SuspendContextImpl extends XSuspendContext implements Susp
 
   protected abstract void resumeImpl();
 
-  protected void resume(){
+  void resume(boolean callResume) {
     assertNotResumed();
     if (isEvaluating()) {
       LOG.error("Resuming context while evaluating", ThreadDumper.dumpThreadsToString());
@@ -127,8 +127,9 @@ public abstract class SuspendContextImpl extends XSuspendContext implements Susp
       for(SuspendContextCommandImpl cmd = pollPostponedCommand(); cmd != null; cmd = pollPostponedCommand()) {
         cmd.notifyCancelled();
       }
-
-      resumeImpl();
+      if (callResume) {
+        resumeImpl();
+      }
     }
     finally {
       myIsResumed = true;
@@ -203,13 +204,11 @@ public abstract class SuspendContextImpl extends XSuspendContext implements Susp
     if(isEvaluating()) {
       return false;
     }
-    switch(getSuspendPolicy()) {
-      case EventRequest.SUSPEND_ALL:
-        return !isExplicitlyResumed(thread);
-      case EventRequest.SUSPEND_EVENT_THREAD:
-        return thread == getThread();
-    }
-    return false;
+    return switch (getSuspendPolicy()) {
+      case EventRequest.SUSPEND_ALL -> !isExplicitlyResumed(thread);
+      case EventRequest.SUSPEND_EVENT_THREAD -> thread == getThread();
+      default -> false;
+    };
   }
 
   public boolean isEvaluating() {
@@ -298,7 +297,7 @@ public abstract class SuspendContextImpl extends XSuspendContext implements Susp
                  ? getDebugProcess().getVirtualMachineProxy().allThreadsAsync()
                  : CompletableFuture.completedFuture(Collections.emptyList()))
           .thenAccept(tds -> addThreads(tds, THREADS_SUSPEND_AND_NAME_COMPARATOR, true))
-          .exceptionally(DebuggerUtilsAsync::logError);
+          .exceptionally(throwable -> DebuggerUtilsAsync.logError(throwable));
       }
 
       CompletableFuture<Boolean> addThreads(Collection<ThreadReferenceProxyImpl> threads, @Nullable Comparator<? super JavaExecutionStack> comparator, boolean last) {

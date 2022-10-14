@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.script
 
@@ -6,7 +6,7 @@ import com.intellij.codeInsight.daemon.DaemonAnalyzerTestCase
 import com.intellij.testFramework.exceptionCases.AbstractExceptionCase
 import org.jetbrains.kotlin.idea.core.script.ScriptDefinitionsManager
 import org.jetbrains.kotlin.idea.core.script.settings.KotlinScriptingSettings
-import org.jetbrains.kotlin.test.InTextDirectivesUtils
+import org.jetbrains.kotlin.idea.test.InTextDirectivesUtils
 import org.junit.ComparisonFailure
 
 @DaemonAnalyzerTestCase.CanChangeDocumentDuringHighlighting
@@ -14,13 +14,9 @@ abstract class AbstractScriptDefinitionsOrderTest : AbstractScriptConfigurationT
     fun doTest(unused: String) {
         configureScriptFile(testDataFile())
 
-        assertException(object : AbstractExceptionCase<ComparisonFailure>() {
-            override fun getExpectedExceptionClass(): Class<ComparisonFailure> = ComparisonFailure::class.java
-
-            override fun tryClosure() {
-                checkHighlighting(editor, false, false)
-            }
-        })
+        assertThrows(ComparisonFailure::class.java) {
+            checkHighlighting(editor, false, false)
+        }
 
         val definitions = InTextDirectivesUtils.findStringWithPrefixes(myFile.text, "// SCRIPT DEFINITIONS: ")
             ?.split(";")

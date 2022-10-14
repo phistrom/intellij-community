@@ -20,12 +20,12 @@ import com.intellij.ui.navigation.History;
 import com.intellij.ui.navigation.Place;
 import com.intellij.ui.treeStructure.Tree;
 import com.intellij.util.PlatformIcons;
+import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.tree.TreeUtil;
 import com.intellij.util.xmlb.XmlSerializerUtil;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -186,8 +186,9 @@ public abstract class MasterDetailsComponent implements Configurable, DetailsCom
         //do nothing
       }
 
+      @RequiresEdt
       @Override
-      protected void scrollToSource(Component tree) {
+      protected void scrollToSource(@NotNull Component tree) {
         updateSelectionFromTree();
       }
 
@@ -788,8 +789,7 @@ public abstract class MasterDetailsComponent implements Configurable, DetailsCom
     /**
      * @deprecated Use {@link #MyDeleteAction(Predicate)}
      */
-    @ApiStatus.ScheduledForRemoval(inVersion = "2022.1")
-    @Deprecated
+    @Deprecated(forRemoval = true)
     public MyDeleteAction(@Nullable Condition<Object[]> availableCondition) {
       this(availableCondition == null ? null : (Predicate<Object[]>)availableCondition::value);
     }
@@ -819,6 +819,11 @@ public abstract class MasterDetailsComponent implements Configurable, DetailsCom
         }
       }
       presentation.setEnabled(true);
+    }
+
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+      return ActionUpdateThread.EDT;
     }
 
     @Override

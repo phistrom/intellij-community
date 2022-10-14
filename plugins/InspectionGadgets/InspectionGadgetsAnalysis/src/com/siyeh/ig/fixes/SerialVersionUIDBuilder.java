@@ -104,17 +104,15 @@ public final class SerialVersionUIDBuilder extends JavaRecursiveElementVisitor {
 
     staticInitializers = new ArrayList<>(1);
     final PsiClassInitializer[] initializers = clazz.getInitializers();
-    if (initializers.length > 0) {
-      for (final PsiClassInitializer initializer : initializers) {
-        final PsiModifierList modifierList =
-          initializer.getModifierList();
-        if (modifierList != null &&
-            modifierList.hasModifierProperty(PsiModifier.STATIC)) {
-          final MemberSignature initializerSignature =
-            MemberSignature.getStaticInitializerMemberSignature();
-          staticInitializers.add(initializerSignature);
-          break;
-        }
+    for (final PsiClassInitializer initializer : initializers) {
+      final PsiModifierList modifierList =
+        initializer.getModifierList();
+      if (modifierList != null &&
+          modifierList.hasModifierProperty(PsiModifier.STATIC)) {
+        final MemberSignature initializerSignature =
+          MemberSignature.getStaticInitializerMemberSignature();
+        staticInitializers.add(initializerSignature);
+        break;
       }
     }
     if (staticInitializers.isEmpty()) {
@@ -296,7 +294,7 @@ public final class SerialVersionUIDBuilder extends JavaRecursiveElementVisitor {
   }
 
   @Override
-  public void visitAssertStatement(PsiAssertStatement statement) {
+  public void visitAssertStatement(@NotNull PsiAssertStatement statement) {
     super.visitAssertStatement(statement);
     if (assertStatement) {
       return;
@@ -328,7 +326,7 @@ public final class SerialVersionUIDBuilder extends JavaRecursiveElementVisitor {
   }
 
   @Override
-  public void visitReferenceElement(PsiJavaCodeReferenceElement reference) {
+  public void visitReferenceElement(@NotNull PsiJavaCodeReferenceElement reference) {
     super.visitReferenceElement(reference);
     final PsiElement parentClass = ClassUtils.getContainingClass(reference);
     if (reference.getParent() instanceof PsiTypeElement) {

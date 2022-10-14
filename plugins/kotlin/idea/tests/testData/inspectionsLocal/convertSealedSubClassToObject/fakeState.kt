@@ -1,5 +1,5 @@
-// FIX: Convert sealed sub-class to object
-// WITH_RUNTIME
+// FIX: Convert sealed subclass to object
+// WITH_STDLIB
 
 abstract class Base {
     var s: String

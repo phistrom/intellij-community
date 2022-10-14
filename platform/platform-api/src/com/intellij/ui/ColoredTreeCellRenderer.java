@@ -2,6 +2,7 @@
 package com.intellij.ui;
 
 import com.intellij.ide.util.treeView.AbstractTreeUi;
+import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.ui.render.RenderingUtil;
@@ -9,6 +10,7 @@ import com.intellij.ui.scale.JBUIScale;
 import com.intellij.ui.speedSearch.SpeedSearchUtil;
 import com.intellij.util.ui.EmptyIcon;
 import com.intellij.util.ui.UIUtil;
+import com.intellij.util.ui.accessibility.AccessibleContextDelegateWithContextMenu;
 import com.intellij.util.ui.tree.WideSelectionTreeUI;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
@@ -18,9 +20,6 @@ import javax.swing.*;
 import javax.swing.tree.TreeCellRenderer;
 import java.awt.*;
 
-/**
- * @author Vladimir Kondratyev
- */
 public abstract class ColoredTreeCellRenderer extends SimpleColoredComponent implements TreeCellRenderer {
   private static final Logger LOG = Logger.getInstance(ColoredTreeCellRenderer.class);
 
@@ -122,7 +121,7 @@ public abstract class ColoredTreeCellRenderer extends SimpleColoredComponent imp
     customizeCellRenderer(tree, value, selected, expanded, leaf, row, hasFocus);
 
     if (!myUsedCustomSpeedSearchHighlighting && !AbstractTreeUi.isLoadingNode(value)) {
-      SpeedSearchUtil.applySpeedSearchHighlightingFiltered(tree, value, this, true, selected);
+      SpeedSearchUtil.applySpeedSearchHighlightingFiltered(tree, value, (SimpleColoredComponent)this, true, selected);
     }
   }
 
@@ -193,7 +192,17 @@ public abstract class ColoredTreeCellRenderer extends SimpleColoredComponent imp
   @Override
   public AccessibleContext getAccessibleContext() {
     if (accessibleContext == null) {
-      accessibleContext = new AccessibleColoredTreeCellRenderer();
+      accessibleContext = new AccessibleContextDelegateWithContextMenu(new AccessibleColoredTreeCellRenderer()) {
+        @Override
+        protected void doShowContextMenu() {
+          ActionManager.getInstance().tryToExecute(ActionManager.getInstance().getAction("ShowPopupMenu"), null, null, null, true);
+        }
+
+        @Override
+        protected Container getDelegateParent() {
+          return getParent();
+        }
+      };
     }
     return accessibleContext;
   }

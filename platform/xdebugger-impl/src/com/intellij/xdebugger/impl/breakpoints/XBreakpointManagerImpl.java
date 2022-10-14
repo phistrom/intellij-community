@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.xdebugger.impl.breakpoints;
 
 import com.intellij.configurationStore.XmlSerializer;
@@ -101,6 +101,8 @@ public final class XBreakpointManagerImpl implements XBreakpointManager {
     XBreakpointType.EXTENSION_POINT_NAME.addExtensionPointListener(new ExtensionPointListener<>() {
       @Override
       public void extensionAdded(@NotNull XBreakpointType type, @NotNull PluginDescriptor pluginDescriptor) {
+        //the project may be 'temporarily disposed' in tests if this class was created from a light test
+        if (project.isDisposed()) return;
         //noinspection unchecked
         WriteAction.run(() -> addDefaultBreakpoint(type));
       }
@@ -395,8 +397,7 @@ public final class XBreakpointManagerImpl implements XBreakpointManager {
 
   @Override
   public boolean isDefaultBreakpoint(@NotNull XBreakpoint<?> breakpoint) {
-    //noinspection SuspiciousMethodCalls
-    return myDefaultBreakpoints.values().stream().anyMatch(s -> s.contains(breakpoint));
+    return ContainerUtil.exists(myDefaultBreakpoints.values(), s -> s.contains(breakpoint));
   }
 
   private <T extends XBreakpointProperties> EventDispatcher<XBreakpointListener> getOrCreateDispatcher(final XBreakpointType<?,T> type) {
@@ -456,8 +457,7 @@ public final class XBreakpointManagerImpl implements XBreakpointManager {
     presentation.setErrorMessage(errorMessage);
     presentation.setIcon(icon);
     lineBreakpoint.setCustomizedPresentation(presentation);
-    myLineBreakpointManager.queueBreakpointUpdate(breakpoint);
-    fireBreakpointPresentationUpdated(breakpoint, null);
+    myLineBreakpointManager.queueBreakpointUpdate(breakpoint, () -> fireBreakpointPresentationUpdated(breakpoint, null));
   }
 
   @NotNull
@@ -505,7 +505,7 @@ public final class XBreakpointManagerImpl implements XBreakpointManager {
       return false;
     }
 
-    BreakpointState defaultState = ((XBreakpointBase)defaultBreakpoint).getState();
+    BreakpointState defaultState = ((XBreakpointBase<?, ?, ?>)defaultBreakpoint).getState();
     return statesAreDifferent(state, defaultState, false);
   }
 
@@ -694,7 +694,7 @@ public final class XBreakpointManagerImpl implements XBreakpointManager {
     }
 
     boolean isRestorable() {
-      return !(myBreakpoint instanceof XLineBreakpointImpl) || ((XLineBreakpointImpl)myBreakpoint).getFile() != null;
+      return !(myBreakpoint instanceof XLineBreakpointImpl) || ((XLineBreakpointImpl<?>)myBreakpoint).getFile() != null;
     }
 
     @Nullable

@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.refactoring.move.moveDeclarations
 
@@ -10,13 +10,14 @@ import com.intellij.usageView.UsageViewBundle
 import com.intellij.usageView.UsageViewDescriptor
 import com.intellij.usageView.UsageViewUtil
 import org.jetbrains.annotations.Nls
-import org.jetbrains.kotlin.idea.KotlinBundle
+import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 
 internal class MoveFilesWithDeclarationsViewDescriptor(
     private val myElementsToMove: Array<PsiElement>,
     newParent: PsiDirectory
 ) : UsageViewDescriptor {
-    private var myProcessedElementsHeader: String? = null
+    @Nls
+    private val myProcessedElementsHeader: String
     @Nls
     private val myCodeReferencesText: String
 
@@ -47,7 +48,6 @@ internal class MoveFilesWithDeclarationsViewDescriptor(
         return myCodeReferencesText + UsageViewBundle.getReferencesString(usagesCount, filesCount)
     }
 
-    override fun getCommentReferencesText(usagesCount: Int, filesCount: Int): String? {
-        return RefactoringBundle.message("comments.elements.header", UsageViewBundle.getOccurencesString(usagesCount, filesCount))
-    }
+    override fun getCommentReferencesText(usagesCount: Int, filesCount: Int): String =
+        RefactoringBundle.message("comments.elements.header", UsageViewBundle.getOccurencesString(usagesCount, filesCount))
 }

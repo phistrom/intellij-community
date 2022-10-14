@@ -224,6 +224,26 @@ public class PyRenameTest extends PyTestCase {
     renameWithDocStringFormat(DocStringFormat.NUMPY, "bar");
   }
 
+  // PY-16760
+  public void testGoogleDocstringAttributeRenamesWithClassAttribute() {
+    renameWithDocStringFormat(DocStringFormat.GOOGLE, "bar");
+  }
+
+  // PY-28549
+  public void testGoogleDocstringAttributeRenamesWithDataclassClassAttribute() {
+    renameWithDocStringFormat(DocStringFormat.GOOGLE, "bar");
+  }
+
+  // PY-28549
+  public void testGoogleDocstringDataClassParameterRenamesWithClassAttribute() {
+    renameWithDocStringFormat(DocStringFormat.GOOGLE, "bar");
+  }
+
+  // PY-28549
+  public void testGoogleDocstringDataClassParameterRenamesWithInitParameterOverClassAttribute() {
+    renameWithDocStringFormat(DocStringFormat.GOOGLE, "bar");
+  }
+
   // PY-2748
   public void testFormatStringDictLiteral() {
     doUnsupportedOperationTest();
@@ -361,6 +381,21 @@ public class PyRenameTest extends PyTestCase {
   // PY-21937
   public void testRenameBothPyFileAndStub() {
     doMultiFileTest("bar.pyi");
+  }
+
+  // PY-29898
+  public void testRenameDataclassAttributeAndKeywordArgument() {
+    doTest("y");
+  }
+
+  // PY-48012
+  public void testRenameKeywordParameter() {
+    doTest("bar");
+  }
+
+  // PY-55231
+  public void testRenameKeywordArgumentConstructorParameter() {
+    doTest("taram");
   }
 
   private void renameWithDocStringFormat(DocStringFormat format, final String newName) {

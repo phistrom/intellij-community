@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.nj2k.tree
 
@@ -9,6 +9,10 @@ import kotlin.reflect.KProperty0
 
 inline fun <reified T : JKElement> JKElement.parentOfType(): T? {
     return generateSequence(parent) { it.parent }.filterIsInstance<T>().firstOrNull()
+}
+
+fun JKElement.parents(): Sequence<JKElement> {
+    return generateSequence(parent) { it.parent }
 }
 
 private fun <T : JKElement> KProperty0<Any>.detach(element: T) {

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.roots;
 
 import com.intellij.openapi.fileTypes.FileTypeRegistry;
@@ -18,6 +18,11 @@ import java.util.List;
  */
 @ApiStatus.NonExtendable
 public interface ProjectFileIndex extends FileIndex {
+
+  /**
+   * @deprecated use {@link ProjectFileIndex#getInstance(Project)} instead
+   */
+  @Deprecated
   final class SERVICE {
     private SERVICE() { }
 
@@ -30,6 +35,17 @@ public interface ProjectFileIndex extends FileIndex {
   static ProjectFileIndex getInstance(@NotNull Project project) {
     return project.getService(ProjectFileIndex.class);
   }
+
+  /**
+   * Returns {@code true} if {@code file} is located under project content or library roots and not excluded or ignored
+   */
+  boolean isInProject(@NotNull VirtualFile file);
+
+  /**
+   * Returns {@code true} if {@code file} is located under project content or library roots, regardless of whether it's marked as excluded or not,
+   * and returns {@code false} if {@code file} is located outside or it or one of its parent directories is ignored.
+   */
+  boolean isInProjectOrExcluded(@NotNull VirtualFile file);
 
   /**
    * Returns module to which content the specified file belongs or null if the file does not belong to content of any module.
@@ -83,17 +99,19 @@ public interface ProjectFileIndex extends FileIndex {
   VirtualFile getContentRootForFile(@NotNull VirtualFile file, final boolean honorExclusion);
 
   /**
-   * Returns the name of the package corresponding to the specified directory.
-   *
-   * @return the package name, or null if the directory does not correspond to any package.
+   * @deprecated use {@link com.intellij.openapi.roots.PackageIndex#getPackageNameByDirectory(VirtualFile)} from Java plugin instead.
    */
+  @Deprecated
   @Nullable
-  String getPackageNameByDirectory(@NotNull VirtualFile dir); //Q: move to FileIndex?
+  String getPackageNameByDirectory(@NotNull VirtualFile dir);
 
   /**
    * Returns true if {@code file} is a file which belongs to the classes (not sources) of some library which is included into dependencies
    * of some module.
+   * @deprecated name of this method may be misleading, actually it doesn't check that {@code file} has the 'class' extension. 
+   * Use {@link #isInLibraryClasses} with additional {@code !file.isDirectory()} check instead.   
    */
+  @Deprecated
   boolean isLibraryClassFile(@NotNull VirtualFile file);
 
   /**
@@ -124,8 +142,7 @@ public interface ProjectFileIndex extends FileIndex {
    * If you want to check if the file is ignored use {@link FileTypeRegistry#isFileIgnored(VirtualFile)}.
    * If you want to check if the file or one of its parents is ignored use {@link #isUnderIgnored(VirtualFile)}.
    */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @Deprecated(forRemoval = true)
   boolean isIgnored(@NotNull VirtualFile file);
 
   /**

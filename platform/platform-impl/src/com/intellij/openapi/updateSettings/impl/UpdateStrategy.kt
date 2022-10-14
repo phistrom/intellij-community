@@ -6,7 +6,6 @@ import com.intellij.openapi.util.BuildNumber
 import com.intellij.util.containers.MultiMap
 import com.intellij.util.graph.InboundSemiGraph
 import com.intellij.util.graph.impl.ShortestPathFinder
-import org.jetbrains.annotations.ApiStatus
 
 class UpdateStrategy @JvmOverloads constructor(
   private val currentBuild: BuildNumber,
@@ -14,19 +13,6 @@ class UpdateStrategy @JvmOverloads constructor(
   private val settings: UpdateSettings = UpdateSettings.getInstance(),
   private val customization: UpdateStrategyCustomization = UpdateStrategyCustomization.getInstance(),
 ) {
-
-  @Deprecated("Please use `UpdateStrategy(BuildNumber, Product, UpdateSettings)` instead")
-  @ApiStatus.ScheduledForRemoval(inVersion = "2022.2")
-  @Suppress("DEPRECATION")
-  constructor(
-    currentBuild: BuildNumber,
-    updates: UpdatesInfo,
-    settings: UpdateSettings = UpdateSettings.getInstance(),
-  ) : this(
-    currentBuild,
-    updates.product,
-    settings,
-  )
 
   fun checkForUpdates(): PlatformUpdates {
     if (product == null || product.channels.isEmpty()) {
@@ -38,7 +24,7 @@ class UpdateStrategy @JvmOverloads constructor(
 
     return product.channels
              .asSequence()
-             .filter { ch -> ch.status >= selectedChannel }                                            // filters out inapplicable channels
+             .filter { ch -> customization.isChannelApplicableForUpdates(ch, selectedChannel) }        // filters out inapplicable channels
              .sortedBy { ch -> ch.status }                                                             // reorders channels (EAPs first)
              .flatMap { ch -> ch.builds.asSequence().map { build -> build to ch } }                    // maps into a sequence of <build, channel> pairs
              .filter { p -> isApplicable(p.first, ignoredBuilds) }                                     // filters out inapplicable builds
@@ -68,11 +54,14 @@ class UpdateStrategy @JvmOverloads constructor(
       return UpdateChain(listOf(from, newBuild.number), single.size)
     }
 
+    val selectedChannel = settings.selectedChannelStatus
     val upgrades = MultiMap<BuildNumber, BuildNumber>()
     val sizes = mutableMapOf<Pair<BuildNumber, BuildNumber>, Int>()
     val number = Regex("\\d+")
 
-    product.channels.forEach { channel ->
+    product.channels
+      .filter { ch -> customization.canBeUsedForIntermediatePatches(ch, selectedChannel) }
+      .forEach { channel ->
       channel.builds.forEach { build ->
         val toBuild = build.number.withoutProductCode()
         build.patches.forEach { patch ->

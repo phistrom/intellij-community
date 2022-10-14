@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vfs.local
 
 import com.intellij.execution.configurations.GeneralCommandLine
@@ -7,7 +7,6 @@ import com.intellij.openapi.application.runWriteAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.io.FileUtil
-import com.intellij.openapi.util.io.IoTestUtil
 import com.intellij.openapi.util.io.IoTestUtil.*
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtilCore
@@ -124,12 +123,11 @@ class WslFileWatcherTest : BareTestFixtureTestCase() {
 
   @Test fun testFileRoot() {
     val files = arrayOf(tempDir.newFile("test1.txt"), tempDir.newFile("test2.txt"))
-    files.forEach { refresh(it) }
-    files.forEach { watch(it, false) }
+    files.forEach { refresh(it); watch(it, false) }
 
-    assertEvents({ files.forEach { it.writeText("new content") } }, files.map { it to 'U' }.toMap())
-    assertEvents({ files.forEach { assertTrue(it.delete()) } }, files.map { it to 'D' }.toMap())
-    assertEvents({ files.forEach { it.writeText("re-creation") } }, files.map { it to 'C' }.toMap())
+    assertEvents({ files.forEach { it.writeText("new content") } }, files.associateWith { 'U' })
+    assertEvents({ files.forEach { assertTrue(it.delete()) } }, files.associateWith { 'D' })
+    assertEvents({ files.forEach { it.writeText("re-creation") } }, files.associateWith { 'C' })
   }
 
   @Test fun testFileRootRecursive() {
@@ -137,9 +135,9 @@ class WslFileWatcherTest : BareTestFixtureTestCase() {
     files.forEach { refresh(it) }
     files.forEach { watch(it, true) }
 
-    assertEvents({ files.forEach { it.writeText("new content") } }, files.map { it to 'U' }.toMap())
-    assertEvents({ files.forEach { assertTrue(it.delete()) } }, files.map { it to 'D' }.toMap())
-    assertEvents({ files.forEach { it.writeText("re-creation") } }, files.map { it to 'C' }.toMap())
+    assertEvents({ files.forEach { it.writeText("new content") } }, files.associateWith { 'U' })
+    assertEvents({ files.forEach { assertTrue(it.delete()) } }, files.associateWith { 'D' })
+    assertEvents({ files.forEach { it.writeText("re-creation") } }, files.associateWith { 'C' })
   }
 
   @Test fun testDirectoryRecursive() {
@@ -455,30 +453,30 @@ class WslFileWatcherTest : BareTestFixtureTestCase() {
     val target = tempDir.newDirectory("top")
     val file = tempDir.newFile("top/sub/test.txt")
 
-    val substRoot = createSubst(target.path)
-    VfsRootAccess.allowRootAccess(testRootDisposable, substRoot.path)
-    val vfsRoot = fs.findFileByIoFile(substRoot)!!
-    watchedPaths += substRoot.path
+    performTestOnWindowsSubst(target.path) { substRoot ->
+      VfsRootAccess.allowRootAccess(testRootDisposable, substRoot.path)
+      val vfsRoot = fs.findFileByIoFile(substRoot)!!
+      watchedPaths += substRoot.path
 
-    val substFile = File(substRoot, "sub/test.txt")
-    refresh(target)
-    refresh(substRoot)
+      val substFile = File(substRoot, "sub/test.txt")
+      refresh(target)
+      refresh(substRoot)
 
-    try {
-      watch(substRoot)
-      assertEvents({ file.writeText("new content") }, mapOf(substFile to 'U'))
+      try {
+        watch(substRoot)
+        assertEvents({ file.writeText("new content") }, mapOf(substFile to 'U'))
 
-      val request = watch(target)
-      assertEvents({ file.writeText("updated content") }, mapOf(file to 'U', substFile to 'U'))
-      assertEvents({ assertTrue(file.delete()) }, mapOf(file to 'D', substFile to 'D'))
-      unwatch(request)
+        val request = watch(target)
+        assertEvents({ file.writeText("updated content") }, mapOf(file to 'U', substFile to 'U'))
+        assertEvents({ assertTrue(file.delete()) }, mapOf(file to 'D', substFile to 'D'))
+        unwatch(request)
 
-      assertEvents({ file.writeText("re-creation") }, mapOf(substFile to 'C'))
-    }
-    finally {
-      deleteSubst(substRoot.path)
-      (vfsRoot as NewVirtualFile).markDirty()
-      fs.refresh(false)
+        assertEvents({ file.writeText("re-creation") }, mapOf(substFile to 'C'))
+      }
+      finally {
+        (vfsRoot as NewVirtualFile).markDirty()
+        fs.refresh(false)
+      }
     }
   }
 

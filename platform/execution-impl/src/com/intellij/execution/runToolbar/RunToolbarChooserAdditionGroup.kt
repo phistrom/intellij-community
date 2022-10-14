@@ -7,7 +7,7 @@ import com.intellij.execution.executors.ExecutorGroup
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 
-internal class RunToolbarChooserAdditionGroup(val executorGroup: ExecutorGroup<*>, process: RunToolbarProcess,
+internal class RunToolbarChooserAdditionGroup(private val executorGroup: ExecutorGroup<*>, process: RunToolbarProcess,
                                               childConverter: (Executor) -> AnAction) : ExecutorGroupActionGroup(executorGroup,
                                                                                                                   childConverter) {
   var myProcess: RunToolbarProcess? = null
@@ -22,7 +22,7 @@ internal class RunToolbarChooserAdditionGroup(val executorGroup: ExecutorGroup<*
   override fun update(e: AnActionEvent) {
     super.update(e)
     e.project?.let {
-      e.presentation.isEnabledAndVisible = e.environment() == null
+      e.presentation.isEnabledAndVisible = !e.isActiveProcess()
     }
   }
 }

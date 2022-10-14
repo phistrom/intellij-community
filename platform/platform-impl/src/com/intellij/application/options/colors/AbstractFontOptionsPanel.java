@@ -16,7 +16,7 @@ import com.intellij.ui.*;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBTextField;
-import com.intellij.ui.components.fields.IntegerField;
+import com.intellij.ui.dsl.builder.impl.UtilsKt;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.MathUtil;
 import com.intellij.util.ui.JBUI;
@@ -57,9 +57,7 @@ public abstract class AbstractFontOptionsPanel extends JPanel implements Options
 
   private boolean myIsInSchemeChange;
   private final JLabel mySizeLabel = new JLabel(ApplicationBundle.message("editbox.font.size"));
-  private final JTextField myEditorFontSizeField = new IntegerField(null,
-                                                                    EditorFontsConstants.getMinEditorFontSize(),
-                                                                    EditorFontsConstants.getMaxEditorFontSize());
+  private final JTextField myEditorFontSizeField = new JBTextField(4);
 
   protected final static int ADDITIONAL_VERTICAL_GAP = 12;
   protected final static int BASE_INSET = 5;
@@ -68,6 +66,10 @@ public abstract class AbstractFontOptionsPanel extends JPanel implements Options
   private final JTextField myLineSpacingField = new JBTextField(4);
 
   protected AbstractFontOptionsPanel() {
+    this(null);
+  }
+
+  protected AbstractFontOptionsPanel(@Nullable Boolean isMonospacedOnly) {
     myPrimaryCombo = createPrimaryFontCombo();
     mySecondaryCombo = createSecondaryFontCombo();
     myPrimaryLabel.setLabelFor(myPrimaryCombo);
@@ -77,8 +79,7 @@ public abstract class AbstractFontOptionsPanel extends JPanel implements Options
     enableLigaturesHintLabel.setToolTipText(ApplicationBundle.message("ligatures.tooltip"));
     myOnlyMonospacedCheckBox.setFont(JBUI.Fonts.smallFont());
 
-    setLayout(new FlowLayout(FlowLayout.LEFT));
-    add(createControls());
+    addControls();
 
     myEditorFontSizeField.getDocument().addDocumentListener(new DocumentAdapter() {
       @Override
@@ -97,7 +98,7 @@ public abstract class AbstractFontOptionsPanel extends JPanel implements Options
         if (e.getKeyCode() != KeyEvent.VK_UP && e.getKeyCode() != KeyEvent.VK_DOWN) return;
         boolean up = e.getKeyCode() == KeyEvent.VK_UP;
         try {
-          int value = Integer.parseInt(myEditorFontSizeField.getText());
+          float value = Float.parseFloat(myEditorFontSizeField.getText());
           value += (up ? 1 : -1);
           value = MathUtil.clamp(value, EditorFontsConstants.getMinEditorFontSize(), EditorFontsConstants.getMaxEditorFontSize());
           myEditorFontSizeField.setText(String.valueOf(value));
@@ -111,7 +112,7 @@ public abstract class AbstractFontOptionsPanel extends JPanel implements Options
     if (myPrimaryCombo.isMonospacedOnlySupported()) {
       myOnlyMonospacedCheckBox.setVisible(true);
       myOnlyMonospacedCheckBox.setBorder(null);
-      myOnlyMonospacedCheckBox.setSelected(EditorColorsManager.getInstance().isUseOnlyMonospacedFonts());
+      myOnlyMonospacedCheckBox.setSelected(isMonospacedOnly != null ? isMonospacedOnly : EditorColorsManager.getInstance().isUseOnlyMonospacedFonts());
       myOnlyMonospacedCheckBox.addActionListener(e -> {
         EditorColorsManager.getInstance().setUseOnlyMonospacedFonts(myOnlyMonospacedCheckBox.isSelected());
         myPrimaryCombo.setMonospacedOnly(myOnlyMonospacedCheckBox.isSelected());
@@ -208,6 +209,11 @@ public abstract class AbstractFontOptionsPanel extends JPanel implements Options
     return enableLigaturesHintLabel;
   }
 
+  protected void addControls() {
+    setLayout(new FlowLayout(FlowLayout.LEFT));
+    add(createControls());
+  }
+
   protected AbstractFontCombo<?> createPrimaryFontCombo() {
     FontComboBox primaryCombo = new FontComboBox();
     //noinspection unchecked
@@ -291,20 +297,16 @@ public abstract class AbstractFontOptionsPanel extends JPanel implements Options
 
     c.gridx = 0;
     c.gridy ++;
-    fontPanel.add(createReaderModeHyperLink(), c);
+    fontPanel.add(createReaderModeComment(), c);
 
     return fontPanel;
   }
 
   @NotNull
-  private static HyperlinkLabel createReaderModeHyperLink() {
-    HyperlinkLabel hyperlinkLabel = new HyperlinkLabel();
-    hyperlinkLabel.setTextWithHyperlink(ApplicationBundle.message("comment.use.ligatures.with.reader.mode"));
-    hyperlinkLabel.setForeground(UIUtil.getLabelFontColor(UIUtil.FontColor.BRIGHTER));
-    UIUtil.applyStyle(UIUtil.ComponentStyle.SMALL, hyperlinkLabel);
-
-    hyperlinkLabel.addHyperlinkListener(e -> goToReaderMode());
-    return hyperlinkLabel;
+  private static JEditorPane createReaderModeComment() {
+    return UtilsKt.createComment(ApplicationBundle.message("comment.use.ligatures.with.reader.mode"), -1,
+                                     e -> goToReaderMode()
+    );
   }
 
   protected static void goToReaderMode() {
@@ -325,7 +327,7 @@ public abstract class AbstractFontOptionsPanel extends JPanel implements Options
     c.gridx = 1;
     target.add(mySecondaryCombo, c);
     c.gridy ++;
-    JBLabel fallbackLabel = new JBLabel(ApplicationBundle.message("label.fallback.fonts.list.description"));
+    JBLabel fallbackLabel = new JBLabel("<html>" + ApplicationBundle.message("label.fallback.fonts.list.description"));
     fallbackLabel.setFont(JBUI.Fonts.smallFont());
     fallbackLabel.setForeground(UIUtil.getContextHelpForeground());
     target.add(fallbackLabel, c);
@@ -338,9 +340,9 @@ public abstract class AbstractFontOptionsPanel extends JPanel implements Options
   protected void setDelegatingPreferences(boolean isDelegating) {
   }
 
-  private int getFontSizeFromField() {
+  private float getFontSizeFromField() {
     try {
-      return MathUtil.clamp(Integer.parseInt(myEditorFontSizeField.getText()), 
+      return MathUtil.clamp(Float.parseFloat(myEditorFontSizeField.getText()),
                             EditorFontsConstants.getMinEditorFontSize(), EditorFontsConstants.getMaxEditorFontSize());
     }
     catch (NumberFormatException e) {
@@ -385,7 +387,7 @@ public abstract class AbstractFontOptionsPanel extends JPanel implements Options
       modifiableFontPreferences.setUseLigatures(myEnableLigaturesCheckbox.isSelected());
       String primaryFontFamily = myPrimaryCombo.getFontName();
       String secondaryFontFamily = mySecondaryCombo.isNoFontSelected() ? null : mySecondaryCombo.getFontName();
-      int fontSize = getFontSizeFromField();
+      float fontSize = getFontSizeFromField();
       if (primaryFontFamily != null) {
         if (!FontPreferences.DEFAULT_FONT_NAME.equals(primaryFontFamily)) {
           modifiableFontPreferences.addFontFamily(primaryFontFamily);
@@ -412,7 +414,7 @@ public abstract class AbstractFontOptionsPanel extends JPanel implements Options
     myPrimaryCombo.setFontName(fontPreferences.getFontFamily());
     boolean isThereSecondaryFont = fontFamilies.size() > 1;
     mySecondaryCombo.setFontName(isThereSecondaryFont ? fontFamilies.get(1) : null);
-    myEditorFontSizeField.setText(String.valueOf(fontPreferences.getSize(fontPreferences.getFontFamily())));
+    myEditorFontSizeField.setText(String.valueOf(fontPreferences.getSize2D(fontPreferences.getFontFamily())));
 
     boolean isReadOnlyColorScheme = isReadOnly();
     updateCustomOptions();
@@ -420,7 +422,7 @@ public abstract class AbstractFontOptionsPanel extends JPanel implements Options
     myPrimaryCombo.setEnabled(!readOnly);
     myPrimaryLabel.setEnabled(!readOnly);
     mySecondaryCombo.setEnabled(!readOnly);
-    mySecondaryFontLabel.setEnabled(!readOnly);
+    if (mySecondaryFontLabel != null) mySecondaryFontLabel.setEnabled(!readOnly);
     myOnlyMonospacedCheckBox.setEnabled(!readOnly);
     myLineSpacingField.setEnabled(!readOnly);
     myLineSpacingLabel.setEnabled(!readOnly);
@@ -448,6 +450,10 @@ public abstract class AbstractFontOptionsPanel extends JPanel implements Options
   protected abstract FontPreferences getFontPreferences();
 
   protected abstract void setFontSize(int fontSize);
+
+  protected void setFontSize(float fontSize) {
+    setFontSize((int)(fontSize + 0.5));
+  }
 
   protected abstract float getLineSpacing();
 

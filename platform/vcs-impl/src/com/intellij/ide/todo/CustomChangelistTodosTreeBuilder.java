@@ -12,6 +12,7 @@ import com.intellij.psi.search.PsiTodoSearchHelper;
 import com.intellij.psi.search.TodoItem;
 import com.intellij.psi.search.TodoPattern;
 import com.intellij.util.Processor;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -29,7 +30,7 @@ public class CustomChangelistTodosTreeBuilder extends TodoTreeBuilder {
   private final MultiMap<PsiFile, TodoItem> myMap = new MultiMap<>();
 
   private final Set<PsiFile> myIncludedFiles;
-  @Nullable private final Set<String> myIncludedChangeListsIds;
+  private final @Nullable Set<String> myIncludedChangeListsIds;
 
   public CustomChangelistTodosTreeBuilder(@NotNull JTree tree,
                                           @NotNull Project project,
@@ -43,8 +44,12 @@ public class CustomChangelistTodosTreeBuilder extends TodoTreeBuilder {
     buildMap(todoItems);
   }
 
-  @NotNull
-  private static Set<PsiFile> collectIncludedFiles(@NotNull Collection<? extends TodoItem> todoItems) {
+  @Override
+  protected @NotNull PsiTodoSearchHelper getSearchHelper() {
+    return myPsiTodoSearchHelper;
+  }
+
+  private static @NotNull Set<PsiFile> collectIncludedFiles(@NotNull Collection<? extends TodoItem> todoItems) {
     HashSet<PsiFile> files = new HashSet<>();
     for (TodoItem item : todoItems) {
       files.add(item.getFile());
@@ -52,8 +57,7 @@ public class CustomChangelistTodosTreeBuilder extends TodoTreeBuilder {
     return files;
   }
 
-  @Nullable
-  private static Set<String> collectIncludedChangeListsIds(@NotNull Project project, @NotNull Collection<Change> changes) {
+  private static @Nullable Set<String> collectIncludedChangeListsIds(@NotNull Project project, @NotNull Collection<Change> changes) {
     if (!ChangeListManager.getInstance(project).areChangeListsEnabled()) return null;
 
     HashSet<String> ids = new HashSet<>();
@@ -104,6 +108,11 @@ public class CustomChangelistTodosTreeBuilder extends TodoTreeBuilder {
 
       final Set<PsiFile> files = myMap.keySet();
       return files.toArray(PsiFile.EMPTY_ARRAY);
+    }
+
+    @Override
+    public boolean processFilesWithTodoItems(@NotNull Processor<? super PsiFile> processor) {
+      return ContainerUtil.process(findFilesWithTodoItems(), processor);
     }
 
     private void putChangesForLocalFiles(@NotNull MultiMap<VirtualFile, Change> changesMap, @NotNull Collection<Change> changes) {
@@ -181,20 +190,9 @@ public class CustomChangelistTodosTreeBuilder extends TodoTreeBuilder {
     return todoItems.isEmpty() ? EMPTY_ITEMS : todoItems.toArray(new TodoItem[0]);
   }
 
-  @NotNull
   @Override
-  protected TodoTreeStructure createTreeStructure() {
+  protected @NotNull TodoTreeStructure createTreeStructure() {
     return new CustomChangelistTodoTreeStructure(myProject, myPsiTodoSearchHelper);
   }
 
-  @Override
-  void collectFiles(Processor<? super VirtualFile> collector) {
-    TodoTreeStructure treeStructure=getTodoTreeStructure();
-    PsiFile[] psiFiles= myPsiTodoSearchHelper.findFilesWithTodoItems();
-    for (PsiFile psiFile : psiFiles) {
-      if (myPsiTodoSearchHelper.getTodoItemsCount(psiFile) > 0 && treeStructure.accept(psiFile)) {
-        collector.process(psiFile.getVirtualFile());
-      }
-    }
-  }
 }

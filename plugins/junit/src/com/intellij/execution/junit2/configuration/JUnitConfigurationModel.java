@@ -1,9 +1,10 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package com.intellij.execution.junit2.configuration;
 
 import com.intellij.execution.JUnitBundle;
 import com.intellij.execution.JavaExecutionUtil;
+import com.intellij.execution.configurations.JavaRunConfigurationModule;
 import com.intellij.execution.junit.JUnitConfiguration;
 import com.intellij.execution.junit.JUnitUtil;
 import com.intellij.execution.junit.TestObject;
@@ -113,18 +114,28 @@ public class JUnitConfigurationModel {
         testObject != JUnitConfiguration.TEST_DIRECTORY &&
         testObject != JUnitConfiguration.TEST_CATEGORY  &&
         testObject != JUnitConfiguration.BY_SOURCE_CHANGES) {
-      try {
-        data.METHOD_NAME = getJUnitTextValue(METHOD);
-        final PsiClass testClass = !myProject.isDefault() && !StringUtil.isEmptyOrSpaces(className) ? JUnitUtil.findPsiClass(className, module, myProject) : null;
-        if (testClass != null && testClass.isValid()) {
-          data.setMainClass(testClass);
+      data.METHOD_NAME = getJUnitTextValue(METHOD);
+      if (!className.equals(replaceRuntimeClassName(data.getMainClassName()))) {
+        try {
+          final PsiClass testClass;
+          if (!myProject.isDefault() && !StringUtil.isEmptyOrSpaces(className)) {
+            JavaRunConfigurationModule configurationModule = new JavaRunConfigurationModule(myProject, true);
+            configurationModule.setModule(module);
+            testClass = configurationModule.findClass(className);
+          }
+          else {
+            testClass = null;
+          }
+          if (testClass != null && testClass.isValid()) {
+            data.setMainClass(testClass);
+          }
+          else {
+            data.MAIN_CLASS_NAME = className;
+          }
         }
-        else {
+        catch (ProcessCanceledException | IndexNotReadyException e) {
           data.MAIN_CLASS_NAME = className;
         }
-      }
-      catch (ProcessCanceledException | IndexNotReadyException e) {
-        data.MAIN_CLASS_NAME = className;
       }
     }
     else if (testObject != JUnitConfiguration.BY_SOURCE_CHANGES) {
@@ -177,11 +188,15 @@ public class JUnitConfigurationModel {
     final JUnitConfiguration.Data data = configuration.getPersistentData();
     setTestType(data.TEST_OBJECT);
     setJUnitTextValue(ALL_IN_PACKAGE, data.getPackageName());
-    setJUnitTextValue(CLASS, data.getMainClassName() != null ? data.getMainClassName().replaceAll("\\$", "\\.") : "");
+    setJUnitTextValue(CLASS, replaceRuntimeClassName(data.getMainClassName()));
     setJUnitTextValue(METHOD, data.getMethodNameWithSignature());
     setJUnitTextValue(PATTERN, data.getPatternPresentation());
     setJUnitTextValue(DIR, data.getDirName());
     setJUnitTextValue(CATEGORY, data.getCategory());
+  }
+
+  private static String replaceRuntimeClassName(String mainClassName) {
+    return mainClassName.replaceAll("\\$", "\\.");
   }
 
   private void setJUnitTextValue(final int index, final String text) {
@@ -210,59 +225,40 @@ public class JUnitConfigurationModel {
   }
 
   public static @NotNull @NlsContexts.Label String getKindName(int value) {
-    switch (value) {
-      case ALL_IN_PACKAGE:
-        return JUnitBundle.message("junit.configuration.kind.all.in.package");
-      case DIR:
-        return JUnitBundle.message("junit.configuration.kind.all.in.directory");
-      case PATTERN:
-        return JUnitBundle.message("junit.configuration.kind.by.pattern");
-      case CLASS:
-        return JUnitBundle.message("junit.configuration.kind.class");
-      case METHOD:
-        return JUnitBundle.message("junit.configuration.kind.method");
-      case CATEGORY:
-        return JUnitBundle.message("junit.configuration.kind.category");
-      case UNIQUE_ID:
-        return JUnitBundle.message("junit.configuration.kind.by.unique.id");
-      case TAGS:
-        return JUnitBundle.message("junit.configuration.kind.by.tags");
-      case BY_SOURCE_POSITION:
-        return "Through source location"; //NON-NLS internal option
-      case BY_SOURCE_CHANGES:
-        return "Over changes in sources"; //NON-NLS internal option
-    }
-    throw new IllegalArgumentException(String.valueOf(value));
+    return switch (value) {
+      case ALL_IN_PACKAGE -> JUnitBundle.message("junit.configuration.kind.all.in.package");
+      case DIR -> JUnitBundle.message("junit.configuration.kind.all.in.directory");
+      case PATTERN -> JUnitBundle.message("junit.configuration.kind.by.pattern");
+      case CLASS -> JUnitBundle.message("junit.configuration.kind.class");
+      case METHOD -> JUnitBundle.message("junit.configuration.kind.method");
+      case CATEGORY -> JUnitBundle.message("junit.configuration.kind.category");
+      case UNIQUE_ID -> JUnitBundle.message("junit.configuration.kind.by.unique.id");
+      case TAGS -> JUnitBundle.message("junit.configuration.kind.by.tags");
+      case BY_SOURCE_POSITION -> "Through source location"; //NON-NLS internal option
+      case BY_SOURCE_CHANGES -> "Over changes in sources"; //NON-NLS internal option
+      default -> throw new IllegalArgumentException(String.valueOf(value));
+    };
   }
 
   public static @NotNull @NlsContexts.Label String getRepeatModeName(@NotNull @NonNls String value) {
-    switch (value) {
-      case RepeatCount.ONCE:
-        return JUnitBundle.message("junit.configuration.repeat.mode.once");
-      case RepeatCount.N:
-        return JUnitBundle.message("junit.configuration.repeat.mode.n.times");
-      case RepeatCount.UNTIL_FAILURE:
-        return JUnitBundle.message("junit.configuration.repeat.mode.until.failure");
-      case RepeatCount.UNLIMITED:
-        return JUnitBundle.message("junit.configuration.repeat.mode.until.stopped");
-    }
+    return JUnitBundle.message(switch (value) {
+      case RepeatCount.ONCE -> "junit.configuration.repeat.mode.once";
+      case RepeatCount.N -> "junit.configuration.repeat.mode.n.times";
+      case RepeatCount.UNTIL_FAILURE -> "junit.configuration.repeat.mode.until.failure";
+      case RepeatCount.UNLIMITED -> "junit.configuration.repeat.mode.until.stopped";
+      default -> throw new IllegalArgumentException(value);
+    });
 
-    throw new IllegalArgumentException(value);
   }
 
   public static @NotNull @NlsContexts.Label String getForkModeName(@NotNull @NonNls String value) {
-    switch (value) {
-      case JUnitConfiguration.FORK_NONE:
-        return JUnitBundle.message("junit.configuration.fork.mode.none");
-      case JUnitConfiguration.FORK_METHOD:
-        return JUnitBundle.message("junit.configuration.fork.mode.method");
-      case JUnitConfiguration.FORK_KLASS:
-        return JUnitBundle.message("junit.configuration.fork.mode.class");
-      case JUnitConfiguration.FORK_REPEAT:
-        return JUnitBundle.message("junit.configuration.fork.mode.repeat");
-    }
-
-    throw new IllegalArgumentException(value);
+    return JUnitBundle.message(switch (value) {
+      case JUnitConfiguration.FORK_NONE -> "junit.configuration.fork.mode.none";
+      case JUnitConfiguration.FORK_METHOD -> "junit.configuration.fork.mode.method";
+      case JUnitConfiguration.FORK_KLASS -> "junit.configuration.fork.mode.class";
+      case JUnitConfiguration.FORK_REPEAT -> "junit.configuration.fork.mode.repeat";
+      default -> throw new IllegalArgumentException(value);
+    });
   }
 
   public void reloadTestKindModel(JComboBox<Integer> comboBox, Module module) {

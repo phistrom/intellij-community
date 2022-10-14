@@ -20,7 +20,6 @@ import com.intellij.openapi.util.Factory;
 import com.intellij.psi.xml.XmlElement;
 import com.intellij.psi.xml.XmlFile;
 import com.intellij.psi.xml.XmlTag;
-import com.intellij.testFramework.FlakyTestLogger;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.xml.DomElement;
 import com.intellij.util.xml.EvaluatedXmlName;
@@ -32,14 +31,9 @@ import org.jetbrains.annotations.Nullable;
 import java.lang.annotation.Annotation;
 import java.util.List;
 
-/**
- * @author peter
- */
 public class IndexedElementInvocationHandler extends DomInvocationHandler {
   private static final Logger LOG = Logger.getInstance(IndexedElementInvocationHandler.class);
   private final int myIndex;
-
-  public final Exception created;
 
   public IndexedElementInvocationHandler(final EvaluatedXmlName tagName,
                                          final FixedChildDescriptionImpl description,
@@ -48,8 +42,6 @@ public class IndexedElementInvocationHandler extends DomInvocationHandler {
                                          final DomManagerImpl manager,
                                          @Nullable ElementStub stub) {
     super(description.getType(), strategy, tagName, description, manager, strategy.isPhysical(), stub);
-    created = FlakyTestLogger.isEnabled() ? new Exception(
-      "IndexedElementInvocationHandler(" + tagName + ", " + description + ", " + strategy + ", " + index + ", " + stub + ")") : null;
     myIndex = index;
   }
 

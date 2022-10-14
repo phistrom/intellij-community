@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.application.impl;
 
 import com.intellij.BundleBase;
@@ -10,11 +10,7 @@ import com.intellij.featureStatistics.fusCollectors.LifecycleUsageTriggerCollect
 import com.intellij.ide.*;
 import com.intellij.ide.plugins.ContainerDescriptor;
 import com.intellij.ide.plugins.IdeaPluginDescriptorImpl;
-import com.intellij.ide.plugins.PluginManagerCore;
-import com.intellij.idea.ApplicationLoader;
-import com.intellij.idea.IdeaLogger;
-import com.intellij.idea.Main;
-import com.intellij.idea.StartupUtil;
+import com.intellij.idea.*;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.*;
 import com.intellij.openapi.application.ex.ApplicationEx;
@@ -32,7 +28,7 @@ import com.intellij.openapi.progress.util.ProgressWindow;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.project.ex.ProjectManagerEx;
-import com.intellij.openapi.ui.DialogWrapper;
+import com.intellij.openapi.ui.DoNotAskOption;
 import com.intellij.openapi.ui.MessageDialogBuilder;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.*;
@@ -43,30 +39,29 @@ import com.intellij.serviceContainer.ComponentManagerImpl;
 import com.intellij.ui.ComponentUtil;
 import com.intellij.util.*;
 import com.intellij.util.concurrency.AppExecutorUtil;
-import com.intellij.util.concurrency.AppScheduledExecutorService;
+import com.intellij.util.concurrency.Propagation;
 import com.intellij.util.containers.Stack;
 import com.intellij.util.messages.Topic;
 import com.intellij.util.ui.EDT;
 import com.intellij.util.ui.EdtInvocationManager;
 import org.jetbrains.annotations.*;
 import sun.awt.AWTAccessor;
-import sun.awt.AWTAutoShutdown;
 
 import javax.swing.*;
 import java.awt.*;
-import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+
+import static com.intellij.util.concurrency.AppExecutorUtil.propagateContextOrCancellation;
 
 @ApiStatus.Internal
 public class ApplicationImpl extends ClientAwareComponentManager implements ApplicationEx {
-  // do not use PluginManager.processException() because it can force app to exit, but we want just log error and continue
+  // do not use PluginManager.processException() because it can force app to exit, but we want just to log an error and continue
   private static final Logger LOG = Logger.getInstance(ApplicationImpl.class);
 
   /**
-   * This boolean controls whether to use thread(s) other than EDT for acquiring IW lock (i.e. running write actions) or not.
+   * This boolean controls whether to use thread(s) other than EDT for acquiring IW lock (i.e., running write actions) or not.
    * If value is {@code false}, IW lock will be granted on EDT at all times, guaranteeing the same execution model as before
    * IW lock introduction.
    */
@@ -74,6 +69,10 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
 
   final ReadMostlyRWLock myLock;
 
+  /**
+   * @deprecated see {@link ModalityInvokator} notice
+   */
+  @Deprecated
   private final ModalityInvokator myInvokator = new ModalityInvokatorImpl();
 
   private final EventDispatcher<ApplicationListener> myDispatcher = EventDispatcher.create(ApplicationListener.class);
@@ -93,85 +92,85 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
   private boolean mySaveAllowed;
   private volatile boolean myExitInProgress;
 
-  private final Disposable myLastDisposable = Disposer.newDisposable(); // will be disposed last
+  private final Disposable myLastDisposable = Disposer.newDisposable();  // the last to be disposed
 
   // defer reading isUnitTest flag until it's initialized
   private static class Holder {
-    private static final int ourDumpThreadsOnLongWriteActionWaiting = ApplicationManager.getApplication().isUnitTestMode() ? 0 : Integer.getInteger("dump.threads.on.long.write.action.waiting", 0);
+    private static final int ourDumpThreadsOnLongWriteActionWaiting =
+      ApplicationManager.getApplication().isUnitTestMode() ? 0 : Integer.getInteger("dump.threads.on.long.write.action.waiting", 0);
   }
 
   private final ExecutorService ourThreadExecutorsService = AppExecutorUtil.getAppExecutorService();
   private static final String WAS_EVER_SHOWN = "was.ever.shown";
 
-  public ApplicationImpl(boolean isInternal,
-                         boolean isUnitTestMode,
-                         boolean isHeadless,
-                         boolean isCommandLine) {
-    super(null);
+  @TestOnly
+  public ApplicationImpl(boolean isHeadless, RwLockHolder lockHolder) {
+    super(null, true);
+
+    myLock = lockHolder.getLock$intellij_platform_ide_impl();
 
     registerServiceInstance(TransactionGuard.class, myTransactionGuard, ComponentManagerImpl.fakeCorePluginDescriptor);
     registerServiceInstance(ApplicationInfo.class, ApplicationInfoImpl.getShadowInstance(), ComponentManagerImpl.fakeCorePluginDescriptor);
     registerServiceInstance(Application.class, this, ComponentManagerImpl.fakeCorePluginDescriptor);
 
-    if (isUnitTestMode || isInternal) {
-      BundleBase.assertOnMissedKeys(true);
-    }
+    BundleBase.assertOnMissedKeys(true);
 
     // do not crash AWT on exceptions
     AWTExceptionHandler.register();
 
-    Disposer.setDebugMode(isInternal || isUnitTestMode || Disposer.isDebugDisposerOn());
+    Disposer.setDebugMode(true);
 
-    myIsInternal = isInternal;
-    myTestModeFlag = isUnitTestMode;
+    myIsInternal = true;
+    myTestModeFlag = true;
     myHeadlessMode = isHeadless;
-    myCommandLineMode = isCommandLine;
-    if (isUnitTestMode) {
-      //noinspection TestOnlyProblems
-      Logger.setUnitTestMode();
-    }
+    myCommandLineMode = true;
+    Logger.setUnitTestMode();
 
-    mySaveAllowed = !isUnitTestMode && !isHeadless;
+    mySaveAllowed = false;
 
     // reset back to null only when all components already disposed
     ApplicationManager.setApplication(this, myLastDisposable);
 
-    if (!isUnitTestMode && !isHeadless) {
-      Disposable uiRootDisposable = Disposer.newDisposable();
-      //noinspection deprecation
-      Disposer.register(this, uiRootDisposable, "ui");
-    }
-
-    Activity activity = StartUpMeasurer.startActivity("AppDelayQueue instantiation", ActivityCategory.DEFAULT);
-    AtomicReference<Thread> edtThread = new AtomicReference<>();
-    EdtInvocationManager.invokeAndWaitIfNeeded(() -> {
-      preventAwtAutoShutdown(this);
-      edtThread.set(Thread.currentThread());
-    });
-    myLock = new ReadMostlyRWLock(edtThread.get());
     // Acquire IW lock on EDT indefinitely in legacy mode
-    if (!USE_SEPARATE_WRITE_THREAD || isUnitTestMode) {
-      EdtInvocationManager.invokeAndWaitIfNeeded(() -> acquireWriteIntentLock(getClass().getName()));
-    }
-    activity.end();
+    EdtInvocationManager.invokeAndWaitIfNeeded(() -> acquireWriteIntentLock(getClass().getName()));
 
     NoSwingUnderWriteAction.watchForEvents(this);
   }
 
-  public static void preventAwtAutoShutdown(@NotNull Disposable parentDisposable) {
-    // instantiate AppDelayQueue which starts "Periodic task thread" which we'll mark busy to prevent this EDT to die
-    // that thread was chosen because we know for sure it's running
-    Thread thread = AppScheduledExecutorService.getPeriodicTasksThread();
-    AWTAutoShutdown.getInstance().notifyThreadBusy(thread); // needed for EDT not to exit suddenly
-    Disposer.register(parentDisposable, () -> {
-      AWTAutoShutdown.getInstance().notifyThreadFree(thread); // allow for EDT to exit - needed for Upsource
-    });
+  public ApplicationImpl(boolean isInternal, boolean isHeadless, boolean isCommandLine, RwLockHolder lockHolder) {
+    super(null, true);
+
+    myLock = lockHolder.getLock$intellij_platform_ide_impl();
+
+    registerServiceInstance(TransactionGuard.class, myTransactionGuard, ComponentManagerImpl.fakeCorePluginDescriptor);
+    registerServiceInstance(ApplicationInfo.class, ApplicationInfoImpl.getShadowInstance(), ComponentManagerImpl.fakeCorePluginDescriptor);
+    registerServiceInstance(Application.class, this, ComponentManagerImpl.fakeCorePluginDescriptor);
+
+    myIsInternal = isInternal;
+    myTestModeFlag = false;
+    myHeadlessMode = isHeadless;
+    myCommandLineMode = isCommandLine;
+    if (!isHeadless) {
+      mySaveAllowed = true;
+    }
+
+    Activity activity = StartUpMeasurer.startActivity("AppDelayQueue instantiation");
+    // Acquire IW lock on EDT indefinitely in legacy mode
+    if (!USE_SEPARATE_WRITE_THREAD) {
+      EventQueue.invokeLater(() -> acquireWriteIntentLock(getClass().getName()));
+    }
+    activity.end();
+
+    NoSwingUnderWriteAction.watchForEvents(this);
+
+    // reset back to null only when all components already disposed
+    ApplicationManager.setApplication(this, myLastDisposable);
   }
 
   /**
    * Executes a {@code runnable} in an "impatient" mode.
    * In this mode any attempt to call {@link #runReadAction(Runnable)}
-   * would fail (i.e. throw {@link ApplicationUtil.CannotRunReadActionException})
+   * would fail (i.e., throw {@link ApplicationUtil.CannotRunReadActionException})
    * if there is a pending write action.
    */
   @Override
@@ -196,24 +195,6 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
       Disposer.dispose(this);
     });
     Disposer.assertIsEmpty();
-  }
-
-  private boolean disposeSelf(boolean checkCanCloseProject) {
-    ProjectManagerEx manager = ProjectManagerEx.getInstanceExIfCreated();
-    if (manager != null) {
-      try {
-        if (!manager.closeAndDisposeAllProjects(checkCanCloseProject)) {
-          return false;
-        }
-      }
-      catch (Throwable e) {
-        LOG.error(e);
-      }
-    }
-
-    //noinspection TestOnlyProblems
-    disposeContainer();
-    return true;
   }
 
   @Override
@@ -248,7 +229,7 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
 
   @Override
   public final boolean isLightEditMode() {
-    return Main.isLightEdit();
+    return AppMode.isLightEdit();
   }
 
   @Override
@@ -324,8 +305,10 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
     return myLock.isWriteThread();
   }
 
+  @Deprecated
   @Override
   public @NotNull ModalityInvokator getInvokator() {
+    PluginException.reportDeprecatedUsage("Application.getInvokator", "Use `invokeLater` instead");
     return myInvokator;
   }
 
@@ -336,7 +319,7 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
 
   @Override
   public void invokeLater(@NotNull Runnable runnable, @NotNull Condition<?> expired) {
-    invokeLater(runnable, ModalityState.defaultModalityState(), expired);
+    invokeLater(runnable, getDefaultModalityState(), expired);
   }
 
   @Override
@@ -346,28 +329,17 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
 
   @Override
   public void invokeLater(@NotNull Runnable runnable, @NotNull ModalityState state, @NotNull Condition<?> expired) {
+    if (propagateContextOrCancellation()) {
+      Pair<Runnable, Condition<?>> captured = Propagation.capturePropagationAndCancellationContext(runnable, expired);
+      runnable = captured.getFirst();
+      expired = captured.getSecond();
+    }
     Runnable r = myTransactionGuard.wrapLaterInvocation(runnable, state);
-    LaterInvocator.invokeLaterWithCallback(() -> runIntendedWriteActionOnCurrentThread(r), state, expired, null, true);
+    LaterInvocator.invokeLater(state, expired, wrapWithRunIntendedWriteAction(r));
   }
 
-  @Override
-  public final void load() {
-    List<IdeaPluginDescriptorImpl> plugins = PluginManagerCore.getLoadedPlugins(null);
-    registerComponents(plugins, this, null, null);
-    ApplicationLoader.initConfigurationStore(this);
-    preloadServices(plugins, "", false).getSecond().join();
-    loadComponents(null);
-    ForkJoinTask.invokeAll(ApplicationLoader.callAppInitialized(this));
-  }
-
-  public final void loadComponents(@Nullable ProgressIndicator indicator) {
-    if (indicator == null) {
-      // no splash, no need to use progress manager
-      createComponents(null);
-    }
-    else {
-      ProgressManager.getInstance().runProcess(() -> createComponents(indicator), indicator);
-    }
+  public final void loadComponents() {
+    createComponents();
     StartUpMeasurer.setCurrentState(LoadingState.COMPONENTS_LOADED);
   }
 
@@ -379,7 +351,7 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
     ShutDownTracker.getInstance().ensureStopperThreadsFinished();
 
     super.dispose();
-    // Remove IW lock from EDT as EDT might be re-created which might lead to deadlock if anybody uses this disposed app
+    // Remove IW lock from EDT as EDT might be re-created, which might lead to deadlock if anybody uses this disposed app
     if (!USE_SEPARATE_WRITE_THREAD || isUnitTestMode()) {
       invokeLater(() -> releaseWriteIntentLock(), ModalityState.NON_MODAL);
     }
@@ -398,10 +370,8 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
                                                      @Nullable Project project,
                                                      @Nullable JComponent parentComponent,
                                                      @Nullable @Nls(capitalization = Nls.Capitalization.Title) String cancelText) {
-    if (isDispatchThread() && isWriteAccessAllowed()
-      // Disallow running process in separate thread from under write action.
-      // The thread will deadlock trying to get read action otherwise.
-    ) {
+    // disallow running process in a separate thread from a write-action, or a thread will deadlock trying to acquire the read-lock
+    if (isDispatchThread() && isWriteAccessAllowed()) {
       LOG.debug("Starting process with progress from within write action makes no sense");
       try {
         ProgressManager.getInstance().runProcess(process, new EmptyProgressIndicator());
@@ -448,12 +418,27 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
     }
 
     Runnable r = myTransactionGuard.wrapLaterInvocation(runnable, modalityState);
-    LaterInvocator.invokeAndWait(() -> runIntendedWriteActionOnCurrentThread(r), modalityState);
+    LaterInvocator.invokeAndWait(modalityState, wrapWithRunIntendedWriteAction(r));
+  }
+
+  @NotNull
+  private Runnable wrapWithRunIntendedWriteAction(@NotNull Runnable runnable) {
+    return new Runnable() {
+      @Override
+      public void run() {
+        runIntendedWriteActionOnCurrentThread(runnable);
+      }
+
+      @Override
+      public String toString() {
+        return runnable.toString();
+      }
+    };
   }
 
   @Override
   public void invokeAndWait(@NotNull Runnable runnable) throws ProcessCanceledException {
-    invokeAndWait(runnable, ModalityState.defaultModalityState());
+    invokeAndWait(runnable, getDefaultModalityState());
   }
 
   @Override
@@ -495,15 +480,17 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
 
   @Override
   public final void restart(boolean exitConfirmed) {
-    int flags = SAVE;
-    if (exitConfirmed) {
-      flags |= EXIT_CONFIRMED;
-    }
-    exit(flags, true, ArrayUtilRt.EMPTY_STRING_ARRAY);
+    restart(exitConfirmed, false);
   }
 
   @Override
   public final void restart(boolean exitConfirmed, boolean elevate) {
+    restart(exitConfirmed, elevate, false);
+  }
+
+  private void restart(boolean exitConfirmed,
+                       boolean elevate,
+                       boolean force) {
     int flags = SAVE;
     if (exitConfirmed) {
       flags |= EXIT_CONFIRMED;
@@ -511,12 +498,15 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
     if (elevate) {
       flags |= ELEVATE;
     }
-    exit(flags, true, ArrayUtilRt.EMPTY_STRING_ARRAY);
+    if (force) {
+      flags |= FORCE_EXIT;
+    }
+    restart(flags, ArrayUtilRt.EMPTY_STRING_ARRAY);
   }
 
   /**
    * There are two ways we can get an exit notification.
-   *  1. From user input i.e. ExitAction
+   *  1. From user input i.e., ExitAction
    *  2. From the native system.
    *  We should not process any quit notifications if we are handling another one
    *
@@ -580,6 +570,10 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
 
       stopServicePreloading();
 
+      if (BitUtil.isSet(flags, SAVE)) {
+        SaveAndSyncHandler.getInstance().saveSettingsUnderModalProgress(this);
+      }
+
       if (isInstantShutdownPossible()) {
         for (Frame frame : Frame.getFrames()) {
           frame.setVisible(false);
@@ -595,11 +589,23 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
 
       LifecycleUsageTriggerCollector.onIdeClose(restart);
 
-      if (BitUtil.isSet(flags, SAVE)) {
-        SaveAndSyncHandler.getInstance().saveSettingsUnderModalProgress(this);
+      boolean success = true;
+      ProjectManagerEx manager = ProjectManagerEx.getInstanceExIfCreated();
+      if (manager != null) {
+        try {
+          if (!manager.closeAndDisposeAllProjects(!force)) {
+            success = false;
+          }
+        }
+        catch (Throwable e) {
+          LOG.error(e);
+        }
+      }
+      if (success) {
+        //noinspection TestOnlyProblems
+        disposeContainer();
       }
 
-      boolean success = disposeSelf(!force);
       //noinspection SpellCheckingInspection
       if (!success || isUnitTestMode() || Boolean.getBoolean("idea.test.guimode")) {
         //noinspection SpellCheckingInspection
@@ -609,6 +615,7 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
         return;
       }
 
+      IdeaLogger.dropFrequentExceptionsCaches();
       int exitCode = 0;
       if (restart && Restarter.isSupported()) {
         try {
@@ -616,11 +623,10 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
         }
         catch (Throwable t) {
           LOG.error("Restart failed", t);
-          Main.showMessage(BootstrapBundle.message("restart.failed.title"), t);
-          exitCode = Main.RESTART_FAILED;
+          StartupErrorReporter.showMessage(BootstrapBundle.message("restart.failed.title"), t);
+          exitCode = AppExitCodes.RESTART_FAILED;
         }
       }
-      IdeaLogger.dropFrequentExceptionsCaches();
       System.exit(exitCode);
     }
     finally {
@@ -636,17 +642,23 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
     return !ProgressManager.getInstance().hasProgressIndicator();
   }
 
-  public final @NotNull CompletableFuture<@NotNull ProgressWindow> createProgressWindowAsyncIfNeeded(@NotNull @NlsContexts.ProgressTitle String progressTitle,
-                                                                                            boolean canBeCanceled,
-                                                                                            boolean shouldShowModalWindow,
-                                                                                            @Nullable Project project,
-                                                                                            @Nullable JComponent parentComponent,
-                                                                                            @Nullable @NlsContexts.Button String cancelText) {
+  public final @NotNull CompletableFuture<@NotNull ProgressWindow> createProgressWindowAsyncIfNeeded(
+    @NotNull @NlsContexts.ProgressTitle String progressTitle,
+    boolean canBeCanceled,
+    boolean shouldShowModalWindow,
+    @Nullable Project project,
+    @Nullable JComponent parentComponent,
+    @Nullable @NlsContexts.Button String cancelText
+  ) {
     if (SwingUtilities.isEventDispatchThread()) {
-      return CompletableFuture.completedFuture(createProgressWindow(progressTitle, canBeCanceled, shouldShowModalWindow, project, parentComponent, cancelText));
+      return CompletableFuture.completedFuture(
+        createProgressWindow(progressTitle, canBeCanceled, shouldShowModalWindow, project, parentComponent, cancelText));
     }
-    return CompletableFuture.supplyAsync(() -> createProgressWindow(progressTitle, canBeCanceled, shouldShowModalWindow, project, parentComponent, cancelText),
-                                         this::invokeLater);
+    else {
+      return CompletableFuture.supplyAsync(
+        () -> createProgressWindow(progressTitle, canBeCanceled, shouldShowModalWindow, project, parentComponent, cancelText),
+        this::invokeLater);
+    }
   }
 
   private @NotNull ProgressWindow createProgressWindow(@NotNull @NlsContexts.ProgressTitle String progressTitle,
@@ -664,7 +676,7 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
   }
 
   /**
-   * Used for GUI tests to stop IdeEventQueue dispatching when Application is disposed already
+   * Used for GUI tests to stop `IdeEventQueue` dispatching when `Application` is already disposed of.
    */
   private static void shutdown() {
     IdeEventQueue.applicationClose();
@@ -677,7 +689,7 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
       return true;
     }
 
-    DialogWrapper.DoNotAskOption option = new DialogWrapper.DoNotAskOption() {
+    DoNotAskOption option = new DoNotAskOption() {
       @Override
       public boolean isToBeShown() {
         return GeneralSettings.getInstance().isConfirmExit() && ProjectManager.getInstance().getOpenProjects().length > 0;
@@ -705,6 +717,12 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
     };
 
     if (!hasUnsafeBgTasks && !option.isToBeShown()) {
+      return true;
+    }
+
+    if (hasUnsafeBgTasks && ApplicationManager.getApplication().isHeadlessEnvironment()) {
+      LOG.error("Headless application has been completed but background tasks are still running! Application will be terminated." +
+                "\nThread dump:\n" + ThreadDumper.dumpThreadsToString());
       return true;
     }
 
@@ -767,6 +785,7 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
     return true;
   }
 
+  @ApiStatus.Internal
   public boolean isCurrentWriteOnEdt() {
     return EDT.isEdt(myLock.writeThread);
   }
@@ -780,12 +799,12 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
   public void invokeLaterOnWriteThread(@NotNull Runnable action, @NotNull ModalityState modal, @NotNull Condition<?> expired) {
     Runnable r = myTransactionGuard.wrapLaterInvocation(action, modal);
     // EDT == Write Thread in legacy mode
-    LaterInvocator.invokeLaterWithCallback(() -> runIntendedWriteActionOnCurrentThread(r), modal, expired, null, !USE_SEPARATE_WRITE_THREAD);
+    LaterInvocator.invokeLater(modal, expired, wrapWithRunIntendedWriteAction(r));
   }
 
   @Override
   public void invokeLaterOnWriteThread(@NotNull Runnable action) {
-    invokeLaterOnWriteThread(action, ModalityState.defaultModalityState());
+    invokeLaterOnWriteThread(action, getDefaultModalityState());
   }
 
   @Override
@@ -894,7 +913,7 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
                                             @Nullable @Nls(capitalization = Nls.Capitalization.Title) String cancelText,
                                             @NotNull java.util.function.Consumer<? super ProgressIndicator> action) {
     if (!USE_SEPARATE_WRITE_THREAD) {
-      // Use Potemkin progress in legacy mode; in the new model such execution will always move to a separate thread.
+      // Use the Potemkin progress in legacy mode; in the new model, such execution will always move to a separate thread.
       return runWriteActionWithClass(action.getClass(), ()->{
         PotemkinProgress indicator = new PotemkinProgress(title, project, parentComponent, cancelText);
         indicator.runInSwingThread(() -> action.accept(indicator));
@@ -969,7 +988,8 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
       LOG.error(
         "Read access is allowed from inside read-action (or EDT) only" +
         " (see com.intellij.openapi.application.Application.runReadAction())",
-        "Current thread: " + describe(Thread.currentThread()), "; dispatch thread: " + EventQueue.isDispatchThread() +"; isDispatchThread(): "+isDispatchThread(),
+        "Current thread: " + describe(Thread.currentThread()),
+        "Dispatch thread: " + EventQueue.isDispatchThread() + "; isDispatchThread(): " + isDispatchThread(),
         "SystemEventQueueThread: " + describe(getEventQueueThread()));
     }
   }
@@ -979,7 +999,8 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
     if (isReadAccessAllowed()) {
       LOG.error(
         "Read access is not allowed",
-        "Current thread: " + describe(Thread.currentThread()), "; dispatch thread: " + EventQueue.isDispatchThread() +"; isDispatchThread(): "+isDispatchThread(),
+        "Current thread: " + describe(Thread.currentThread()),
+        "Dispatch thread: " + EventQueue.isDispatchThread() + "; isDispatchThread(): " + isDispatchThread(),
         "SystemEventQueueThread: " + describe(getEventQueueThread()));
     }
   }
@@ -1000,17 +1021,16 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
 
   @Override
   public void assertIsDispatchThread() {
-    if (isDispatchThread()) return;
-    if (ShutDownTracker.isShutdownHookRunning()) return;
-    throwThreadAccessException("Access is allowed from event dispatch thread only");
+    if (!isDispatchThread()) {
+      throwThreadAccessException("Access is allowed from event dispatch thread only");
+    }
   }
 
   @Override
   public void assertIsNonDispatchThread() {
-    if (isUnitTestMode() || isHeadlessEnvironment()) return;
-    if (!isDispatchThread()) return;
-    if (ShutDownTracker.isShutdownHookRunning()) return;
-    throwThreadAccessException("Access from event dispatch thread is not allowed.");
+    if (!isUnitTestMode() && !isHeadlessEnvironment() && isDispatchThread()) {
+      throwThreadAccessException("Access from event dispatch thread is not allowed");
+    }
   }
 
   private static void throwThreadAccessException(@NotNull String message) {
@@ -1022,15 +1042,11 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
       new Attachment("threadDump.txt", ThreadDumper.dumpThreadsToString()));
   }
 
+  @Override
   public void assertIsWriteThread() {
-    if (isWriteThread()) return;
-    if (ShutDownTracker.isShutdownHookRunning()) return;
-    throw new RuntimeExceptionWithAttachments(
-      "Access is allowed from write thread only.",
-      "EventQueue.isDispatchThread()=" + EventQueue.isDispatchThread() +
-      "\nCurrent thread: " + describe(Thread.currentThread()) +
-      "\nWrite thread: " + describe(myLock.writeThread),
-      new Attachment("threadDump.txt", ThreadDumper.dumpThreadsToString()));
+    if (!isWriteThread()) {
+      throwThreadAccessException("Access is allowed from write thread only");
+    }
   }
 
   @Override
@@ -1097,7 +1113,7 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
 
   @Override
   public @NotNull AccessToken acquireReadActionLock() {
-    DeprecatedMethodException.report("Use runReadAction() instead");
+    PluginException.reportDeprecatedUsage("Application.acquireReadActionLock", "Use `runReadAction()` instead");
 
     // if we are inside read action, do not try to acquire read lock again since it will deadlock if there is a pending writeAction
     return isWriteThread() || myLock.isReadLockedByThisThread() ? AccessToken.EMPTY_ACCESS_TOKEN : new ReadAccessToken();
@@ -1112,17 +1128,21 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
 
   private void startWrite(@NotNull Class<?> clazz) {
     assertIsWriteThread();
-    boolean writeActionPending = myWriteActionPending;
+    assertNotInsideListener();
     myWriteActionPending = true;
     try {
       ActivityTracker.getInstance().inc();
       fireBeforeWriteActionStart(clazz);
 
+      // otherwise (when myLock is locked) there's a nesting write action:
+      // - allow it,
+      // - fire listeners for it (somebody can rely on having listeners fired for each write action)
+      // - but do not re-acquire any locks because it could be deadlock-level dangerous
       if (!myLock.isWriteLocked()) {
         int delay = Holder.ourDumpThreadsOnLongWriteActionWaiting;
         Future<?> reportSlowWrite = delay <= 0 ? null :
-                                    AppExecutorUtil.getAppScheduledExecutorService()
-                                      .scheduleWithFixedDelay(() -> PerformanceWatcher.getInstance().dumpThreads("waiting", true),
+           AppExecutorUtil.getAppScheduledExecutorService()
+           .scheduleWithFixedDelay(() -> PerformanceWatcher.getInstance().dumpThreads("waiting", true),
                                                               delay, delay, TimeUnit.MILLISECONDS);
         long t = LOG.isDebugEnabled() ? System.currentTimeMillis() : 0;
         myLock.writeLock();
@@ -1138,18 +1158,24 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
       }
     }
     finally {
-      myWriteActionPending = writeActionPending;
+      myWriteActionPending = false;
     }
 
     myWriteActionsStack.push(clazz);
     fireWriteActionStarted(clazz);
   }
 
+  private void assertNotInsideListener() {
+    if (myWriteActionPending) {
+      throw new IllegalStateException("Must not start write action from inside write action listener");
+    }
+  }
+
   private void endWrite(@NotNull Class<?> clazz) {
     try {
       fireWriteActionFinished(clazz);
-      // fire listeners before popping stack because if somebody starts write action in a listener,
-      // there is a danger of unlocking the write lock before other listeners have been run (since write lock became non-reentrant).
+      // fire listeners before popping stack because if somebody starts a write-action in a listener,
+      // there is a danger of releasing the write-lock before other listeners have been run (since write lock became non-reentrant).
     }
     finally {
       myWriteActionsStack.pop();
@@ -1164,7 +1190,7 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
 
   @Override
   public @NotNull AccessToken acquireWriteActionLock(@NotNull Class<?> clazz) {
-    DeprecatedMethodException.report("Use runWriteAction() instead");
+    PluginException.reportDeprecatedUsage("Application#acquireWriteActionLock", "Use `runWriteAction()` instead");
 
     return new WriteAccessToken(clazz);
   }
@@ -1254,9 +1280,9 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
   }
 
   /**
-   * If called inside a write action, executes the given code under a modal progress with write lock released (e.g. to allow for read-action parallelization).
-   * It's the caller's responsibility to invoke this method only when the model is in internally consistent state,
-   * so that background threads with read actions don't see half-baked PSI/VFS/etc. The runnable may perform write actions itself,
+   * If called inside a write-action, executes the given code under modal progress with write-lock released (e.g., to allow for read-action parallelization).
+   * It's the caller's responsibility to invoke this method only when the model is in an internally consistent state,
+   * so that background threads with read actions don't see half-baked PSI/VFS/etc. The runnable may perform write-actions itself;
    * callers should be ready for those.
    */
   public void executeSuspendingWriteAction(@Nullable Project project, @NotNull @NlsContexts.DialogTitle String title, @NotNull Runnable runnable) {
@@ -1268,8 +1294,8 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
 
     int prevBase = myWriteStackBase;
     myWriteStackBase = myWriteActionsStack.size();
-    try (AccessToken ignored = myLock.writeSuspend()) {
-      runModalProgress(project, title, runnable);
+    try {
+      myLock.writeSuspendWhilePumpingIdeEventQueueHopingForTheBest(()->runModalProgress(project, title, runnable));
     }
     finally {
       myWriteStackBase = prevBase;
@@ -1345,11 +1371,20 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
 
   @Override
   public String toString() {
-    return "Application (containerState=" + getContainerStateName() + ") " +
-           (isUnitTestMode() ? " (Unit test)" : "") +
-           (isInternal() ? " (Internal)" : "") +
-           (isHeadlessEnvironment() ? " (Headless)" : "") +
-           (isCommandLine() ? " (Command line)" : "");
+    boolean writeActionPending = isWriteActionPending();
+    boolean writeActionInProgress = isWriteActionInProgress();
+    boolean writeAccessAllowed = isWriteAccessAllowed();
+    return "Application "
+           + (getContainerState().get() == ContainerState.COMPONENT_CREATED ? "" : " (containerState "+getContainerStateName() + ") ")
+           + (isUnitTestMode() ? " (unit test)" : "")
+           + (isInternal() ? " (internal)" : "")
+           + (isHeadlessEnvironment() ? " (headless)" : "")
+           + (isCommandLine() ? " (command line)" : "")
+           + (writeActionPending || writeActionInProgress || writeAccessAllowed ? " (WA" + (writeActionPending ? " pending" : "") + (writeActionInProgress ? " inProgress" : "") + (writeAccessAllowed ? " allowed" : "") + ")" : "")
+           + (isReadAccessAllowed() ? " (RA allowed)" : "")
+           + (isInImpatientReader() ? " (impatient reader)" : "")
+           + (isExitInProgress() ? " (exit in progress)" : "")
+      ;
   }
 
   @Override
@@ -1372,8 +1407,8 @@ public class ApplicationImpl extends ClientAwareComponentManager implements Appl
     }
     else if (topic == VirtualFileManager.VFS_CHANGES) {
       if (TimeUnit.NANOSECONDS.toMillis(duration) > 50) {
-        LOG.info(String.format("LONG VFS PROCESSING. Topic=%s, offender=%s, message=%s, time=%dms", topic.getDisplayName(), handler.getClass(), messageName, TimeUnit.NANOSECONDS.toMillis(
-          duration)));
+        LOG.info(String.format("LONG VFS PROCESSING. Topic=%s, offender=%s, message=%s, time=%dms",
+                               topic.getDisplayName(), handler.getClass(), messageName, TimeUnit.NANOSECONDS.toMillis(duration)));
       }
     }
   }

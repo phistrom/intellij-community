@@ -2,6 +2,7 @@
 package com.siyeh.ig.dependency;
 
 import com.intellij.codeInsight.intention.IntentionAction;
+import com.intellij.codeInsight.intention.preview.IntentionPreviewInfo;
 import com.intellij.codeInspection.*;
 import com.intellij.codeInspection.apiUsage.ApiUsageProcessor;
 import com.intellij.codeInspection.apiUsage.ApiUsageUastVisitor;
@@ -12,9 +13,11 @@ import com.intellij.lang.jvm.actions.MemberRequestsKt;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.util.ClearableLazyValue;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.profile.codeInspection.InspectionProfileManager;
 import com.intellij.psi.*;
 import com.intellij.psi.util.InheritanceUtil;
@@ -27,6 +30,7 @@ import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.components.JBTextArea;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.ObjectUtils;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xmlb.annotations.Property;
 import com.intellij.util.xmlb.annotations.Tag;
 import com.intellij.util.xmlb.annotations.XCollection;
@@ -36,6 +40,7 @@ import org.jdom.Element;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.jps.model.java.JavaModuleSourceRootTypes;
 import org.jetbrains.uast.*;
 
 import javax.swing.*;
@@ -62,6 +67,11 @@ public final class SuspiciousPackagePrivateAccessInspection extends AbstractBase
   @NotNull
   @Override
   public PsiElementVisitor buildVisitor(@NotNull ProblemsHolder holder, boolean isOnTheFly) {
+    VirtualFile file = holder.getFile().getVirtualFile();
+    if (file == null || !ProjectFileIndex.getInstance(holder.getProject()).isUnderSourceRootOfType(file, JavaModuleSourceRootTypes.SOURCES)) {
+      return PsiElementVisitor.EMPTY_VISITOR;
+    }
+
     return ApiUsageUastVisitor.createPsiElementVisitor(
       new SuspiciousApiUsageProcessor(holder, myModuleSetByModuleName.getValue())
     );
@@ -237,11 +247,11 @@ public final class SuspiciousPackagePrivateAccessInspection extends AbstractBase
                                                             boolean forClassReference) {
     UElement parent = sourceClass.getUastParent();
     if (parent instanceof UObjectLiteralExpression) {
-      if (((UCallExpression)parent).getValueArguments().stream().anyMatch(it -> UastUtils.isPsiAncestor(it, sourceNode))) {
+      if (ContainerUtil.exists(((UCallExpression)parent).getValueArguments(), it -> UastUtils.isPsiAncestor(it, sourceNode))) {
         return true;
       }
     }
-    return forClassReference && sourceClass.getUastSuperTypes().stream().anyMatch(it -> UastUtils.isPsiAncestor(it, sourceNode));
+    return forClassReference && ContainerUtil.exists(sourceClass.getUastSuperTypes(), it -> UastUtils.isPsiAncestor(it, sourceNode));
   }
 
   @Tag("modules-set")
@@ -305,6 +315,11 @@ public final class SuspiciousPackagePrivateAccessInspection extends AbstractBase
     @Override
     public String getFamilyName() {
       return InspectionGadgetsBundle.message("mark.modules.as.loaded.together.fix.family.name");
+    }
+
+    @Override
+    public @NotNull IntentionPreviewInfo generatePreview(@NotNull Project project, @NotNull ProblemDescriptor previewDescriptor) {
+      return IntentionPreviewInfo.EMPTY;
     }
 
     @Override

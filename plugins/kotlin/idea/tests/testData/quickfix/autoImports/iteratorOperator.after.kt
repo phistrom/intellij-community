@@ -1,6 +1,6 @@
-// "Import" "true"
+// "Import extension function 'ClosedRange.iterator'" "true"
 // ERROR: For-loop range must have an 'iterator()' method
-// WITH_RUNTIME
+// WITH_STDLIB
 
 package bar
 
@@ -10,3 +10,4 @@ import foo.iterator
 fun foo(start: Foo, end: Foo) {
     for (date in start<caret>..end) {}
 }
+/* IGNORE_FIR */

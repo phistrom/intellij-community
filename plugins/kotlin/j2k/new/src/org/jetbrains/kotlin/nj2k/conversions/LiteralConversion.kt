@@ -1,47 +1,58 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.nj2k.conversions
 
-
 import org.jetbrains.annotations.NonNls
 import org.jetbrains.kotlin.nj2k.NewJ2kConverterContext
+import org.jetbrains.kotlin.nj2k.RecursiveApplicableConversionBase
 import org.jetbrains.kotlin.nj2k.tree.*
+import org.jetbrains.kotlin.nj2k.tree.JKLiteralExpression.LiteralType
 import java.math.BigInteger
+import java.util.*
 
 class LiteralConversion(context: NewJ2kConverterContext) : RecursiveApplicableConversionBase(context) {
     override fun applyToElement(element: JKTreeElement): JKTreeElement {
         if (element !is JKLiteralExpression) return recurse(element)
-
-        val convertedElement = try {
-            element.apply { convertLiteral() }
+        return try {
+            with(element) {
+                convertLiteral()
+                if (type == LiteralType.TEXT_BLOCK) addTrimIndentCall() else this
+            }
         } catch (_: NumberFormatException) {
             createTodoCall(cannotConvertLiteralMessage(element))
         }
-
-        return recurse(convertedElement)
     }
+
+    private fun JKLiteralExpression.addTrimIndentCall() = JKQualifiedExpression(
+        copyTreeAndDetach(),
+        JKCallExpressionImpl(
+            symbolProvider.provideMethodSymbol("kotlin.text.trimIndent"),
+            expressionType = typeFactory.types.string
+        )
+    ).withFormattingFrom(this)
 
     private fun createTodoCall(@NonNls message: String): JKCallExpressionImpl {
         val todoMethodSymbol = symbolProvider.provideMethodSymbol("kotlin.TODO")
-        val todoMessageArgument = JKArgumentImpl(JKLiteralExpression("\"$message\"", JKLiteralExpression.LiteralType.STRING))
+        val todoMessageArgument = JKArgumentImpl(JKLiteralExpression("\"$message\"", LiteralType.STRING))
 
         return JKCallExpressionImpl(todoMethodSymbol, JKArgumentList(todoMessageArgument))
     }
 
     private fun cannotConvertLiteralMessage(element: JKLiteralExpression): String {
-        val literalType = element.type.toString().toLowerCase()
+        val literalType = element.type.toString().lowercase(Locale.getDefault())
         val literalValue = element.literal
         return "Could not convert $literalType literal '$literalValue' to Kotlin"
     }
 
     private fun JKLiteralExpression.convertLiteral() {
         literal = when (type) {
-            JKLiteralExpression.LiteralType.DOUBLE -> toDoubleLiteral()
-            JKLiteralExpression.LiteralType.FLOAT -> toFloatLiteral()
-            JKLiteralExpression.LiteralType.LONG -> toLongLiteral()
-            JKLiteralExpression.LiteralType.INT -> toIntLiteral()
-            JKLiteralExpression.LiteralType.CHAR -> convertCharLiteral()
-            JKLiteralExpression.LiteralType.STRING -> toStringLiteral()
+            LiteralType.DOUBLE -> toDoubleLiteral()
+            LiteralType.FLOAT -> toFloatLiteral()
+            LiteralType.LONG -> toLongLiteral()
+            LiteralType.INT -> toIntLiteral()
+            LiteralType.CHAR -> convertCharLiteral()
+            LiteralType.STRING -> toStringLiteral()
+            LiteralType.TEXT_BLOCK -> toRawStringLiteral()
             else -> return
         }
     }
@@ -55,7 +66,6 @@ class LiteralConversion(context: NewJ2kConverterContext) : RecursiveApplicableCo
             if (text.endsWith(".")) "${text}0" else text
         }
 
-
     private fun JKLiteralExpression.toFloatLiteral() =
         literal.cleanFloatAndDoubleLiterals().let { text ->
             if (!text.endsWith("f")) "${text}f"
@@ -63,20 +73,31 @@ class LiteralConversion(context: NewJ2kConverterContext) : RecursiveApplicableCo
         }
 
     private fun JKLiteralExpression.toStringLiteral() =
-        literal.replace("""((?:\\)*)\\([0-3]?[0-7]{1,2})""".toRegex()) { matchResult ->
-            val leadingBackslashes = matchResult.groupValues[1]
-            if (leadingBackslashes.length % 2 == 0)
-                String.format("%s\\u%04x", leadingBackslashes, Integer.parseInt(matchResult.groupValues[2], 8))
-            else matchResult.value
-        }.replace("""(?<!\\)\$([A-Za-z]+|\{)""".toRegex(), "\\\\$0")
-            .replace( "\\f", "\\u000c")
+        literal
+            .replaceOctalEscapes(format = "%s\\u%04x")
+            .replace("""\$([A-Za-z]+|\{)""".toRegex(), "\\\\$0")
+            .replace("\\f", "\\u000c")
 
+    private fun JKLiteralExpression.toRawStringLiteral(): String {
+        // remove implicit newlines that were suppressed with a single backslash at end of line
+        literal = literal.replace("([^\\\\])\\\\\n\\s*".toRegex(), "$1")
+        while (literal.contains("\\n")) {
+            // replace escaped newlines with real newlines and leading indenting spaces
+            literal = literal.replace("""\n(\s*)(.*)(\\n)""".toRegex(), "\n$1$2\n$1")
+        }
+        rawStringSpecialCharReplacements.forEach { (old, new) -> literal = literal.replace(old, new) }
+        return literal
+            .replaceOctalEscapes(format = "%s\${'\\u%04x'}")
+            // unescape backslashes
+            .replace("\\\\", "\\")
+            // add a trailing line break and leading indenting spaces before the closing triple quote
+            .replace("\\n(\\s*)(.*)\"\"\"\\Z".toRegex(), "\n$1$2\n$1\"\"\"")
+    }
 
     private fun JKLiteralExpression.convertCharLiteral() =
         literal.replace("""\\([0-3]?[0-7]{1,2})""".toRegex()) {
             String.format("\\u%04x", Integer.parseInt(it.groupValues[1], 8))
         }
-
 
     private fun JKLiteralExpression.toIntLiteral() =
         literal
@@ -84,7 +105,6 @@ class LiteralConversion(context: NewJ2kConverterContext) : RecursiveApplicableCo
             .convertHexLiteral(isLongLiteral = false)
             .convertBinaryLiteral(isLongLiteral = false)
             .convertOctalLiteral(isLongLiteral = false)
-
 
     private fun JKLiteralExpression.toLongLiteral() =
         literal
@@ -114,7 +134,7 @@ class LiteralConversion(context: NewJ2kConverterContext) : RecursiveApplicableCo
     }
 
     private fun String.convertOctalLiteral(isLongLiteral: Boolean): String {
-        if (!startsWith("0") || length == 1 || get(1).toLowerCase() == 'x') return this
+        if (!startsWith("0") || length == 1 || get(1).lowercaseChar() == 'x') return this
         val value = BigInteger(drop(1), 8)
         return if (isLongLiteral) value.toLong().toString(10) else value.toInt().toString(10)
     }
@@ -131,3 +151,23 @@ class LiteralConversion(context: NewJ2kConverterContext) : RecursiveApplicableCo
         replace("l", "", ignoreCase = true)
             .replace("_", "")
 }
+
+private fun String.replaceOctalEscapes(format: String): String =
+    replace("""(\\*)\\([0-3]?[0-7]{1,2})""".toRegex()) { matchResult ->
+        val leadingBackslashes = matchResult.groupValues[1]
+        if (leadingBackslashes.length % 2 == 0)
+            String.format(format, leadingBackslashes, Integer.parseInt(matchResult.groupValues[2], 8))
+        else matchResult.value
+    }
+
+private val rawStringSpecialCharReplacements: Map<String, String> = mapOf(
+    "\$" to "\${'$'}",
+    "\\040" to " ", // escaped (trailing) space
+    "\\s" to " ", // also escaped (trailing) space
+    "\\\'" to "'",
+    "\\\"" to "\${'\"'}",
+    "\\r" to "\${'\\r'}",
+    "\\t" to "\${'\\t'}",
+    "\\b" to "\${'\\b'}",
+    "\\f" to "\${'\\u000c'}"
+)

@@ -14,9 +14,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
-/**
- * @author peter
- */
 public class LookupElementPresentation {
   private Icon myIcon;
   private Icon myTypeIcon;
@@ -30,7 +27,7 @@ public class LookupElementPresentation {
   private boolean myItemTextItalic;
   private boolean myTypeGrayed;
   @Nullable private List<TextFragment> myTail;
-  private boolean myFrozen;
+  private volatile boolean myFrozen;
 
   public void setIcon(@Nullable Icon icon) {
     ensureMutable();
@@ -112,7 +109,7 @@ public class LookupElementPresentation {
    * @deprecated Always returns true. To speed up completion by delaying rendering more expensive parts,
    * implement {@link LookupElement#getExpensiveRenderer()}.
    */
-  @Deprecated
+  @Deprecated(forRemoval = true)
   public boolean isReal() {
     return true;
   }

@@ -1,5 +1,4 @@
-// COMPILER_ARGUMENTS: -XXLanguage:-NewInference
-// WITH_RUNTIME
+// WITH_STDLIB
 import java.util.ArrayList
 
 fun f() {

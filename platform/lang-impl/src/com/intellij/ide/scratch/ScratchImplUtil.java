@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.scratch;
 
 import com.intellij.icons.AllIcons;
@@ -20,6 +20,7 @@ import com.intellij.openapi.util.text.StringUtilRt;
 import com.intellij.openapi.vfs.ReadonlyStatusHandler;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.terminal.TerminalUtils;
 import com.intellij.ui.SimpleColoredComponent;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.PathUtil;
@@ -28,11 +29,13 @@ import com.intellij.util.containers.JBIterable;
 import com.intellij.util.containers.JBTreeTraverser;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.tree.TreeUtil;
-import gnu.trove.TIntHashSet;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import it.unimi.dsi.fastutil.ints.IntSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import javax.swing.table.TableCellRenderer;
 import javax.swing.text.JTextComponent;
 import javax.swing.tree.TreeCellRenderer;
 import javax.swing.tree.TreePath;
@@ -63,7 +66,7 @@ final class ScratchImplUtil {
     FileType currType = currLanguage == null ? item.fileType : ObjectUtils.notNull(currLanguage.getAssociatedFileType(), item.fileType);
     if (prevType == currType) return;
 
-    String nameWithoutExtension = getNameWithoutExtension(file, prevType, fileTypeManager);
+    String nameWithoutExtension = getNameWithoutExtension(file, fileTypeManager);
 
     VirtualFile parent = file.getParent();
     String newName = parent != null ? VfsUtil.getNextAvailableName(parent, nameWithoutExtension, item.fileExtension) :
@@ -72,14 +75,18 @@ final class ScratchImplUtil {
   }
 
   private static @NotNull String getNameWithoutExtension(@NotNull VirtualFile file,
-                                                         @Nullable FileType fileType,
+                                                         @NotNull FileTypeManager fileTypeManager) {
+    return getNameWithoutExtension(file.getName(), file.isCaseSensitive(), fileTypeManager);
+  }
+
+  private static @NotNull String getNameWithoutExtension(@NotNull String fileName,
+                                                         boolean caseSensitive,
                                                          @NotNull FileTypeManager fileTypeManager) {
     // support multipart extensions like *.blade.php
-    String fileName = file.getName();
     String extension = StringUtil.notNullize(PathUtilRt.getFileExtension(fileName));
     if (extension.isEmpty()) return fileName;
-    if (fileType != null) {
-      boolean caseSensitive = file.isCaseSensitive();
+    FileType fileType = fileTypeManager.getFileTypeByFileName(fileName);
+    if (fileType != FileTypes.UNKNOWN) {
       extension = getFileTypeExtensions(fileType, false, fileTypeManager)
         .reduce(extension, (val, o) -> val.length() < o.length() && hasExtension(fileName, o, caseSensitive) ? o : val);
     }
@@ -139,13 +146,27 @@ final class ScratchImplUtil {
     return result;
   }
 
-  static @NotNull String getNextAvailableName(@NotNull VirtualFile dir, @NotNull String fileName, @NotNull String extension) {
+  static @Nullable VirtualFile findFileIgnoreExtension(@NotNull VirtualFile dir, @NotNull String fileNameAndExt) {
     FileTypeManager fileTypeManager = FileTypeManager.getInstance();
-    TIntHashSet existing = new TIntHashSet();
-    int fileNameLen = fileName.length();
+    String fileName = getNameWithoutExtension(fileNameAndExt, dir.isCaseSensitive(), fileTypeManager);
     for (VirtualFile child : dir.getChildren()) {
-      FileType fileType = fileTypeManager.getFileTypeByFileName(child.getNameSequence());
-      String childName = getNameWithoutExtension(child, fileType, fileTypeManager);
+      if (child.isDirectory()) continue;
+      String childName = getNameWithoutExtension(child, fileTypeManager);
+      if (!StringUtil.equalsIgnoreCase(childName, fileName)) continue;
+      return child;
+    }
+    return null;
+  }
+
+  static @NotNull String getNextAvailableName(@NotNull VirtualFile dir, @NotNull String fileNameAndExt) {
+    FileTypeManager fileTypeManager = FileTypeManager.getInstance();
+    IntSet existing = new IntOpenHashSet();
+    String fileName = getNameWithoutExtension(fileNameAndExt, dir.isCaseSensitive(), fileTypeManager);
+    int fileNameLen = fileName.length();
+    String fileExt = fileNameAndExt.length() > fileNameLen + 1 ? fileNameAndExt.substring(fileNameLen + 1) : "";
+    for (VirtualFile child : dir.getChildren()) {
+      if (child.isDirectory()) continue;
+      String childName = getNameWithoutExtension(child, fileTypeManager);
       if (!StringUtil.startsWithIgnoreCase(childName, fileName)) continue;
       if (childName.length() == fileNameLen) {
         existing.add(0);
@@ -159,7 +180,7 @@ final class ScratchImplUtil {
     int num = 0;
     while (existing.contains(num)) num++;
 
-    return PathUtil.makeFileName(num == 0 ? fileName : fileName + "_" + num, extension);
+    return PathUtil.makeFileName(num == 0 ? fileName : fileName + "_" + num, fileExt);
   }
 
   static void changeLanguageWithUndo(@NotNull Project project,
@@ -233,8 +254,9 @@ final class ScratchImplUtil {
         return o.language != null ? o.language.getID() : o.fileType.getName();
       }
     }
-      .withComparator(comparator)
       .forValues(items)
+      .withComparator(comparator)
+      .withExtraSpeedSearchNamer(o -> o.fileExtension)
       .withSelection(null);
   }
 
@@ -269,12 +291,37 @@ final class ScratchImplUtil {
   static @Nullable TextExtractor getTextExtractor(@Nullable Component component) {
     return component instanceof JTextComponent ? new TextComponentExtractor((JTextComponent)component) :
            component instanceof JList ? new ListExtractor((JList<?>)component) :
-           component instanceof JTree ? new TreeExtractor((JTree)component) : null;
+           component instanceof JTree ? new TreeExtractor((JTree)component) :
+           component instanceof JTable ? new TableExtractor((JTable)component) :
+           TerminalUtils.isTerminalComponent(component) ? new TerminalExtractor(component) :
+           null;
   }
 
   interface TextExtractor {
     boolean hasSelection();
-    String extractText();
+    @Nullable String extractText();
+  }
+
+  private static class TerminalExtractor implements TextExtractor {
+    final Component component;
+
+    TerminalExtractor(@Nullable Component dataContext) {
+      component = dataContext;
+    }
+
+    @Override
+    public boolean hasSelection() {
+      return TerminalUtils.hasSelectionInTerminal(component);
+    }
+
+    @Override
+    public String extractText() {
+      if (TerminalUtils.hasSelectionInTerminal(component)) {
+        return TerminalUtils.getSelectedTextInTerminal(component);
+      }
+      String text = TerminalUtils.getTextInTerminal(component);
+      return StringUtil.isEmptyOrSpaces(text) ? null : text;
+    }
   }
 
   private static class TextComponentExtractor implements TextExtractor {
@@ -284,7 +331,7 @@ final class ScratchImplUtil {
 
     @Override
     public boolean hasSelection() {
-      return !StringUtil.isEmpty(comp.getSelectedText());
+      return comp.getSelectionStart() != comp.getSelectionEnd();
     }
 
     @Override
@@ -320,6 +367,7 @@ final class ScratchImplUtil {
       StringBuilder sb = new StringBuilder();
       for (Object value : values) {
         append(sb, value, renderer.getListCellRendererComponent(comp, value, -1, false, false));
+        sb.append("\n");
       }
       return sb.toString();
     }
@@ -360,6 +408,36 @@ final class ScratchImplUtil {
         //noinspection StringRepeatCanBeUsed
         for (int i = 0; i < depth; i++) sb.append("  ");
         append(sb, value, renderer.getTreeCellRendererComponent(comp, value, false, false, false, -1, false));
+        sb.append("\n");
+      }
+      return sb.toString();
+    }
+  }
+
+  private static class TableExtractor implements TextExtractor {
+    final JTable comp;
+
+    TableExtractor(@NotNull JTable component) { comp = component; }
+
+    @Override
+    public boolean hasSelection() {
+      return comp.getSelectionModel().getSelectedItemsCount() > 1;
+    }
+
+    @Override
+    public String extractText() {
+      int[] rows = comp.getSelectionModel().getSelectedIndices();
+      int[] cols = comp.getColumnModel().getSelectionModel().getSelectedIndices();
+      StringBuilder sb = new StringBuilder();
+      int lastCol = cols.length == 0 ? -1 : cols[cols.length - 1];
+      for (int row : rows) {
+        for (int col : cols) {
+          Object value = comp.getModel().getValueAt(comp.convertRowIndexToModel(row), comp.convertColumnIndexToModel(col));
+          TableCellRenderer renderer = comp.getCellRenderer(row, col);
+          append(sb, value, renderer.getTableCellRendererComponent(comp, value, false, false, row, col));
+          if (col != lastCol) sb.append("    ");
+        }
+        sb.append("\n");
       }
       return sb.toString();
     }
@@ -378,7 +456,6 @@ final class ScratchImplUtil {
     else if (!appendSimple(sb, renderer)) {
       sb.append(TreeUtil.getUserObject(value));
     }
-    sb.append("\n");
     // replace various space chars like `FontUtil#thinSpace` with just space
     for (int i = length, len = sb.length(); i < len; i++) {
       char c = sb.charAt(i);

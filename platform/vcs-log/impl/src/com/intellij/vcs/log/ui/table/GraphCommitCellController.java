@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.vcs.log.ui.table;
 
 import com.intellij.ide.IdeTooltip;
@@ -96,7 +96,7 @@ public abstract class GraphCommitCellController implements VcsLogCellController 
       triggerElementClick(printElement);
     }
 
-    Selection previousSelection = myTable.getSelection();
+    SelectionSnapshot previousSelection = myTable.getSelectionSnapshot();
     GraphAnswer<Integer> answer =
       myTable.getVisibleGraph().getActionController().performAction(new GraphAction.GraphActionImpl(printElement, actionType));
     return handleGraphAnswer(answer, isClickOnGraphElement, previousSelection, e);
@@ -104,7 +104,7 @@ public abstract class GraphCommitCellController implements VcsLogCellController 
 
   @Nullable
   Cursor handleGraphAnswer(@Nullable GraphAnswer<Integer> answer, boolean dataCouldChange,
-                           @Nullable Selection previousSelection, @Nullable MouseEvent e) {
+                           @Nullable SelectionSnapshot previousSelection, @Nullable MouseEvent e) {
     if (dataCouldChange) {
       myTable.getModel().fireTableDataChanged();
 
@@ -140,10 +140,10 @@ public abstract class GraphCommitCellController implements VcsLogCellController 
   private String getArrowTooltipText(int commit, @Nullable Integer row) {
     VcsShortCommitDetails details;
     if (row != null && row >= 0) {
-      details = myTable.getModel().getCommitMetadata(row); // preload rows around the commit
+      details = myTable.getModel().getCommitMetadata(row, true); // preload rows around the commit
     }
     else {
-      details = myLogData.getMiniDetailsGetter().getCommitData(commit, Collections.singleton(commit)); // preload just the commit
+      details = myLogData.getMiniDetailsGetter().getCommitData(commit, Collections.singletonList(commit)); // preload just the commit
     }
 
     if (details instanceof LoadingDetails) {

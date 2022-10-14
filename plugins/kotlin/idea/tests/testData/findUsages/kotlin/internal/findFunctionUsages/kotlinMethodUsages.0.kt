@@ -6,7 +6,8 @@ public open class Server() {
     internal open fun <caret>processRequest() = "foo"
 }
 
-public class ServerEx(): Server() {
+public class ServerEx() : Server() {
     override fun processRequest() = "foofoo"
 }
 
+// FIR_COMPARISON

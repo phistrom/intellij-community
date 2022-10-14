@@ -1,9 +1,8 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.intention.impl;
 
 import com.intellij.codeInsight.ChangeContextUtil;
 import com.intellij.codeInsight.CodeInsightBundle;
-import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.generation.GenerateMembersUtil;
 import com.intellij.codeInsight.generation.OverrideImplementUtil;
 import com.intellij.ide.util.MethodCellRenderer;
@@ -21,12 +20,15 @@ import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.psi.*;
+import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
-import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.util.IncorrectOperationException;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.List;
 
 
 public class CopyAbstractMethodImplementationHandler {
@@ -115,9 +117,8 @@ public class CopyAbstractMethodImplementationHandler {
   }
 
   private void copyImplementation(final PsiMethod sourceMethod) {
-    if (!FileModificationService.getInstance().preparePsiElementForWrite(sourceMethod)) return;
     final List<PsiMethod> generatedMethods = new ArrayList<>();
-    WriteCommandAction.writeCommandAction(myProject, getTargetFiles()).run(() -> {
+    WriteCommandAction.writeCommandAction(myProject, myTargetClasses.isEmpty() ? myTargetEnumConstants : myTargetClasses).run(() -> {
       for (PsiEnumConstant enumConstant : myTargetEnumConstants) {
         PsiClass initializingClass = enumConstant.getOrCreateInitializingClass();
         myTargetClasses.add(initializingClass);
@@ -133,7 +134,15 @@ public class CopyAbstractMethodImplementationHandler {
         ChangeContextUtil.encodeContextInfo(sourceBody, true);
         final PsiElement newBody = body.replace(sourceBody.copy());
         ChangeContextUtil.decodeContextInfo(newBody, psiClass, null);
-
+        final PsiDocComment docComment = overriddenMethod.getDocComment();
+        if (docComment != null) {
+          try {
+            docComment.delete();
+          }
+          catch (IncorrectOperationException e) {
+            LOG.error(e);
+          }
+        }
         PsiSubstitutor substitutor = TypeConversionUtil.getSuperClassSubstitutor(mySourceClass, psiClass, PsiSubstitutor.EMPTY);
         PsiElement anchor = OverrideImplementUtil.getDefaultAnchorToOverrideOrImplement(psiClass, sourceMethod, substitutor);
         try {
@@ -161,13 +170,4 @@ public class CopyAbstractMethodImplementationHandler {
       }
     }
   }
-
-  private PsiFile[] getTargetFiles() {
-    Collection<PsiFile> fileList = new HashSet<>();
-    for(PsiClass psiClass: myTargetClasses) {
-      fileList.add(psiClass.getContainingFile());
-    }
-    return PsiUtilCore.toPsiFileArray(fileList);
-  }
-
 }

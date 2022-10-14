@@ -4,17 +4,14 @@ package org.jetbrains.plugins.github.pullrequest.data
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.util.Disposer
 import org.jetbrains.plugins.github.api.data.pullrequest.GHPullRequest
-import org.jetbrains.plugins.github.api.data.pullrequest.GHPullRequestShort
 import org.jetbrains.plugins.github.pullrequest.GHPRDiffRequestModel
 import org.jetbrains.plugins.github.pullrequest.data.service.GHPRCreationService
 import org.jetbrains.plugins.github.pullrequest.data.service.GHPRDetailsService
 import org.jetbrains.plugins.github.pullrequest.data.service.GHPRRepositoryDataService
 import org.jetbrains.plugins.github.pullrequest.data.service.GHPRSecurityService
-import org.jetbrains.plugins.github.pullrequest.search.GHPRSearchQueryHolder
 import org.jetbrains.plugins.github.ui.avatars.GHAvatarIconsProvider
 
-internal class GHPRDataContext(val searchHolder: GHPRSearchQueryHolder,
-                               val listLoader: GHListLoader<GHPullRequestShort>,
+internal class GHPRDataContext(val listLoader: GHPRListLoader,
                                val listUpdatesChecker: GHPRListUpdatesChecker,
                                val dataProviderRepository: GHPRDataProviderRepository,
                                val securityService: GHPRSecurityService,
@@ -28,9 +25,6 @@ internal class GHPRDataContext(val searchHolder: GHPRSearchQueryHolder,
   private val listenersDisposable = Disposer.newDisposable("GH PR context listeners disposable")
 
   init {
-    searchHolder.addQueryChangeListener(listenersDisposable) {
-      listLoader.reset()
-    }
     listLoader.addDataListener(listenersDisposable, object : GHListLoader.ListDataListener {
       override fun onDataAdded(startIdx: Int) = listUpdatesChecker.start()
       override fun onAllDataRemoved() = listUpdatesChecker.stop()

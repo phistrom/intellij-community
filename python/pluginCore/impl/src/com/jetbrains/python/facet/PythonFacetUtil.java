@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.jetbrains.python.facet;
 
 import com.intellij.openapi.application.ApplicationManager;
@@ -39,13 +39,16 @@ public class PythonFacetUtil {
           }
         }
         if (name != null) {
-          final ModifiableModelsProvider provider = ModifiableModelsProvider.SERVICE.getInstance();
+          final ModifiableModelsProvider provider = ModifiableModelsProvider.getInstance();
           final LibraryTable.ModifiableModel libraryTableModifiableModel = provider.getLibraryTableModifiableModel();
           Library library = libraryTableModifiableModel.getLibraryByName(name);
           provider.disposeLibraryTableModifiableModel(libraryTableModifiableModel);
           if (library == null) {
             // we just create new project library
             library = PythonSdkTableListener.addLibrary(sdk);
+          }
+          else {
+            PythonSdkTableListener.updateLibrary(sdk);
           }
           if (!librarySeen) {
             model.addLibraryEntry(library);
@@ -54,7 +57,7 @@ public class PythonFacetUtil {
         }
       }
       finally {
-        if (modelChanged){
+        if (modelChanged) {
           model.commit();
         }
         else {

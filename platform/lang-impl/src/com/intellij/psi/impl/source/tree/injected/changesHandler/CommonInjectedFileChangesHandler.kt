@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi.impl.source.tree.injected.changesHandler
 
 import com.intellij.lang.injection.InjectedLanguageManager
@@ -114,7 +114,7 @@ open class CommonInjectedFileChangesHandler(
       if (host == null) continue
       val hostRange = host.textRange
       val hostOffset = hostRange.startOffset
-      var currentHost = host;
+      var currentHost = host
       val hostMarkers = map[host].orEmpty().reversed()
       for ((hostMarker, fragmentMarker, _) in hostMarkers) {
         val localInsideHost = ProperTextRange(hostMarker.startOffset - hostOffset, hostMarker.endOffset - hostOffset)
@@ -162,7 +162,7 @@ open class CommonInjectedFileChangesHandler(
   }
 
   @Deprecated("use updateHostElement", ReplaceWith("updateHostElement"))
-  @ApiStatus.ScheduledForRemoval(inVersion =  "2021.3")
+  @ApiStatus.ScheduledForRemoval
   protected fun updateInjectionHostElement(host: PsiLanguageInjectionHost,
                                            insideHost: ProperTextRange,
                                            content: String): PsiLanguageInjectionHost? {
@@ -205,9 +205,9 @@ open class CommonInjectedFileChangesHandler(
   protected fun failAndReport(@NonNls message: String, e: DocumentEvent? = null, exception: Exception? = null): Nothing =
     throw getReportException(message, e, exception)
 
-  protected fun getReportException(@NonNls message: String,
-                                   e: DocumentEvent?,
-                                   exception: Exception?): RuntimeExceptionWithAttachments =
+  private fun getReportException(@NonNls message: String,
+                                 e: DocumentEvent?,
+                                 exception: Exception?): RuntimeExceptionWithAttachments =
     RuntimeExceptionWithAttachments("${this.javaClass.simpleName}: $message (event = $e)," +
                                     " myInjectedFile.isValid = ${myInjectedFile.isValid}, isValid = $isValid",
                                     *listOfNotNull(
@@ -221,7 +221,7 @@ open class CommonInjectedFileChangesHandler(
 
   protected fun String.esclbr(): String = StringUtil.escapeLineBreak(this)
 
-  protected val RangeMarker.debugText: String
+  private val RangeMarker.debugText: String
     get() = "$range'${
       try {
         document.getText(range)
@@ -240,9 +240,9 @@ open class CommonInjectedFileChangesHandler(
     return "${hostMarker.debugText}\t<-\t${fragmentMarker.debugText}"
   }
 
-  protected fun Iterable<MarkersMapping>.logMarkersRanges(): String = joinToString("\n", transform = ::markerString)
+  private fun Iterable<MarkersMapping>.logMarkersRanges(): String = joinToString("\n", transform = ::markerString)
 
-  protected fun String.substringVerbose(start: Int, cursor: Int): String = try {
+  private fun String.substringVerbose(start: Int, cursor: Int): String = try {
     substring(start, cursor)
   }
   catch (e: StringIndexOutOfBoundsException) {
@@ -291,14 +291,12 @@ open class CommonInjectedFileChangesHandler(
 
 }
 
+@Deprecated("Use platform API", ReplaceWith("debug", "com.intellij.openapi.diagnostic"))
 inline fun Logger.debug(message: () -> String) {
-  if (isDebugEnabled) {
-    debug(message())
-  }
+  this.debug(null, message)
 }
 
 private val LOG = logger<CommonInjectedFileChangesHandler>()
-
 
 data class MarkersMapping(val hostMarker: RangeMarker,
                           val fragmentMarker: RangeMarker,

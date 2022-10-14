@@ -1,55 +1,52 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.plugins;
 
+import com.intellij.diagnostic.LoadingState;
+import com.intellij.openapi.application.Application;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.extensions.PluginId;
-import com.intellij.openapi.util.registry.Registry;
-import com.intellij.openapi.util.registry.RegistryValue;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collection;
-import java.util.LinkedHashSet;
+import java.util.Set;
 
+@ApiStatus.Experimental
 public interface PluginEnabler {
 
-  @ApiStatus.Internal
-  @NotNull RegistryValue ourIsPerProjectEnabled = Registry.get("ide.plugins.per.project");
+  interface Headless extends PluginEnabler {
 
-  void setEnabledState(@NotNull Collection<? extends IdeaPluginDescriptor> descriptors,
-                       @NotNull PluginEnableDisableAction action);
+    boolean isIgnoredDisabledPlugins();
+
+    void setIgnoredDisabledPlugins(boolean ignoredDisabledPlugins);
+  }
+
+  Headless HEADLESS = new DisabledPluginsState();
+
+  static @NotNull PluginEnabler getInstance() {
+    if (!LoadingState.COMPONENTS_LOADED.isOccurred()) {
+      return HEADLESS;
+    }
+
+    Application application = ApplicationManager.getApplication();
+    if (application == null || application.isDisposed()) {
+      return HEADLESS;
+    }
+
+    return application.getService(PluginEnabler.class);
+  }
 
   boolean isDisabled(@NotNull PluginId pluginId);
 
-  default void enablePlugins(@NotNull Collection<? extends IdeaPluginDescriptor> descriptors) {
-    setEnabledState(descriptors, PluginEnableDisableAction.ENABLE_GLOBALLY);
+  boolean enable(@NotNull Collection<? extends IdeaPluginDescriptor> descriptors);
+
+  boolean disable(@NotNull Collection<? extends IdeaPluginDescriptor> descriptors);
+
+  default boolean enableById(@NotNull Set<PluginId> pluginIds) {
+    return enable(IdeaPluginDescriptorImplKt.toPluginDescriptors(pluginIds));
   }
 
-  default void disablePlugins(@NotNull Collection<? extends IdeaPluginDescriptor> descriptors) {
-    setEnabledState(descriptors, PluginEnableDisableAction.DISABLE_GLOBALLY);
+  default boolean disableById(@NotNull Set<PluginId> pluginIds) {
+    return disable(IdeaPluginDescriptorImplKt.toPluginDescriptors(pluginIds));
   }
-
-  static boolean isPerProjectEnabled() {
-    return ourIsPerProjectEnabled.asBoolean();
-  }
-
-  PluginEnabler HEADLESS = new PluginEnabler() {
-
-    @Override
-    public void setEnabledState(@NotNull Collection<? extends IdeaPluginDescriptor> descriptors,
-                                @NotNull PluginEnableDisableAction action) {
-      boolean enabled = action.isEnable();
-      LinkedHashSet<PluginId> pluginIds = new LinkedHashSet<>(descriptors.size());
-      for (IdeaPluginDescriptor descriptor : descriptors) {
-        descriptor.setEnabled(enabled);
-        pluginIds.add(descriptor.getPluginId());
-      }
-
-      DisabledPluginsState.setEnabledState(pluginIds, enabled);
-    }
-
-    @Override
-    public boolean isDisabled(@NotNull PluginId pluginId) {
-      return DisabledPluginsState.isDisabled(pluginId);
-    }
-  };
 }

@@ -19,6 +19,29 @@ public class RedundantMethodOverride extends S {
   void n(int i) {
     super.n(10);
   }
+
+  @Override
+  void <warning descr="Method 'x()' is identical to its super method">x</warning>(List<String> list) {
+    for (String s : list) {
+      System.out.println(s);
+    }
+  }
+
+  @Override
+  void <warning descr="Method 'x()' is identical to its super method">x</warning>() {
+    try {
+    } catch (RuntimeException f) {
+      System.out.println(f);
+    }
+  }
+
+  @Override
+  void <warning descr="Method 'y()' is identical to its super method">y</warning>() {
+    label1:
+    while(true) {
+      if (true) break label1;
+    }
+  }
 }
 class S {
 
@@ -36,6 +59,26 @@ class S {
 
   void n(int i) {
     System.out.println(i);
+  }
+
+  void x(List<String> list) {
+    for (String t : list) {
+      System.out.println(t);
+    }
+  }
+
+  void x() {
+    try {
+    } catch (RuntimeException e) {
+      System.out.println(e);
+    }
+  }
+
+  void y() {
+    label:
+    while(true) {
+      if (true) break label;
+    }
   }
 }
 class A {
@@ -419,5 +462,33 @@ class RedundantSuperBug2 {
 
   public static void main(String[] args) {
     new Sub().foo();
+  }
+}
+class X11 {
+  void x(boolean b) {
+    while (true) {
+      System.out.println();
+      if (b) break;
+    }
+  }
+}
+class X12 extends X11 {
+  @Override
+  void <warning descr="Method 'x()' is identical to its super method">x</warning>(boolean b) {
+    label:
+    while (true) {
+      System.out.println();
+      if  (b) break label;
+    }
+  }
+}
+class X13 extends X11 {
+  @Override
+  void x(boolean b) {
+    label:
+    while (true) {
+      System.out.println("diff");
+      if  (b) break label;
+    }
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.scratch.compile
 
@@ -15,6 +15,7 @@ import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Computable
+import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.io.FileUtil
 import org.jetbrains.kotlin.idea.KotlinJvmBundle
 import org.jetbrains.kotlin.idea.core.KotlinCompilerIde
@@ -63,7 +64,7 @@ class KtScratchExecutionSession(
         }
     }
 
-    private fun executeInBackground(title: String, block: (indicator: ProgressIndicator) -> Unit) {
+    private fun executeInBackground(@NlsContexts.ProgressTitle title: String, block: (indicator: ProgressIndicator) -> Unit) {
         object : Task.Backgroundable(file.project, title, true) {
             override fun run(indicator: ProgressIndicator) = block.invoke(indicator)
         }.queue()

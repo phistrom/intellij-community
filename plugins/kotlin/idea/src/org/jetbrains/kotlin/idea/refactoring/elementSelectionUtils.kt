@@ -1,23 +1,26 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.refactoring
 
 import com.intellij.codeInsight.unwrap.ScopeHighlighter
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.ui.popup.JBPopupListener
 import com.intellij.openapi.ui.popup.LightweightWindowEvent
+import com.intellij.openapi.util.NlsSafe
 import com.intellij.psi.PsiComment
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiWhiteSpace
 import com.intellij.psi.util.PsiTreeUtil
 import org.jetbrains.kotlin.builtins.KotlinBuiltIns
-import org.jetbrains.kotlin.idea.KotlinBundle
+import org.jetbrains.kotlin.descriptors.ClassKind
+import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.caches.resolve.analyze
-import org.jetbrains.kotlin.idea.core.util.CodeInsightUtils
 import org.jetbrains.kotlin.idea.refactoring.introduce.findExpressionOrStringFragment
+import org.jetbrains.kotlin.idea.util.ElementKind
+import org.jetbrains.kotlin.idea.util.application.isUnitTestMode
+import org.jetbrains.kotlin.idea.util.findElement
 import org.jetbrains.kotlin.kdoc.psi.api.KDoc
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.*
@@ -25,7 +28,9 @@ import org.jetbrains.kotlin.psi.psiUtil.getNextSiblingIgnoringWhitespaceAndComme
 import org.jetbrains.kotlin.psi.psiUtil.getParentOfTypeAndBranch
 import org.jetbrains.kotlin.psi.psiUtil.getPrevSiblingIgnoringWhitespaceAndComments
 import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
+import org.jetbrains.kotlin.resolve.BindingContext
 import org.jetbrains.kotlin.resolve.lazy.BodyResolveMode
+import org.jetbrains.kotlin.resolve.scopes.receivers.ClassQualifier
 import org.jetbrains.kotlin.utils.addToStdlib.safeAs
 import java.awt.Component
 import javax.swing.DefaultListCellRenderer
@@ -35,44 +40,21 @@ import kotlin.math.min
 fun selectElement(
     editor: Editor,
     file: KtFile,
-    elementKinds: Collection<CodeInsightUtils.ElementKind>,
+    elementKind: ElementKind,
     callback: (PsiElement?) -> Unit
-) = selectElement(editor, file, true, elementKinds, callback)
+) = selectElement(editor, file, true, listOf(elementKind), callback)
 
 fun selectElement(
     editor: Editor,
     file: KtFile,
     failOnEmptySuggestion: Boolean,
-    elementKinds: Collection<CodeInsightUtils.ElementKind>,
+    elementKinds: Collection<ElementKind>,
     callback: (PsiElement?) -> Unit
 ) {
     if (editor.selectionModel.hasSelection()) {
-        var selectionStart = editor.selectionModel.selectionStart
-        var selectionEnd = editor.selectionModel.selectionEnd
-
-        var firstElement: PsiElement = file.findElementAt(selectionStart)!!
-        var lastElement: PsiElement = file.findElementAt(selectionEnd - 1)!!
-
-        if (PsiTreeUtil.getParentOfType(
-                firstElement,
-                KtLiteralStringTemplateEntry::class.java,
-                KtEscapeStringTemplateEntry::class.java
-            ) == null
-            && PsiTreeUtil.getParentOfType(
-                lastElement,
-                KtLiteralStringTemplateEntry::class.java,
-                KtEscapeStringTemplateEntry::class.java
-            ) == null
-        ) {
-            firstElement = firstElement.getNextSiblingIgnoringWhitespaceAndComments(true)!!
-            lastElement = lastElement.getPrevSiblingIgnoringWhitespaceAndComments(true)!!
-            selectionStart = firstElement.textRange.startOffset
-            selectionEnd = lastElement.textRange.endOffset
-        }
-
-        val element = elementKinds.asSequence()
-            .mapNotNull { findElement(file, selectionStart, selectionEnd, failOnEmptySuggestion, it) }
-            .firstOrNull()
+        val selectionStart = editor.selectionModel.selectionStart
+        val selectionEnd = editor.selectionModel.selectionEnd
+        val element = findElementAtRange(file, selectionStart, selectionEnd, elementKinds, failOnEmptySuggestion)
         callback(element)
     } else {
         val offset = editor.caretModel.offset
@@ -80,10 +62,44 @@ fun selectElement(
     }
 }
 
+fun findElementAtRange(
+    file: KtFile,
+    selectionStart: Int,
+    selectionEnd: Int,
+    elementKinds: Collection<ElementKind>,
+    failOnEmptySuggestion: Boolean
+): PsiElement? {
+    var adjustedStart = selectionStart
+    var adjustedEnd = selectionEnd
+    var firstElement: PsiElement = file.findElementAt(adjustedStart)!!
+    var lastElement: PsiElement = file.findElementAt(adjustedEnd - 1)!!
+
+    if (PsiTreeUtil.getParentOfType(
+            firstElement,
+            KtLiteralStringTemplateEntry::class.java,
+            KtEscapeStringTemplateEntry::class.java
+        ) == null
+        && PsiTreeUtil.getParentOfType(
+            lastElement,
+            KtLiteralStringTemplateEntry::class.java,
+            KtEscapeStringTemplateEntry::class.java
+        ) == null
+    ) {
+        firstElement = firstElement.getNextSiblingIgnoringWhitespaceAndComments(true)!!
+        lastElement = lastElement.getPrevSiblingIgnoringWhitespaceAndComments(true)!!
+        adjustedStart = firstElement.textRange.startOffset
+        adjustedEnd = lastElement.textRange.endOffset
+    }
+
+    return elementKinds.asSequence()
+        .mapNotNull { findElement(file, adjustedStart, adjustedEnd, failOnEmptySuggestion, it) }
+        .firstOrNull()
+}
+
 fun getSmartSelectSuggestions(
     file: PsiFile,
     offset: Int,
-    elementKind: CodeInsightUtils.ElementKind,
+    elementKind: ElementKind,
     isOriginalOffset: Boolean = true,
 ): List<KtElement> {
     if (offset < 0) return emptyList()
@@ -106,13 +122,13 @@ fun getSmartSelectSuggestions(
 
         if (element is KtTypeElement) {
             addElement =
-                elementKind == CodeInsightUtils.ElementKind.TYPE_ELEMENT
+                elementKind == ElementKind.TYPE_ELEMENT
                         && element.getParentOfTypeAndBranch<KtUserType>(true) { qualifier } == null
             if (!addElement) {
                 keepPrevious = false
             }
         } else if (element is KtExpression && element !is KtStatementExpression) {
-            addElement = elementKind == CodeInsightUtils.ElementKind.EXPRESSION
+            addElement = elementKind == ElementKind.EXPRESSION
 
             if (addElement) {
                 if (element is KtParenthesizedExpression) {
@@ -163,7 +179,7 @@ private fun smartSelectElement(
     file: PsiFile,
     offset: Int,
     failOnEmptySuggestion: Boolean,
-    elementKinds: Collection<CodeInsightUtils.ElementKind>,
+    elementKinds: Collection<ElementKind>,
     callback: (PsiElement?) -> Unit
 ) {
     val elements = elementKinds.flatMap { getSmartSelectSuggestions(file, offset, it) }
@@ -175,7 +191,7 @@ private fun smartSelectElement(
         return
     }
 
-    if (elements.size == 1 || ApplicationManager.getApplication().isUnitTestMode) {
+    if (elements.size == 1 || isUnitTestMode()) {
         callback(elements.first())
         return
     }
@@ -183,11 +199,11 @@ private fun smartSelectElement(
     val highlighter = ScopeHighlighter(editor)
     val title: String = if (elementKinds.size == 1) {
         when (elementKinds.iterator().next()) {
-            CodeInsightUtils.ElementKind.EXPRESSION -> "Expressions"
-            CodeInsightUtils.ElementKind.TYPE_ELEMENT, CodeInsightUtils.ElementKind.TYPE_CONSTRUCTOR -> "Types"
+            ElementKind.EXPRESSION -> KotlinBundle.message("popup.title.expressions")
+            ElementKind.TYPE_ELEMENT, ElementKind.TYPE_CONSTRUCTOR -> KotlinBundle.message("popup.title.types")
         }
     } else {
-        "Elements"
+        KotlinBundle.message("popup.title.elements")
     }
 
     JBPopupFactory.getInstance()
@@ -225,6 +241,7 @@ private fun smartSelectElement(
         .showInBestPositionFor(editor)
 }
 
+@NlsSafe
 fun getExpressionShortText(element: KtElement): String {
     val text = element.renderTrimmed().trimStart()
     val firstNewLinePos = text.indexOf('\n')
@@ -238,12 +255,20 @@ private fun findElement(
     startOffset: Int,
     endOffset: Int,
     failOnNoExpression: Boolean,
-    elementKind: CodeInsightUtils.ElementKind
+    elementKind: ElementKind
 ): PsiElement? {
-    var element = CodeInsightUtils.findElement(file, startOffset, endOffset, elementKind)
-    if (element == null && elementKind == CodeInsightUtils.ElementKind.EXPRESSION) {
+    var element = findElement(file, startOffset, endOffset, elementKind)
+    if (element == null && elementKind == ElementKind.EXPRESSION) {
         element = findExpressionOrStringFragment(file, startOffset, endOffset)
     }
+
+    if (element is KtExpression) {
+        val qualifier = element.analyze().get(BindingContext.QUALIFIER, element)
+        if (qualifier != null && (qualifier !is ClassQualifier || qualifier.descriptor.kind != ClassKind.OBJECT)) {
+            element = null
+        }
+    }
+
     if (element == null) {
         //todo: if it's infix expression => add (), then commit document then return new created expression
 
@@ -252,6 +277,7 @@ private fun findElement(
         }
         return null
     }
+
     return element
 }
 

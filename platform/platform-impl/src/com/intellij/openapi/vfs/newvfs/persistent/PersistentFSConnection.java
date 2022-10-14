@@ -1,24 +1,33 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vfs.newvfs.persistent;
 
+import com.intellij.core.CoreBundle;
+import com.intellij.notification.NotificationGroupManager;
+import com.intellij.notification.NotificationType;
+import com.intellij.openapi.Forceable;
+import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.vfs.newvfs.AttributeInputStream;
+import com.intellij.openapi.vfs.newvfs.AttributeOutputStream;
 import com.intellij.util.ExceptionUtil;
 import com.intellij.util.FlushingDaemon;
 import com.intellij.util.hash.ContentHashEnumerator;
-import com.intellij.util.io.EnumeratorStringDescriptor;
-import com.intellij.util.io.PersistentStringEnumerator;
+import com.intellij.util.io.*;
 import com.intellij.util.io.storage.CapacityAllocationPolicy;
 import com.intellij.util.io.storage.HeavyProcessLatch;
 import com.intellij.util.io.storage.RefCountingContentStorage;
-import com.intellij.util.io.storage.Storage;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
 import java.io.*;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 final class PersistentFSConnection {
   private static final Logger LOG = Logger.getInstance(PersistentFSConnection.class);
@@ -29,21 +38,26 @@ final class PersistentFSConnection {
 
   private final IntList myFreeRecords;
   @NotNull
-  private final VfsDependentEnum<String> myAttributesList;
+  private final VfsDependentEnum myAttributesList;
   @NotNull
   private final PersistentFSPaths myPersistentFSPaths;
 
   @NotNull
-  private final Storage myAttributes;
+  private final AbstractAttributesStorage myAttributesStorage;
   @NotNull
   private final RefCountingContentStorage myContents;
   @NotNull
   private final PersistentFSRecordsStorage myRecords;
   @Nullable
   private final ContentHashEnumerator myContentHashesEnumerator;
-  private final PersistentStringEnumerator myNames;
+  private final ScannableDataEnumeratorEx<String> myNames;
+  /**
+   * Enumerator for repeating strings used in attributes. Used to support
+   * {@link AttributeInputStream#readEnumeratedString()}
+   * {@link AttributeOutputStream#writeEnumeratedString(String)}
+   */
+  private final @NotNull SimpleStringPersistentEnumerator myEnumeratedAttributes;
 
-  private volatile int myLocalModificationCount;
   private volatile boolean myDirty;
   /**
    * accessed under {@link #r}/{@link #w}
@@ -52,27 +66,37 @@ final class PersistentFSConnection {
   /**
    * accessed under {@link #r}/{@link #w}
    */
-  private boolean myCorrupted;
+  private final AtomicBoolean myCorrupted = new AtomicBoolean();
 
   PersistentFSConnection(@NotNull PersistentFSPaths paths,
                          @NotNull PersistentFSRecordsStorage records,
-                         @NotNull PersistentStringEnumerator names,
-                         @NotNull Storage attributes,
+                         @NotNull ScannableDataEnumeratorEx<String> names,
+                         @NotNull AbstractAttributesStorage attributes,
                          @NotNull RefCountingContentStorage contents,
                          @Nullable ContentHashEnumerator contentHashesEnumerator,
+                         @NotNull SimpleStringPersistentEnumerator enumeratedAttributes,
                          @NotNull IntList freeRecords,
                          boolean markDirty) throws IOException {
+    if (!(names instanceof Forceable) || !(names instanceof Closeable)) {
+      //RC: there is no simple way to specify type like DataEnumerator & Forceable & Closeable in java,
+      //    hence the runtime check here (and in methods below calling Forceable/Closeable methods).
+      //    This is needed only during transition period, while we're experimenting with plugging in
+      //    different names impls -- after we'll decide which impl is the best, explicit type could be specified here
+      throw new IllegalArgumentException("names(" + names + ") must implement Forceable & Closeable");
+    }
     myRecords = records;
     myNames = names;
-    myAttributes = attributes;
+    myAttributesStorage = attributes;
     myContents = contents;
     myContentHashesEnumerator = contentHashesEnumerator;
     myPersistentFSPaths = paths;
     myFreeRecords = freeRecords;
+    myEnumeratedAttributes = enumeratedAttributes;
+
     if (markDirty) {
       markDirty();
     }
-    myAttributesList = new VfsDependentEnum<>(getPersistentFSPaths(), "attrib", EnumeratorStringDescriptor.INSTANCE, 1);
+    myAttributesList = new VfsDependentEnum(getPersistentFSPaths(), "attrib", 1);
 
     if (FSRecords.backgroundVfsFlush) {
       myFlushingFuture = FlushingDaemon.everyFiveSeconds(new Runnable() {
@@ -80,16 +104,22 @@ final class PersistentFSConnection {
 
         @Override
         public void run() {
-          if (lastModCount == myLocalModificationCount) {
+          //TODO RC: use myDirty instead of myRecords.getGlobalModCount?
+          if (lastModCount == myRecords.getGlobalModCount()) {
             flush();
           }
-          lastModCount = myLocalModificationCount;
+          lastModCount = myRecords.getGlobalModCount();
         }
       });
     }
     else {
       myFlushingFuture = null;
     }
+  }
+
+  @NotNull("Vfs must be initialized")
+  SimpleStringPersistentEnumerator getEnumeratedAttributes() {
+    return myEnumeratedAttributes;
   }
 
   @NotNull("Content hash enumerator must be initialized")
@@ -103,12 +133,12 @@ final class PersistentFSConnection {
   }
 
   @NotNull("Vfs must be initialized")
-  Storage getAttributes() {
-    return myAttributes;
+  AbstractAttributesStorage getAttributes() {
+    return myAttributesStorage;
   }
 
   @NotNull("Vfs must be initialized")
-  PersistentStringEnumerator getNames() {
+  ScannableDataEnumeratorEx<String> getNames() {
     return myNames;
   }
 
@@ -119,15 +149,22 @@ final class PersistentFSConnection {
 
   @NotNull
   IntList getFreeRecords() {
-    return myFreeRecords;
+    synchronized (myFreeRecords) {
+      return new IntArrayList(myFreeRecords);
+    }
   }
 
   long getTimestamp() throws IOException {
     return myRecords.getTimestamp();
   }
 
-  int getFreeRecord() {
-    return myFreeRecords.isEmpty() ? 0 : myFreeRecords.removeInt(myFreeRecords.size() - 1);
+  /**
+   * @return id of record to re-use, or -1 if no records for reuse remain
+   */
+  int reserveFreeRecord() {
+    synchronized (myFreeRecords) {
+      return myFreeRecords.isEmpty() ? -1 : myFreeRecords.removeInt(myFreeRecords.size() - 1);
+    }
   }
 
   void createBrokenMarkerFile(@Nullable Throwable reason) {
@@ -150,41 +187,32 @@ final class PersistentFSConnection {
     }  // No luck.
   }
 
-  int getPersistentModCount() throws IOException {
+  @TestOnly
+  int getPersistentModCount() {
     return myRecords.getGlobalModCount();
   }
 
-  int incGlobalModCount() throws IOException {
-    incLocalModCount();
-    return myRecords.incGlobalModCount();
-  }
-
   void markDirty() throws IOException {
-    assert FSRecords.lock.isWriteLocked();
     if (!myDirty) {
       myDirty = true;
       myRecords.setConnectionStatus(PersistentFSHeaders.CONNECTED_MAGIC);
     }
   }
 
-  void incLocalModCount() throws IOException {
-    markDirty();
-    //noinspection NonAtomicOperationOnVolatileField
-    myLocalModificationCount++;
-  }
-
-  int getLocalModificationCount() {
-    return myLocalModificationCount;
+  int getModificationCount() {
+    return myRecords.getGlobalModCount();
   }
 
   void doForce() throws IOException {
     // avoid NPE when close has already taken place
     if (myNames != null && myFlushingFuture != null) {
-      myNames.force();
-      myAttributes.force();
+      if (myNames instanceof Forceable) {
+        ((Forceable)myNames).force();
+      }
+      myAttributesStorage.force();
       myContents.force();
       if (myContentHashesEnumerator != null) myContentHashesEnumerator.force();
-      markClean();
+      markClean();      //TODO RC: shouldn't markClean() be _after_ myRecords.close()?
       myRecords.force();
     }
   }
@@ -192,15 +220,18 @@ final class PersistentFSConnection {
   // must not be run under write lock to avoid other clients wait for read lock
   private void flush() {
     if (isDirty() && !HeavyProcessLatch.INSTANCE.isRunning()) {
-      FSRecords.readAndHandleErrors(() -> {
+      try {
         doForce();
-        return null;
-      });
+      }
+      catch (IOException e) {
+        handleError(e);
+        throw new RuntimeException(e);
+      }
     }
   }
 
   public boolean isDirty() {
-    return myDirty || myNames.isDirty() || myAttributes.isDirty() || myContents.isDirty() || myRecords.isDirty() ||
+    return myDirty || ((Forceable)myNames).isDirty() || myAttributesStorage.isDirty() || myContents.isDirty() || myRecords.isDirty() ||
            myContentHashesEnumerator != null && myContentHashesEnumerator.isDirty();
   }
 
@@ -209,10 +240,10 @@ final class PersistentFSConnection {
       myFlushingFuture.cancel(false);
     }
 
-    markClean();
+    markClean(); //TODO RC: shouldn't markClean() be the last statement, after storages close?
     closeStorages(myRecords,
                   myNames,
-                  myAttributes,
+                  myAttributesStorage,
                   myContentHashesEnumerator,
                   myContents);
   }
@@ -222,22 +253,23 @@ final class PersistentFSConnection {
     return myPersistentFSPaths;
   }
 
-  public void incModCount(int fileId) throws IOException {
-    int count = incGlobalModCount();
-    getRecords().setModCount(fileId, count);
+  public void markRecordAsModified(int fileId) throws IOException {
+    getRecords().markRecordAsModified(fileId);
+    markDirty();
   }
 
   static void closeStorages(@Nullable PersistentFSRecordsStorage records,
-                            @Nullable PersistentStringEnumerator names,
-                            @Nullable Storage attributes,
+                            @Nullable ScannableDataEnumeratorEx<String> names,
+                            @Nullable AbstractAttributesStorage attributes,
                             @Nullable ContentHashEnumerator contentHashesEnumerator,
                             @Nullable RefCountingContentStorage contents) throws IOException {
-    if (names != null) {
-      names.close();
+    if (names instanceof Closeable) {//implies != null
+      ((Closeable)names).close();
     }
 
     if (attributes != null) {
-      Disposer.dispose(attributes);
+      attributes.close();
+      //Disposer.dispose(attributes);
     }
 
     if (contents != null) {
@@ -253,13 +285,11 @@ final class PersistentFSConnection {
     }
   }
 
-  // either called from FlushingDaemon thread under read lock, or from handleError under write lock
   void markClean() throws IOException {
-    assert FSRecords.lock.isWriteLocked() || FSRecords.lock.getReadHoldCount() != 0;
+    // no synchronization, it's ok to have race here
     if (myDirty) {
       myDirty = false;
-      // writing here under read lock is safe because no-one else read or write at this offset (except at startup)
-      myRecords.setConnectionStatus(myCorrupted
+      myRecords.setConnectionStatus(myCorrupted.get()
                                     ? PersistentFSHeaders.CORRUPTED_MAGIC
                                     : PersistentFSHeaders.SAFELY_CLOSED_MAGIC);
     }
@@ -267,22 +297,20 @@ final class PersistentFSConnection {
 
   int getAttributeId(@NotNull String attId) throws IOException {
     // do not invoke FSRecords.requestVfsRebuild under read lock to avoid deadlock
-    return myAttributesList.getIdRaw(attId, false) + FIRST_ATTR_ID_OFFSET;
+    return myAttributesList.getIdRaw(attId) + FIRST_ATTR_ID_OFFSET;
   }
 
   @Contract("_->fail")
   void handleError(@NotNull Throwable e) throws RuntimeException, Error {
-    assert FSRecords.lock.getReadHoldCount() == 0;
-
     // No need to forcibly mark VFS corrupted if it is already shut down
     try {
-      FSRecords.write(() -> {
-        if (!myCorrupted) {
-          createBrokenMarkerFile(e);
-          myCorrupted = true;
-          doForce();
+      if (myCorrupted.compareAndSet(false, true)) {
+        createBrokenMarkerFile(e);
+        if (!ApplicationManager.getApplication().isHeadlessEnvironment()) {
+          showCorruptionNotification();
         }
-      });
+        doForce();
+      }
     }
     catch (IOException ioException) {
       LOG.error(ioException);
@@ -305,5 +333,14 @@ final class PersistentFSConnection {
    */
   static void ensureIdIsValid(int id) {
     assert id > 0 : id;
+  }
+
+  private static void showCorruptionNotification() {
+    NotificationGroupManager.getInstance().getNotificationGroup("IDE Caches")
+      .createNotification(CoreBundle.message("vfs.corruption.notification.title"),
+                          CoreBundle.message("vfs.corruption.notification.text"),
+                          NotificationType.INFORMATION)
+      .addAction(ActionManager.getInstance().getAction("RestartIde"))
+      .notify(null);
   }
 }

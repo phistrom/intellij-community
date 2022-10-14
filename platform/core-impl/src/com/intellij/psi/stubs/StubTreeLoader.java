@@ -53,11 +53,14 @@ public abstract class StubTreeLoader {
     return null;
   }
 
+  protected boolean isTooLarge(@NotNull VirtualFile file) {
+    return false;
+  }
+
   @NotNull
-  public RuntimeException stubTreeAndIndexDoNotMatch(@Nullable ObjectStubTree stubTree,
+  public RuntimeException stubTreeAndIndexDoNotMatch(@Nullable ObjectStubTree<?> stubTree,
                                                      @NotNull PsiFileWithStubSupport psiFile,
                                                      @Nullable Throwable cause) {
-
     return ProgressManager.getInstance().computeInNonCancelableSection(() -> {
       VirtualFile file = psiFile.getViewProvider().getVirtualFile();
       StubTree stubTreeFromIndex = (StubTree)readFromVFile(psiFile.getProject(), file);
@@ -82,11 +85,7 @@ public abstract class StubTreeLoader {
         PsiFile fromText = PsiFileFactory.getInstance(psiFile.getProject()).createFileFromText(psiFile.getName(), psiFile.getFileType(), text);
         if (fromText.getLanguage().equals(psiFile.getLanguage())) {
           boolean consistent = DebugUtil.psiToString(psiFile, false).equals(DebugUtil.psiToString(fromText, false));
-          if (consistent) {
-            msg += "\n tree consistent";
-          } else {
-            msg += "\n AST INCONSISTENT, perhaps after incremental reparse; " + fromText;
-          }
+          msg += consistent ? "\n tree consistent" : "\n AST INCONSISTENT, perhaps after incremental reparse; " + fromText;
         }
       }
 
@@ -136,17 +135,17 @@ public abstract class StubTreeLoader {
     return new ManyProjectsStubIndexMismatch(message, cause, attachments);
   }
 
-  private static Attachment @NotNull [] createAttachments(@Nullable ObjectStubTree stubTree,
+  private static Attachment @NotNull [] createAttachments(@Nullable ObjectStubTree<?> stubTree,
                                                           @NotNull PsiFileWithStubSupport psiFile,
-                                                          VirtualFile file,
+                                                          @NotNull VirtualFile file,
                                                           @Nullable StubTree stubTreeFromIndex) {
     List<Attachment> attachments = new ArrayList<>();
     attachments.add(new Attachment(file.getPath() + "_file.txt", psiFile instanceof PsiCompiledElement ? "compiled" : psiFile.getText()));
     if (stubTree != null) {
-      attachments.add(new Attachment("stubTree.txt", ((PsiFileStubImpl)stubTree.getRoot()).printTree()));
+      attachments.add(new Attachment("stubTree.txt", ((PsiFileStubImpl<?>)stubTree.getRoot()).printTree()));
     }
     if (stubTreeFromIndex != null) {
-      attachments.add(new Attachment("stubTreeFromIndex.txt", ((PsiFileStubImpl)stubTreeFromIndex.getRoot()).printTree()));
+      attachments.add(new Attachment("stubTreeFromIndex.txt", ((PsiFileStubImpl<?>)stubTreeFromIndex.getRoot()).printTree()));
     }
     return attachments.toArray(Attachment.EMPTY_ARRAY);
   }
@@ -160,7 +159,9 @@ public abstract class StubTreeLoader {
            ", languages = [" + StringUtil.join(provider.getLanguages(), Language::getID, ", ") +
            "], fileTypes = [" + StringUtil.join(provider.getAllFiles(), file -> file.getFileType().getName(), ", ") +
            "], files = [" + StringUtil.join(provider.getAllFiles(), fileClassName, ", ") +
-           "], roots = [" + StringUtil.join(roots, stubRootToString, ", ") + "]";
+           "], roots = [" + StringUtil.join(roots, stubRootToString, ", ") +
+           "], indexingInfo = " + getInstance().getIndexingStampInfo(provider.getVirtualFile()) +
+           ", isTooLarge = " + getInstance().isTooLarge(provider.getVirtualFile());
   }
 }
 

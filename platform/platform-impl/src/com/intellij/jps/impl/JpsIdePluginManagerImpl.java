@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.jps.impl;
 
 import com.intellij.openapi.application.Application;
@@ -18,6 +18,7 @@ import com.intellij.openapi.roots.SourceFolder;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.Ref;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.workspaceModel.ide.impl.legacyBridge.module.roots.SourceRootTypeRegistry;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -136,12 +137,14 @@ public final class JpsIdePluginManagerImpl extends JpsPluginManager {
     if (jpsServiceManager instanceof JpsServiceManagerImpl) {
       ((JpsServiceManagerImpl)jpsServiceManager).cleanupExtensionCache();
     }
+    SourceRootTypeRegistry.getInstance().clearCache();
   }
 
   private void handlePluginAdded(@NotNull PluginDescriptor pluginDescriptor) {
     if (myExternalBuildPlugins.contains(pluginDescriptor)) {
       return;
     }
+    SourceRootTypeRegistry.getInstance().clearCache();
     Set<String> before = new HashSet<>();
     for (JpsModelSerializerExtension extension : loadExtensions(JpsModelSerializerExtension.class)) {
       for (JpsModuleSourceRootPropertiesSerializer<?> serializer : extension.getModuleSourceRootPropertiesSerializers()) {
@@ -285,6 +288,7 @@ public final class JpsIdePluginManagerImpl extends JpsPluginManager {
     if (loaders.isEmpty()) {
       return Collections.emptyList();
     }
+
     @NonNls String resourceName = "META-INF/services/" + extensionClass.getName();
     Set<Class<T>> classes = new LinkedHashSet<>();
     Set<String> loadedUrls = new HashSet<>();

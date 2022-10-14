@@ -1,19 +1,20 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.gdpr
 
 import com.intellij.ide.IdeBundle
 import com.intellij.ide.gdpr.ui.HtmlRtfPane
-import com.intellij.idea.Main
+import com.intellij.idea.AppExitCodes
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.OnePixelDivider
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.NlsSafe
+import com.intellij.openapi.util.text.HtmlChunk
 import com.intellij.ui.BrowserHyperlinkListener
 import com.intellij.ui.JBColor
 import com.intellij.ui.border.CustomLineBorder
 import com.intellij.ui.components.JBScrollPane
-import com.intellij.util.ui.JBHtmlEditorKit
+import com.intellij.util.ui.HTMLEditorKitBuilder
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.SwingHelper
 import java.awt.BorderLayout
@@ -117,7 +118,7 @@ class AgreementUi private constructor(@NlsSafe val htmlText: String, val exitOnC
         if (exitOnCancel) {
           val application = ApplicationManager.getApplication()
           if (application == null) {
-            exitProcess(Main.PRIVACY_POLICY_REJECTION)
+            exitProcess(AppExitCodes.PRIVACY_POLICY_REJECTION)
           }
           else {
             application.exit(true, true, false)
@@ -133,7 +134,7 @@ class AgreementUi private constructor(@NlsSafe val htmlText: String, val exitOnC
     return JTextPane().apply {
       contentType = "text/html"
       addHyperlinkListener(BrowserHyperlinkListener.INSTANCE)
-      editorKit = JBHtmlEditorKit(false)
+      editorKit = HTMLEditorKitBuilder().withGapsBetweenParagraphs().build()
       text = htmlText
 
       val styleSheet = (document as HTMLDocument).styleSheet
@@ -183,14 +184,14 @@ class AgreementUi private constructor(@NlsSafe val htmlText: String, val exitOnC
     return this
   }
 
-  fun setText(newHtmlText: String): AgreementUi {
+  fun setContent(newHtml: HtmlChunk): AgreementUi {
     val htmlRtfPane = htmlRtfPane
     if (htmlRtfPane != null) {
-      val pane = htmlRtfPane.replaceText(newHtmlText)
+      val pane = htmlRtfPane.replaceText(newHtml.toString())
       pane.caretPosition = 0
     }
     else {
-      viewer!!.text = newHtmlText
+      viewer!!.text = newHtml.toString()
     }
     return this
   }

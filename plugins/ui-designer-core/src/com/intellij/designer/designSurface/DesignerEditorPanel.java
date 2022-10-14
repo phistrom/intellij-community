@@ -1107,7 +1107,7 @@ public abstract class DesignerEditorPanel extends JPanel
 
     @NotNull
     @Override
-    protected DefaultActionGroup createPopupActionGroup(JComponent button) {
+    protected DefaultActionGroup createPopupActionGroup(@NotNull JComponent button, @NotNull DataContext context) {
       DefaultActionGroup actionGroup = new DefaultActionGroup();
       for (final FixableMessageInfo message : myItems) {
         AnAction action;
@@ -1116,16 +1116,12 @@ public abstract class DesignerEditorPanel extends JPanel
           final AnAction[] defaultAction = new AnAction[1];
           DefaultActionGroup popupGroup = new DefaultActionGroup() {
             @Override
-            public boolean canBePerformed(@NotNull DataContext context) {
-              return true;
-            }
-
-            @Override
             public void actionPerformed(@NotNull AnActionEvent e) {
               defaultAction[0].actionPerformed(e);
             }
           };
           popupGroup.setPopup(true);
+          popupGroup.getTemplatePresentation().setPerformGroup(true);
           action = popupGroup;
 
           if (message.myQuickFix != null && (message.myLinkText.length() > 0 || message.myAfterLinkText.length() > 0)) {

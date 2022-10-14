@@ -1,6 +1,5 @@
 // "Replace with 'Factory()'" "true"
-// WITH_RUNTIME
-// COMPILER_ARGUMENTS: -XXLanguage:-NewInference
+// WITH_STDLIB
 
 class Foo<T> @Deprecated("", ReplaceWith("Factory<T>()")) constructor()
 fun <T> Factory(): Foo<T> = TODO()

@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package org.jetbrains.kotlin.idea.actions.generate
 
@@ -10,7 +10,6 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.DataContext
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.InputValidator
@@ -27,15 +26,17 @@ import com.intellij.ui.components.JBList
 import com.intellij.util.IncorrectOperationException
 import org.jetbrains.kotlin.asJava.toLightClass
 import org.jetbrains.kotlin.descriptors.FunctionDescriptor
-import org.jetbrains.kotlin.idea.KotlinBundle
+import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.caches.resolve.unsafeResolveToDescriptor
-import org.jetbrains.kotlin.idea.core.insertMember
-import org.jetbrains.kotlin.idea.core.overrideImplement.OverrideMemberChooserObject.BodyType
+import org.jetbrains.kotlin.idea.core.insertMembersAfterAndReformat
+import org.jetbrains.kotlin.idea.core.overrideImplement.BodyType
 import org.jetbrains.kotlin.idea.core.overrideImplement.generateUnsupportedOrSuperCall
 import org.jetbrains.kotlin.idea.j2k.j2k
 import org.jetbrains.kotlin.idea.quickfix.createFromUsage.callableBuilder.setupEditorSelection
 import org.jetbrains.kotlin.idea.testIntegration.findSuitableFrameworks
 import org.jetbrains.kotlin.idea.util.application.executeWriteCommand
+import org.jetbrains.kotlin.idea.util.application.isUnitTestMode
+import org.jetbrains.kotlin.j2k.ConverterSettings.Companion.publicByDefault
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.isIdentifier
@@ -56,7 +57,7 @@ abstract class KotlinGenerateTestSupportActionBase(
             frameworks.ifEmpty { return }
             frameworks.singleOrNull()?.let { return consumer(it) }
 
-            if (ApplicationManager.getApplication().isUnitTestMode) return consumer(frameworks.first())
+            if (isUnitTestMode()) return consumer(frameworks.first())
 
             val list = JBList<TestFramework>(*frameworks.toTypedArray())
             list.cellRenderer = TestFrameworkListCellRenderer()
@@ -134,7 +135,7 @@ abstract class KotlinGenerateTestSupportActionBase(
 
     private fun doGenerate(editor: Editor, file: PsiFile, klass: KtClassOrObject, framework: TestFramework) {
         val project = file.project
-        val commandName = KotlinBundle.message("action.generate.test.support.generate.test.function")
+        val commandName = KotlinBundle.message("command.generate.test.support.generate.test.function")
 
         val fileTemplateDescriptor = methodKind.getFileTemplateDescriptor(framework)
         val fileTemplate = FileTemplateManager.getInstance(project).getCodeTemplate(fileTemplateDescriptor.fileName)
@@ -142,7 +143,7 @@ abstract class KotlinGenerateTestSupportActionBase(
         var name: String? = null
         if (templateText.contains(NAME_VAR)) {
             name = if (templateText.contains("test$NAME_VAR")) "Name" else "name"
-            if (!ApplicationManager.getApplication().isUnitTestMode) {
+            if (!isUnitTestMode()) {
                 val message = KotlinBundle.message("action.generate.test.support.choose.test.name")
                 name = Messages.showInputDialog(message, commandName, null, name, NAME_VALIDATOR) ?: return
             }
@@ -158,21 +159,21 @@ abstract class KotlinGenerateTestSupportActionBase(
                 val factory = PsiElementFactory.getInstance(project)
                 val psiMethod = factory.createMethodFromText(templateText, null)
                 psiMethod.throwsList.referenceElements.forEach { it.delete() }
-                var function = psiMethod.j2k() as? KtNamedFunction ?: run {
+                var function = psiMethod.j2k(settings = publicByDefault) as? KtNamedFunction ?: run {
                     errorHint = KotlinBundle.message("action.generate.test.support.error.cant.convert.java.template")
                     return@executeWriteCommand
                 }
                 name?.let {
                     function = substituteNewName(function, it)
                 }
-                val functionInPlace = insertMember(editor, klass, function)
+                val functionInPlace = insertMembersAfterAndReformat(editor, klass, function)
 
                 val functionDescriptor = functionInPlace.unsafeResolveToDescriptor() as FunctionDescriptor
                 val overriddenDescriptors = functionDescriptor.overriddenDescriptors
                 val bodyText = when (overriddenDescriptors.size) {
-                    0 -> generateUnsupportedOrSuperCall(project, functionDescriptor, BodyType.FROM_TEMPLATE)
-                    1 -> generateUnsupportedOrSuperCall(project, overriddenDescriptors.single(), BodyType.SUPER)
-                    else -> generateUnsupportedOrSuperCall(project, overriddenDescriptors.first(), BodyType.QUALIFIED_SUPER)
+                    0 -> generateUnsupportedOrSuperCall(project, functionDescriptor, BodyType.FromTemplate)
+                    1 -> generateUnsupportedOrSuperCall(project, overriddenDescriptors.single(), BodyType.Super)
+                    else -> generateUnsupportedOrSuperCall(project, overriddenDescriptors.first(), BodyType.QualifiedSuper)
                 }
                 functionInPlace.bodyExpression?.delete()
                 functionInPlace.add(KtPsiFactory(project).createBlock(bodyText))

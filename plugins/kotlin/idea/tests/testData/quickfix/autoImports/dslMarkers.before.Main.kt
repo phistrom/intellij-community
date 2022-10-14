@@ -1,5 +1,5 @@
-// "Import" "true"
-// WITH_RUNTIME
+// "Import extension function 'BBB.aaa'" "true"
+// WITH_STDLIB
 // ERROR: Unresolved reference: aaa
 
 fun test() {
@@ -9,3 +9,4 @@ fun test() {
         }
     }
 }
+/* IGNORE_FIR */

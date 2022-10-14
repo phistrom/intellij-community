@@ -18,7 +18,6 @@ import com.intellij.xdebugger.frame.XStackFrame;
 import com.intellij.xdebugger.frame.XSuspendContext;
 import com.intellij.xdebugger.stepping.XSmartStepIntoHandler;
 import com.intellij.xdebugger.stepping.XSmartStepIntoVariant;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -49,14 +48,12 @@ public interface XDebugSession extends AbstractDebuggerSession {
 
   /**
    * Position from the current frame
-   * @return
    */
   @Nullable
   XSourcePosition getCurrentPosition();
 
   /**
    * Position from the top frame
-   * @return
    */
   @Nullable
   XSourcePosition getTopFramePosition();
@@ -122,8 +119,7 @@ public interface XDebugSession extends AbstractDebuggerSession {
   /**
    * @deprecated use {@link #breakpointReached(XBreakpoint, String, XSuspendContext)} instead
    */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  @Deprecated(forRemoval = true)
   boolean breakpointReached(@NotNull XBreakpoint<?> breakpoint, @NotNull XSuspendContext suspendContext);
 
   /**

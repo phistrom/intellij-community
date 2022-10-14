@@ -1,0 +1,1 @@
+SymbolLightClass: B
